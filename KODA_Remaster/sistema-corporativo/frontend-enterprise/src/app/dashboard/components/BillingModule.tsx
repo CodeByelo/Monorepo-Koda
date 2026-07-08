@@ -8,9 +8,9 @@ export default function BillingModule({ darkMode }: { darkMode: boolean }) {
   const isTailscale = typeof window !== 'undefined' && window.location.hostname.includes('.ts.net');
   const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
   
-  let baseUrl = `http://${host}:5174`;
-  if (isCloudflare) {
-    baseUrl = '/facturacion/';
+  let baseUrl = '/facturacion/';
+  if (host === 'localhost' || host === '127.0.0.1') {
+    baseUrl = `http://${host}:5174`;
   } else if (isTailscale) {
     baseUrl = `https://${host}:8443`;
   }

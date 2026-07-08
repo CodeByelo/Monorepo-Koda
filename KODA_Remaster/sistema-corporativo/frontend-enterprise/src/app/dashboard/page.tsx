@@ -5153,9 +5153,9 @@ export default function Dashboard() {
     if (typeof window !== "undefined") {
       const token = localStorage.getItem("sgd_token");
       const host = window.location.hostname;
-      let baseUrl = `http://${host}:5174`;
-      if (host.includes('cloudflare')) {
-        baseUrl = '/facturacion/';
+      let baseUrl = '/facturacion/';
+      if (host === 'localhost' || host === '127.0.0.1') {
+        baseUrl = `http://${host}:5174`;
       } else if (host.includes('.ts.net')) {
         baseUrl = `https://${host}:8443`;
       }
