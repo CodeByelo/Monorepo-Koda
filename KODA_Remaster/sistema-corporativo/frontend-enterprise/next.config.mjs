@@ -38,6 +38,14 @@ const nextConfig = {
       },
     ];
   },
+  async rewrites() {
+    return [
+      {
+        source: '/facturacion/:path*',
+        destination: 'https://koda-billing-front.vercel.app/facturacion/:path*',
+      },
+    ];
+  },
 };
 
 export default nextConfig;
