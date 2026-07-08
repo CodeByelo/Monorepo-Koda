@@ -1,0 +1,18 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Copiar requirements e instalar dependencias
+COPY backend/requirements.txt ./backend/requirements.txt
+RUN pip install --no-cache-dir -r backend/requirements.txt
+
+# Copiar el código del backend preservando la estructura de paquete
+COPY backend/ ./backend/
+
+# PYTHONPATH apunta a /app para que "from backend.core..." funcione
+ENV PYTHONPATH=/app
+
+EXPOSE 8000
+
+# Ejecutar desde /app usando el path completo del módulo
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

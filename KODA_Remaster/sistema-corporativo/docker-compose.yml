@@ -1,0 +1,196 @@
+version: '3.8'
+
+services:
+  # ── 1. PROXY (Custom HTTP Reverse Proxy) ────────────────────────────────────
+  proxy:
+    image: python:3.11-alpine
+    container_name: koda_proxy
+    volumes:
+      - ./proxy:/app
+    command: python -u /app/proxy.py
+    environment:
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "80:80"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    restart: unless-stopped
+    networks:
+      - frontend-backend-network
+
+  # ── 3. BACKEND (FastAPI) ─────────────────────────────────────────────────────
+  backend:
+    build: ./backend
+    container_name: koda_backend
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    volumes:
+      - ./backend:/app
+      - /proc:/host/proc:ro
+    # DEV_MODE=true → --reload (hot-reload para desarrollo)
+    # DEV_MODE no definido → 2 workers en producción (más rápido)
+    command: >-
+      sh -c '
+        if [ "$${DEV_MODE}" = "true" ];
+        then uvicorn main:app --host 0.0.0.0 --port 8000 --reload;
+        else uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2;
+        fi
+      '
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      - PROCFS_PATH=/host/proc
+      - DB_SSL_MODE=require
+      - REDIS_URL=redis://redis:6379
+      # Hot-reload activado para desarrollo:
+      - DEV_MODE=false
+    depends_on:
+      - redis
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`api.localhost`)"
+      - "traefik.http.routers.backend.entrypoints=web"
+      - "traefik.http.services.backend.loadbalancer.server.port=8000"
+    restart: unless-stopped
+    networks:
+      - frontend-backend-network
+      - backend-db-network
+
+  # ── 4. GESTOR (Frontend Next.js Enterprise) ───────────────────────────────────
+  frontend:
+    build: ./frontend-enterprise
+    container_name: koda_frontend_enterprise_mvp_v3
+    volumes:
+      - ./frontend-enterprise:/app
+      - /app/node_modules
+      - /app/.next
+    command: >-
+      sh -c '
+        if [ "$${DEV_MODE}" = "true" ];
+        then npm run dev -- -p 3000 -H 0.0.0.0;
+        else npm run start -- -p 3000 -H 0.0.0.0;
+        fi
+      '
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=/api
+      - INTERNAL_API_URL=http://backend:8000
+      - NODE_OPTIONS=--dns-result-order=ipv4first
+      - WATCHPACK_POLLING=true
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      # Activa hot-reload y arranca al instante:
+      - DEV_MODE=false
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`gestor.localhost`)"
+      - "traefik.http.routers.frontend.entrypoints=web"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+    restart: unless-stopped
+    networks:
+      - frontend-backend-network
+
+  # ── 5. REDIS ─────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:alpine
+    container_name: koda_redis
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+    restart: unless-stopped
+    networks:
+      - backend-db-network
+
+  # ── 6. FACTURACIÓN FRONTEND ──────────────────────────────────────────────────
+  facturacion:
+    build: ../../koda-frontend
+    container_name: koda_facturacion_frontend_mvp_v3
+    ports:
+      - "5174:5174"
+    volumes:
+      - ../../koda-frontend:/app
+      - /app/node_modules
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.facturacion.rule=Host(`facturacion.localhost`)"
+      - "traefik.http.routers.facturacion.entrypoints=web"
+      - "traefik.http.services.facturacion.loadbalancer.server.port=5174"
+    restart: unless-stopped
+    depends_on:
+      - facturacion-backend
+    networks:
+      - frontend-backend-network
+
+  # ── 7. FACTURACIÓN BACKEND ───────────────────────────────────────────────────
+  facturacion-backend:
+    build:
+      context: ../../koda-frontend
+      dockerfile: Dockerfile.backend
+    container_name: koda_facturacion_backend
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    ports:
+      - "8001:8000"
+    volumes:
+      - ../../koda-frontend/backend:/app/backend
+    # DEV_MODE=true → --reload (hot-reload para desarrollo)
+    # DEV_MODE no definido → 2 workers en producción (más rápido)
+    command: >-
+      sh -c '
+        if [ "$${DEV_MODE}" = "true" ];
+        then uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload;
+        else uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers 2;
+        fi
+      '
+    env_file:
+      - ../../koda-frontend/.env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      # Hot-reload activado para desarrollo:
+      - DEV_MODE=true
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.facturacion-backend.rule=Host(`api-facturacion.localhost`)"
+      - "traefik.http.routers.facturacion-backend.entrypoints=web"
+      - "traefik.http.services.facturacion-backend.loadbalancer.server.port=8000"
+    restart: unless-stopped
+    networks:
+      - frontend-backend-network
+      - backend-db-network
+
+  # ── 8. DESARROLLADOR FRONTEND ─────────────────────────────────────────────────
+  desarrollador:
+    image: node:20-alpine
+    container_name: koda_dev_frontend
+    volumes:
+      - ../../Modulo Desarrollador/frontend:/app
+    working_dir: /app
+    command: sh -c "npm install && npm run build && npm run preview -- --host"
+    ports:
+      - "5175:5175"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.desarrollador.rule=Host(`desarrollador.localhost`)"
+      - "traefik.http.routers.desarrollador.entrypoints=web"
+      - "traefik.http.services.desarrollador.loadbalancer.server.port=5175"
+    restart: unless-stopped
+    depends_on:
+      - facturacion-backend
+    networks:
+      - frontend-backend-network
+
+networks:
+  frontend-backend-network:
+    driver: bridge
+  backend-db-network:
+    driver: bridge
