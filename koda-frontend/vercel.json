@@ -1,8 +1,13 @@
 {
+  "cleanUrls": true,
   "rewrites": [
     {
-      "source": "/(.*)",
-      "destination": "/index.html"
+      "source": "/facturacion/assets/(.*)",
+      "destination": "/facturacion/assets/$1"
+    },
+    {
+      "source": "/facturacion/(.*)",
+      "destination": "/facturacion/index.html"
     }
   ]
 }
