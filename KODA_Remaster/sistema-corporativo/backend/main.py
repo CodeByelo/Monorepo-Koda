@@ -276,13 +276,13 @@ origins = [
     "http://10.0.2.15:3000",
     "http://10.0.2.15:8000",
     "https://koda-remaster.vercel.app",
-    "https://sistema-corpoelect-backend.onrender.com"
+    "https://monorepo-koda-backend.onrender.com"
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_origin_regex=r"^https://(koda-remaster|sistema-corpoelect)(-[a-zA-Z0-9-]+)?\.vercel\.app$",
+    allow_origin_regex=r"^https://(koda-remaster|monorepo-koda)(-[a-zA-Z0-9-]+)?\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -755,7 +755,7 @@ def _apply_cors_headers(request: Request, response: JSONResponse) -> JSONRespons
             allow_origin = True
         else:
             try:
-                if re.match(r"^https://(koda-remaster|sistema-corpoelect)(-[a-zA-Z0-9-]+)?\.vercel\.app$", origin):
+                if re.match(r"^https://(koda-remaster|monorepo-koda)(-[a-zA-Z0-9-]+)?\.vercel\.app$", origin):
                     allow_origin = True
             except re.error:
                 allow_origin = False

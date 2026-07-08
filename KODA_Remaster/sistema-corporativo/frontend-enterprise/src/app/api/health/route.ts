@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-const FALLBACK_URL = "https://corpoelect-backend.onrender.com";
+const FALLBACK_URL = "https://monorepo-koda.onrender.com";
 const PRIMARY_URL =
   process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL ||
   (process.env.NODE_ENV === "production" ? FALLBACK_URL : "http://127.0.0.1:8000");
