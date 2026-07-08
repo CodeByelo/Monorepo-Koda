@@ -31,26 +31,40 @@ class AsientoCreate(BaseModel):
 
 PLAN_CUENTAS_DEFAULT = [
     ("1", "ACTIVO", "ACTIVO", 1),
-    ("11", "ACTIVO CORRIENTE", "ACTIVO", 2),
-    ("1101", "CAJA Y BANCOS", "ACTIVO", 3),
-    ("1102", "CUENTAS POR COBRAR", "ACTIVO", 3),
+    ("1.1", "ACTIVO CORRIENTE", "ACTIVO", 2),
+    ("1.1.01", "Caja y Bancos", "ACTIVO", 3),
+    ("1.1.02", "Cuentas por Cobrar Comerciales", "ACTIVO", 3),
+    ("1.1.03", "Inventario de Mercancía", "ACTIVO", 3),
+    ("1.1.04", "IVA Crédito Fiscal", "ACTIVO", 3),
+    ("1.1.05", "Anticipo de Retención de IVA", "ACTIVO", 3),
     ("2", "PASIVO", "PASIVO", 1),
-    ("21", "PASIVO CORRIENTE", "PASIVO", 2),
-    ("2101", "CUENTAS POR PAGAR", "PASIVO", 3),
-    ("2102", "IVA POR PAGAR", "PASIVO", 3),
+    ("2.1", "PASIVO CORRIENTE", "PASIVO", 2),
+    ("2.1.01", "Cuentas por Pagar Comerciales", "PASIVO", 3),
+    ("2.1.02", "IVA Débito Fiscal por Pagar", "PASIVO", 3),
+    ("2.1.03", "IGTF por Pagar", "PASIVO", 3),
+    ("2.1.04", "Nómina por Pagar", "PASIVO", 3),
+    ("2.1.05", "Otras Retenciones por Pagar", "PASIVO", 3),
     ("3", "PATRIMONIO", "PATRIMONIO", 1),
+    ("3.1", "PATRIMONIO NETO", "PATRIMONIO", 2),
+    ("3.1.01", "Capital Social", "PATRIMONIO", 3),
     ("4", "INGRESOS", "INGRESO", 1),
-    ("4101", "VENTAS", "INGRESO", 2),
-    ("5", "EGRESOS", "EGRESO", 1),
-    ("5101", "COSTO DE VENTAS", "EGRESO", 2),
+    ("4.1", "INGRESOS OPERACIONALES", "INGRESO", 2),
+    ("4.1.01", "Ventas de Mercancía", "INGRESO", 3),
+    ("5", "EGRESOS / GASTOS", "EGRESO", 1),
+    ("5.1", "COSTOS Y GASTOS OPERACIONALES", "EGRESO", 2),
+    ("5.1.01", "Costo de Ventas", "EGRESO", 3),
+    ("5.1.02", "Sueldos y Salarios Base (Gasto)", "EGRESO", 3),
+    ("5.1.03", "Otras Asignaciones (Gasto)", "EGRESO", 3),
+    ("5.1.04", "Gastos por Mermas y Faltantes", "EGRESO", 3),
+    ("5.1.05", "Resultado por Exposición a la Inflación (REI)", "EGRESO", 3),
 ]
 
 
 def _seed_cuentas(db: Session):
-    if db.query(CuentaContable).first():
-        return
     for codigo, nombre, tipo, nivel in PLAN_CUENTAS_DEFAULT:
-        db.add(CuentaContable(codigo=codigo, nombre=nombre, tipo=tipo, nivel=nivel, activa=True))
+        existing = db.query(CuentaContable).filter(CuentaContable.codigo == codigo).first()
+        if not existing:
+            db.add(CuentaContable(codigo=codigo, nombre=nombre, tipo=tipo, nivel=nivel, activa=True))
     db.commit()
 
 
@@ -328,6 +342,14 @@ def balance_comprobacion(periodo: str, db: Session = Depends(get_db)):
     lineas = sorted(list(lineas_dict.values()), key=lambda x: x["codigo"])
 
     # Dynamic forensic audit cards for "Lectura del Balance"
+    from backend.models.erp_extended import CuentaBancaria
+    from backend.models.operations import Producto, Venta
+    from backend.models.core import TasaCambio
+    
+    # Obtener tasa de cambio para los reportes
+    tasa_obj = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
+    tasa_bcv = Decimal(str(tasa_obj.valor_ves)) if tasa_obj else Decimal("36.52")
+
     diff_val = abs(total_debe - total_haber)
     
     # Check if there are unbalanced items
@@ -335,40 +357,104 @@ def balance_comprobacion(periodo: str, db: Session = Depends(get_db)):
         cuadre_status = {
             "label": "CUADRE",
             "title": "Descuadre Detectado",
-            "desc": f"Se encontr una diferencia de Bs. {diff_val:,.2f} entre dbitos y crditos.",
+            "desc": f"Se encontró una diferencia de Bs. {diff_val * float(tasa_bcv):,.2f} entre débitos y créditos.",
             "color": "bg-red-500"
         }
     else:
         cuadre_status = {
             "label": "CUADRE",
             "title": "Balance Cuadrado",
-            "desc": "Dbitos y crditos coinciden perfectamente en el periodo revisado.",
+            "desc": "Débitos y créditos coinciden perfectamente en el periodo revisado.",
             "color": "bg-green-500"
         }
         
-    # Bancos check
-    bancos_status = {
-        "label": "BANCOS",
-        "title": "Cuentas Conciliadas",
-        "desc": "Los movimientos de la cuenta 1.1.01 (Bancos) coinciden con el estado de cuenta fsico.",
-        "color": "bg-green-500"
-    }
+    # Bancos check: comparar 1.1.01 saldo contable contra saldo de CuentaBancaria en DB
+    saldo_contable_bancos = db.query(
+        func.sum(AsientoDetalle.debe_usd - AsientoDetalle.haber_usd)
+    ).join(AsientoContable).filter(
+        AsientoDetalle.cuenta_codigo.like("1.1.01%"),
+        AsientoContable.fecha < end_date
+    ).scalar() or Decimal("0.00")
     
-    # Inventario check
-    inventario_status = {
-        "label": "INVENTARIO",
-        "title": "Ajustes al Da",
-        "desc": "La valorizacin del inventario se encuentra registrada y conciliada con almacn.",
-        "color": "bg-green-500"
-    }
+    saldo_bancos_real = db.query(
+        func.sum(CuentaBancaria.saldo_actual_usd)
+    ).scalar() or Decimal("0.00")
     
-    # Fiscal check (query VAT if exists)
-    fiscal_status = {
-        "label": "FISCAL",
-        "title": "IVA Auditado",
-        "desc": "El dbito fiscal declarado coincide con el IVA de los comprobantes de venta.",
-        "color": "bg-blue-500"
-    }
+    diff_bancos = abs(saldo_contable_bancos - saldo_bancos_real)
+    if diff_bancos > Decimal("0.01"):
+        bancos_status = {
+            "label": "BANCOS",
+            "title": "Desbalance Bancario",
+            "desc": f"Diferencia de Bs. {float(diff_bancos * tasa_bcv):,.2f} entre el libro mayor y los saldos bancarios registrados.",
+            "color": "bg-amber-500"
+        }
+    else:
+        bancos_status = {
+            "label": "BANCOS",
+            "title": "Cuentas Conciliadas",
+            "desc": "Los movimientos de la cuenta 1.1.01 (Bancos) coinciden con el estado de cuenta físico.",
+            "color": "bg-green-500"
+        }
+    
+    # Inventario check: comparar 1.1.03 saldo contable contra valoración física (stock * costo_usd)
+    saldo_contable_inventario = db.query(
+        func.sum(AsientoDetalle.debe_usd - AsientoDetalle.haber_usd)
+    ).join(AsientoContable).filter(
+        AsientoDetalle.cuenta_codigo.like("1.1.03%"),
+        AsientoContable.fecha < end_date
+    ).scalar() or Decimal("0.00")
+    
+    valoracion_fisica_inventario = db.query(
+        func.sum(Producto.stock * Producto.costo_usd)
+    ).scalar() or Decimal("0.00")
+    
+    diff_inventario = abs(saldo_contable_inventario - valoracion_fisica_inventario)
+    if diff_inventario > Decimal("0.01"):
+        inventario_status = {
+            "label": "INVENTARIO",
+            "title": "Ajuste Requerido",
+            "desc": f"Diferencia de Bs. {float(diff_inventario * tasa_bcv):,.2f} entre el inventario en libros y la valoración del stock físico.",
+            "color": "bg-amber-500"
+        }
+    else:
+        inventario_status = {
+            "label": "INVENTARIO",
+            "title": "Ajustes al Día",
+            "desc": "La valorización del inventario se encuentra registrada y conciliada con almacén.",
+            "color": "bg-green-500"
+        }
+    
+    # Fiscal check: comparar saldo de IVA (2.1.02) con el IVA registrado en facturas
+    iva_contable = db.query(
+        func.sum(AsientoDetalle.haber_usd - AsientoDetalle.debe_usd)
+    ).join(AsientoContable).filter(
+        AsientoDetalle.cuenta_codigo.like("2.1.02%"),
+        AsientoContable.fecha >= start_date,
+        AsientoContable.fecha < end_date
+    ).scalar() or Decimal("0.00")
+    
+    iva_facturas = db.query(
+        func.sum(Venta.iva_usd)
+    ).filter(
+        Venta.fecha >= start_date,
+        Venta.fecha < end_date
+    ).scalar() or Decimal("0.00")
+    
+    diff_fiscal = abs(iva_contable - iva_facturas)
+    if diff_fiscal > Decimal("0.01"):
+        fiscal_status = {
+            "label": "FISCAL",
+            "title": "Discrepancia IVA",
+            "desc": f"Discrepancia de Bs. {float(diff_fiscal * tasa_bcv):,.2f} entre el IVA en libros contables y el IVA de las facturas de venta.",
+            "color": "bg-red-500"
+        }
+    else:
+        fiscal_status = {
+            "label": "FISCAL",
+            "title": "IVA Auditado",
+            "desc": "El débito fiscal declarado coincide con el IVA de los comprobantes de venta.",
+            "color": "bg-blue-500"
+        }
     
     lectura = [cuadre_status, bancos_status, inventario_status, fiscal_status]
 
@@ -383,6 +469,12 @@ def balance_comprobacion(periodo: str, db: Session = Depends(get_db)):
 @router.get("/balance-general")
 def balance_general(periodo: str, db: Session = Depends(get_db)):
     _seed_cuentas(db)
+    
+    from backend.models.core import TasaCambio
+    tasa_obj = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
+    tasa = Decimal(str(tasa_obj.valor_ves)) if tasa_obj else Decimal("36.52")
+    tasa_f = float(tasa)
+
     y, m = map(int, periodo.split("-"))
     start_date = datetime(y, m, 1, 0, 0, 0, tzinfo=timezone.utc)
     if m == 12:
@@ -390,74 +482,179 @@ def balance_general(periodo: str, db: Session = Depends(get_db)):
     else:
         end_date = datetime(y, m + 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 
-    resultados = db.query(
+    # Cuentas contables activas
+    cuentas = db.query(CuentaContable).filter(CuentaContable.activa == True).all()
+    
+    # Calcular saldos acumulados hasta end_date
+    saldos = {}
+    for c in cuentas:
+        res = db.query(
+            func.sum(AsientoDetalle.debe_usd).label("debe"),
+            func.sum(AsientoDetalle.haber_usd).label("haber")
+        ).join(AsientoContable).filter(
+            AsientoDetalle.cuenta_codigo == c.codigo,
+            AsientoContable.fecha < end_date
+        ).first()
+        
+        debe = float(res.debe or 0.0)
+        haber = float(res.haber or 0.0)
+        
+        if c.codigo.startswith("1") or c.codigo.startswith("5"):
+            saldo = debe - haber
+        else:
+            saldo = haber - debe
+            
+        saldos[c.codigo] = {
+            "nombre": c.nombre,
+            "tipo": c.tipo,
+            "saldo_usd": saldo,
+            "saldo_ves": saldo * tasa_f
+        }
+
+    # También considerar cualquier cuenta registrada en asientos que no esté en CuentaContable (por si acaso)
+    asientos_detalles_huerfanos = db.query(
         AsientoDetalle.cuenta_codigo,
         AsientoDetalle.cuenta_nombre,
-        func.sum(AsientoDetalle.debe_usd).label("debe_total"),
-        func.sum(AsientoDetalle.haber_usd).label("haber_total")
-    ).join(
-        AsientoContable
-    ).filter(
-        AsientoContable.fecha >= start_date,
+        func.sum(AsientoDetalle.debe_usd).label("debe"),
+        func.sum(AsientoDetalle.haber_usd).label("haber")
+    ).join(AsientoContable).filter(
         AsientoContable.fecha < end_date
     ).group_by(
         AsientoDetalle.cuenta_codigo,
         AsientoDetalle.cuenta_nombre
     ).all()
 
-    activos = []
-    pasivos = []
-    patrimonio = []
+    for h in asientos_detalles_huerfanos:
+        if h.cuenta_codigo not in saldos:
+            debe = float(h.debe or 0.0)
+            haber = float(h.haber or 0.0)
+            if h.cuenta_codigo.startswith("1") or h.cuenta_codigo.startswith("5"):
+                saldo = debe - haber
+            else:
+                saldo = haber - debe
+            
+            saldos[h.cuenta_codigo] = {
+                "nombre": h.cuenta_nombre,
+                "tipo": "OTROS",
+                "saldo_usd": saldo,
+                "saldo_ves": saldo * tasa_f
+            }
 
-    total_activo = 0.0
-    total_pasivo = 0.0
-    total_patrimonio = 0.0
+    # Agrupar
+    activo_corriente_items = []
+    activo_no_corriente_items = []
+    
+    pasivo_corriente_items = []
+    pasivo_no_corriente_items = []
+    
+    patrimonio_items = []
 
-    activos_map = {}
-    pasivos_map = {}
-    patrimonio_map = {}
+    total_activo_usd = 0.0
+    total_pasivo_usd = 0.0
+    total_patrimonio_usd = 0.0
 
-    for r in resultados:
-        debe = float(r.debe_total or 0.0)
-        haber = float(r.haber_total or 0.0)
+    # Listas planas para compatibilidad con exportaciones
+    activos_flat = []
+    pasivos_flat = []
+    patrimonio_flat = []
+
+    for code, info in sorted(saldos.items(), key=lambda x: x[0]):
+        # Solo mostrar cuentas detalle de nivel 3 o huerfanas (las de nivel 1 y 2 son agrupadoras)
+        if len(code) <= 2 and code not in ["1101", "2101", "2102", "4101"]:
+            continue
+            
+        monto_usd = info["saldo_usd"]
+        monto_ves = info["saldo_ves"]
+        nombre = info["nombre"]
         
-        if r.cuenta_codigo.startswith("1"):
-            monto = debe - haber
-            activos_map[r.cuenta_nombre] = activos_map.get(r.cuenta_nombre, 0.0) + monto
-        elif r.cuenta_codigo.startswith("2"):
-            monto = haber - debe
-            pasivos_map[r.cuenta_nombre] = pasivos_map.get(r.cuenta_nombre, 0.0) + monto
-        elif r.cuenta_codigo.startswith("3"):
-            monto = haber - debe
-            patrimonio_map[r.cuenta_nombre] = patrimonio_map.get(r.cuenta_nombre, 0.0) + monto
+        # Objeto para el frontend
+        item_frontend = {"name": nombre, "usd": monto_usd, "ves": monto_ves}
+        # Objeto plano para exportación
+        item_flat = {"nombre": nombre, "monto": monto_usd}
 
-    if not activos_map:
-        activos_map["Caja y equivalentes"] = 0.0
-        activos_map["Cuentas por cobrar"] = 0.0
-    if not pasivos_map:
-        pasivos_map["Cuentas por pagar"] = 0.0
-    if not patrimonio_map:
-        patrimonio_map["Capital"] = 0.0
+        if code.startswith("1"):
+            total_activo_usd += monto_usd
+            activos_flat.append(item_flat)
+            if code.startswith("1.1") or code.startswith("11"):
+                activo_corriente_items.append(item_frontend)
+            else:
+                activo_no_corriente_items.append(item_frontend)
+        elif code.startswith("2"):
+            total_pasivo_usd += monto_usd
+            pasivos_flat.append(item_flat)
+            if code.startswith("2.1") or code.startswith("21"):
+                pasivo_corriente_items.append(item_frontend)
+            else:
+                pasivo_no_corriente_items.append(item_frontend)
+        elif code.startswith("3"):
+            total_patrimonio_usd += monto_usd
+            patrimonio_flat.append(item_flat)
+            patrimonio_items.append(item_frontend)
 
-    for k, v in activos_map.items():
-        activos.append({"nombre": k, "monto": v})
-        total_activo += v
+    # Si están vacías las listas planas, rellenar con ceros
+    if not activos_flat:
+        activos_flat = [{"nombre": "Caja y equivalentes", "monto": 0.0}, {"nombre": "Cuentas por cobrar", "monto": 0.0}]
+    if not pasivos_flat:
+        pasivos_flat = [{"nombre": "Cuentas por pagar", "monto": 0.0}]
+    if not patrimonio_flat:
+        patrimonio_flat = [{"nombre": "Capital", "monto": 0.0}]
 
-    for k, v in pasivos_map.items():
-        pasivos.append({"nombre": k, "monto": v})
-        total_pasivo += v
+    # Armar lista final de activos para el frontend
+    activos = []
+    if activo_corriente_items:
+        activos.append({"isHeader": True, "category": "ACTIVO CORRIENTE"})
+        activos.extend(activo_corriente_items)
+    if activo_no_corriente_items:
+        activos.append({"isHeader": True, "category": "ACTIVO NO CORRIENTE"})
+        activos.extend(activo_no_corriente_items)
+        
+    # Armar lista final de pasivos y patrimonio para el frontend
+    pasivos_patrimonio = []
+    if pasivo_corriente_items:
+        pasivos_patrimonio.append({"isHeader": True, "category": "PASIVO CORRIENTE"})
+        pasivos_patrimonio.extend(pasivo_corriente_items)
+    if pasivo_no_corriente_items:
+        pasivos_patrimonio.append({"isHeader": True, "category": "PASIVO NO CORRIENTE"})
+        pasivos_patrimonio.extend(pasivo_no_corriente_items)
+    if patrimonio_items:
+        pasivos_patrimonio.append({"isHeader": True, "category": "PATRIMONIO NETO"})
+        pasivos_patrimonio.extend(patrimonio_items)
 
-    for k, v in patrimonio_map.items():
-        patrimonio.append({"nombre": k, "monto": v})
-        total_patrimonio += v
+    # Totales en VES
+    total_activo_ves = total_activo_usd * tasa_f
+    total_pasivo_ves = total_pasivo_usd * tasa_f
+    total_patrimonio_ves = total_patrimonio_usd * tasa_f
+    
+    # Calcular Razón de Liquidez
+    activo_corr_usd = sum(item["usd"] for item in activo_corriente_items)
+    pasivo_corr_usd = sum(item["usd"] for item in pasivo_corriente_items)
+    if pasivo_corr_usd > 0:
+        liquidez_str = f"{float(activo_corr_usd / pasivo_corr_usd):.2f}x"
+    else:
+        liquidez_str = "1.00x" if activo_corr_usd > 0 else "0.00x"
 
     return {
         "periodo": periodo,
         "activos": activos,
-        "pasivos": pasivos,
-        "patrimonio": patrimonio,
-        "total_activo": total_activo,
-        "total_pasivo_patrimonio": total_pasivo + total_patrimonio,
+        "pasivos_patrimonio": pasivos_patrimonio,
+        # Flat lists para exportación
+        "activos_flat": activos_flat,
+        "pasivos": pasivos_flat,
+        "patrimonio": patrimonio_flat,
+        
+        "total_activo": total_activo_ves,
+        "total_pasivo": total_pasivo_ves,
+        "total_patrimonio": total_patrimonio_ves,
+        "total_pasivo_patrimonio": total_pasivo_ves + total_patrimonio_ves,
+        "totales": {
+            "activos_ves": total_activo_ves,
+            "activos_usd": total_activo_usd,
+            "pasivos_ves": total_pasivo_ves,
+            "pasivos_usd": total_pasivo_usd,
+            "patrimonio_ves": total_patrimonio_ves,
+            "patrimonio_usd": total_patrimonio_usd,
+            "liquidez": liquidez_str
+        }
     }
 
 
@@ -499,9 +696,9 @@ def exportar_balance(periodo: str, formato: str, db: Session = Depends(get_db)):
         table_data = [['Grupo/Concepto', 'Monto (USD)']]
         
         table_data.append(['ACTIVOS', ''])
-        for item in data["activos"]:
+        for item in data["activos_flat"]:
             table_data.append([f"  {item['nombre']}", f"{item['monto']:,.2f}"])
-        table_data.append(['Total Activos', f"{data['total_activo']:,.2f}"])
+        table_data.append(['Total Activos', f"{data['totales']['activos_usd']:,.2f}"])
         
         table_data.append(['PASIVOS', ''])
         for item in data["pasivos"]:
@@ -511,7 +708,7 @@ def exportar_balance(periodo: str, formato: str, db: Session = Depends(get_db)):
         for item in data["patrimonio"]:
             table_data.append([f"  {item['nombre']}", f"{item['monto']:,.2f}"])
             
-        table_data.append(['Total Pasivo + Patrimonio', f"{data['total_pasivo_patrimonio']:,.2f}"])
+        table_data.append(['Total Pasivo + Patrimonio', f"{data['totales']['pasivos_usd'] + data['totales']['patrimonio_usd']:,.2f}"])
         
         t = Table(table_data, colWidths=[350, 150])
         t.setStyle(TableStyle([
@@ -568,13 +765,13 @@ def exportar_balance(periodo: str, formato: str, db: Session = Depends(get_db)):
         
         ws.cell(row=row_num, column=1, value="ACTIVOS").font = section_font
         row_num += 1
-        for item in data["activos"]:
+        for item in data["activos_flat"]:
             ws.cell(row=row_num, column=1, value=f"  {item['nombre']}")
             ws.cell(row=row_num, column=2, value=item['monto']).number_format = '$#,##0.00'
             row_num += 1
         
         ws.cell(row=row_num, column=1, value="Total Activos").font = total_font
-        ws.cell(row=row_num, column=2, value=data['total_activo']).font = total_font
+        ws.cell(row=row_num, column=2, value=data['totales']['activos_usd']).font = total_font
         ws.cell(row=row_num, column=2).number_format = '$#,##0.00'
         row_num += 2
         
@@ -593,7 +790,7 @@ def exportar_balance(periodo: str, formato: str, db: Session = Depends(get_db)):
             row_num += 1
             
         ws.cell(row=row_num, column=1, value="Total Pasivo + Patrimonio").font = total_font
-        ws.cell(row=row_num, column=2, value=data['total_pasivo_patrimonio']).font = total_font
+        ws.cell(row=row_num, column=2, value=data['totales']['pasivos_usd'] + data['totales']['patrimonio_usd']).font = total_font
         ws.cell(row=row_num, column=2).number_format = '$#,##0.00'
         
         ws.column_dimensions['A'].width = 40

@@ -14,6 +14,7 @@ from backend.models.core import TasaCambio
 from backend.schemas.operations import VentaCreate, VentaResponse, VentaReporteResponse
 from backend.core.security import get_current_user, require_role
 from backend.utils.idempotency import require_idempotency
+from backend.services.contabilidad import ContabilidadService
 
 router = APIRouter(prefix="/ventas", tags=["Ventas e Inventario"])
 
@@ -194,6 +195,10 @@ def registrar_venta_y_cxc(
             estado="PENDIENTE"
         )
         db.add(nueva_cxc)
+
+        # Generar Asiento Contable Automático de Ventas y de Costo de Ventas (COGS)
+        ContabilidadService.generar_asiento_venta(nueva_venta, db)
+        ContabilidadService.generar_asiento_costo_ventas(nueva_venta, detalles_para_guardar, db)
 
         # Confirmación de la transacción atómica
         db.commit()

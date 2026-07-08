@@ -390,3 +390,30 @@ main .space-y-6 > :not([hidden]) ~ :not([hidden]),
 .bg-koda-main .force-text-koda {
   color: #0b5156 !important;
 }
+
+/* 15. Optimización de Impresión Oficial */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  /* Ocultar elementos innecesarios */
+  .print\:hidden, aside, nav, header, .sidebar, .topbar {
+    display: none !important;
+  }
+  /* Expandir contenedor principal */
+  main, article, table {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+  tr {
+    page-break-inside: avoid !important;
+  }
+  th, td {
+    padding: 10px 14px !important;
+    border-bottom: 1px solid #cbd5e1 !important;
+  }
+}
