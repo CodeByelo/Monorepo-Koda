@@ -47,6 +47,7 @@ def get_tasa_actual(db: Session = Depends(get_db), current_user=Depends(get_curr
     return {
         "id": tasa.id,
         "tasa": float(tasa.valor_ves),
+        "valor_ves": float(tasa.valor_ves),
         "tasa_referencial": float(tasa.valor_ves) * 1.15,
         "fecha": tasa.fecha,
         "fuente": tasa.fuente

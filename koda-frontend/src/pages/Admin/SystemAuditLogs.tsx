@@ -17,9 +17,19 @@ const SystemAuditLogs = () => {
   const [verifying, setVerifying] = useState(false);
   const [verified, setVerified] = useState(false);
   const [logs, setLogs] = useState<any[]>([]);
+  const [filterType, setFilterType] = useState<string>('');
+  const [kpisObj, setKpisObj] = useState<any>({
+    eventosHoy: '0',
+    alertasFiscales: '0',
+    accesosDenegados: '0',
+    integridad: '100%',
+  });
 
   useEffect(() => {
     api.get<any>('/admin/auditoria').then((res) => {
+      if (res?.kpis) {
+        setKpisObj(res.kpis);
+      }
       const items = res?.logs || res?.items || [];
       setLogs(items.map((l: any) => ({
         id: l.id || l.modulo,
@@ -42,6 +52,31 @@ const SystemAuditLogs = () => {
     }, 1500);
   };
 
+  const handleExportPDF = async () => {
+    try {
+      const res = await api.get<any>('/admin/auditoria/export');
+      const blob = new Blob([JSON.stringify(res, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `auditoria_koda_${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error exportando:', error);
+      alert('Error al exportar el log de auditoría.');
+    }
+  };
+
+  const filteredLogs = filterType
+    ? logs.filter(l => {
+        if (filterType === 'fiscal') return l.type === 'fiscal' || (l.event || '').toLowerCase().includes('fiscal');
+        if (filterType === 'security') return l.status === 'fail' || l.type === 'auth' || l.type === 'seguridad';
+        if (filterType === 'ip') return l.ip && l.ip !== '';
+        return true;
+      })
+    : logs;
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-20">
       {/* Header */}
@@ -59,8 +94,8 @@ const SystemAuditLogs = () => {
             </p>
           </div>
           <div className="flex gap-3">
-            <button className="bg-white border border-slate-200 text-slate-700 px-6 py-3 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-sm hover:bg-slate-50 transition-all">
-              <Download size={14} /> Exportar PDF
+            <button onClick={handleExportPDF} className="bg-white border border-slate-200 text-slate-700 px-6 py-3 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-sm hover:bg-slate-50 transition-all">
+              <Download size={14} /> Exportar JSON
             </button>
             <button 
               onClick={handleVerify}
@@ -84,10 +119,10 @@ const SystemAuditLogs = () => {
       {/* KPI Grid */}
       <section className="grid grid-cols-1 md:grid-cols-4 gap-4 items-start">
         {[
-          { label: 'Eventos Hoy', value: '0', color: 'text-slate-800', border: 'border-slate-200', bg: 'bg-white' },
-          { label: 'Alertas Fiscales', value: '0', color: 'text-amber-600', border: 'border-amber-200', bg: 'bg-amber-50' },
-          { label: 'Accesos Denegados', value: '0', color: 'text-red-600', border: 'border-red-200', bg: 'bg-red-50' },
-          { label: 'Integridad Global', value: '100%', color: 'text-green-600', border: 'border-green-200', bg: 'bg-green-50' },
+          { label: 'Eventos Hoy', value: String(kpisObj.eventosHoy || 0), color: 'text-slate-800', border: 'border-slate-200', bg: 'bg-white' },
+          { label: 'Alertas Fiscales', value: String(kpisObj.alertasFiscales || 0), color: 'text-amber-600', border: 'border-amber-200', bg: 'bg-amber-50' },
+          { label: 'Accesos Denegados', value: String(kpisObj.accesosDenegados || 0), color: 'text-red-600', border: 'border-red-200', bg: 'bg-red-50' },
+          { label: 'Integridad Global', value: String(kpisObj.integridad || '100%'), color: 'text-green-600', border: 'border-green-200', bg: 'bg-green-50' },
         ].map((kpi, i) => (
           <div key={i} className={`p-6 rounded-2xl border ${kpi.border} ${kpi.bg} flex flex-col justify-between`}>
             <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">{kpi.label}</span>
@@ -124,7 +159,7 @@ const SystemAuditLogs = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-900">
-                  {logs.map((log, idx) => (
+                  {filteredLogs.map((log, idx) => (
                     <tr 
                       key={idx} 
                       onClick={() => log.field && setSelectedLog(log)}
@@ -175,15 +210,38 @@ const SystemAuditLogs = () => {
                <h3 className="text-sm font-black text-[#0b5156] uppercase tracking-tighter">Filtro Rápido</h3>
             </div>
             <div className="space-y-3">
-              <button className="w-full bg-slate-50 border border-slate-200 text-slate-700 px-4 py-3 rounded-xl text-[10px] font-black uppercase hover:bg-white hover:border-[#0b5156] transition-all text-left shadow-sm">
+              <button 
+                onClick={() => setFilterType(filterType === 'fiscal' ? '' : 'fiscal')}
+                className={`w-full px-4 py-3 rounded-xl text-[10px] font-black uppercase transition-all text-left shadow-sm border ${
+                  filterType === 'fiscal' ? 'bg-amber-500 text-white border-amber-500' : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-white hover:border-[#0b5156]'
+                }`}
+              >
                  Solo Eventos Fiscales
               </button>
-              <button className="w-full bg-slate-50 border border-slate-200 text-slate-700 px-4 py-3 rounded-xl text-[10px] font-black uppercase hover:bg-white hover:border-[#0b5156] transition-all text-left shadow-sm">
+              <button 
+                onClick={() => setFilterType(filterType === 'security' ? '' : 'security')}
+                className={`w-full px-4 py-3 rounded-xl text-[10px] font-black uppercase transition-all text-left shadow-sm border ${
+                  filterType === 'security' ? 'bg-red-500 text-white border-red-500' : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-white hover:border-[#0b5156]'
+                }`}
+              >
                  Alertas de Seguridad
               </button>
-              <button className="w-full bg-slate-50 border border-slate-200 text-slate-700 px-4 py-3 rounded-xl text-[10px] font-black uppercase hover:bg-white hover:border-[#0b5156] transition-all text-left shadow-sm">
+              <button 
+                onClick={() => setFilterType(filterType === 'ip' ? '' : 'ip')}
+                className={`w-full px-4 py-3 rounded-xl text-[10px] font-black uppercase transition-all text-left shadow-sm border ${
+                  filterType === 'ip' ? 'bg-sky-500 text-white border-sky-500' : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-white hover:border-[#0b5156]'
+                }`}
+              >
                  Actividad por IP
               </button>
+              {filterType && (
+                <button 
+                  onClick={() => setFilterType('')}
+                  className="w-full bg-slate-100 border border-slate-300 text-slate-600 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all text-left hover:bg-slate-200"
+                >
+                  ✕ Quitar Filtro
+                </button>
+              )}
             </div>
           </div>
 
@@ -205,7 +263,7 @@ const SystemAuditLogs = () => {
           <div className="bg-[#0b5156] p-8 rounded-3xl shadow-2xl border border-[#083a3d] w-full max-w-lg animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-6 border-b border-[#083a3d] pb-4">
               <h3 className="text-lg font-black text-white uppercase tracking-tighter flex items-center gap-2">
-                <FileText className="text-indigo-400" size={20} /> Detalle de Modificación
+                <FileText className="text-emerald-400" size={20} /> Detalle de Modificación
               </h3>
               <button onClick={() => setSelectedLog(null)} className="text-slate-500 hover:text-white transition-colors"><XCircle size={20} /></button>
             </div>
@@ -222,7 +280,7 @@ const SystemAuditLogs = () => {
             </div>
 
             <div className="bg-[#083a3d] rounded-2xl p-6 border border-[#083a3d] mb-6 font-mono">
-              <span className="block text-[10px] text-slate-500 uppercase tracking-widest mb-4">Campo Modificado: <strong className="text-indigo-400">{selectedLog.field}</strong></span>
+              <span className="block text-[10px] text-slate-500 uppercase tracking-widest mb-4">Campo Modificado: <strong className="text-emerald-400">{selectedLog.field}</strong></span>
               <div className="grid grid-cols-2 gap-4 items-start">
                  <div className="pr-4 border-r border-slate-800">
                    <span className="block text-[9px] text-red-500 uppercase mb-2">Valor Anterior (-)</span>

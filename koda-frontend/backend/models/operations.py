@@ -37,9 +37,11 @@ class Venta(Base):
     tasa_cambio_bs = Column(Numeric(10, 4), nullable=False)  # Se congela la tasa (ej. BCV) al momento exacto de la venta
     estado = Column(String(20), default="ACTIVA", nullable=False) # ACTIVA, ANULADA
     creado_por = Column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=True)
+    vendedor_id = Column(Integer, ForeignKey("public.vendedores.id"), nullable=True)
 
     # Relación uno-a-muchos con los detalles de la venta
     cliente = relationship("Cliente")
+    vendedor = relationship("Vendedor")
     detalles = relationship("VentaDetalle", back_populates="venta", cascade="all, delete-orphan")
     cuenta_por_cobrar = relationship("CuentaPorCobrar", back_populates="venta", uselist=False)
 

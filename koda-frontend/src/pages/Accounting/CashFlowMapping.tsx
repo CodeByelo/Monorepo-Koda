@@ -23,7 +23,7 @@ const CashFlowMapping = () => {
         <div className="flex justify-between items-start mb-6">
           <div className="space-y-1">
             <div className="flex items-center gap-2 mb-2">
-              <Link to="/contabilidad/flujo-efectivo" className="bg-[#0b5156]/10 text-[#0b5156] text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-widest flex items-center gap-1 hover:bg-[#0b5156]/20 transition-all">
+              <Link to="/contabilidad/flujo-caja" className="bg-[#0b5156]/10 text-[#0b5156] text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-widest flex items-center gap-1 hover:bg-[#0b5156]/20 transition-all">
                 <ArrowLeft size={10} /> Volver al Reporte
               </Link>
               <span className="bg-[#0b5156] text-white text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-widest">

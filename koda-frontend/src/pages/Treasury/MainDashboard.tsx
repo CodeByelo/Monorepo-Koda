@@ -53,7 +53,7 @@ const MainDashboard = () => {
           </span>
           <h1 className="text-4xl font-black text-slate-800 tracking-tighter uppercase">Visión General</h1>
           <p className="text-slate-500 text-sm font-bold uppercase tracking-tight max-w-2xl leading-relaxed">
-            Bienvenido a KODA ERP. El sistema está operando con la tasa oficial BCV: <strong className="text-koda-main">Bs. {data?.tasa_bcv?.toFixed(2) || '—'}</strong>.
+            Bienvenido a KODA ERP. El sistema está operando con la tasa oficial BCV: <strong className="text-koda-main">Bs. {typeof data?.tasa_bcv === 'number' && !isNaN(data.tasa_bcv) ? data.tasa_bcv.toFixed(4) : '—'}</strong>.
           </p>
         </div>
         <div className="relative z-10 flex gap-3">
@@ -91,24 +91,23 @@ const MainDashboard = () => {
                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50 px-3 py-1 rounded-lg">Últimos 7 días</span>
               </div>
               
-              {/* Mini simple bar visualization */}
               <div className="space-y-6">
                  <div className="space-y-2">
                     <div className="flex justify-between text-xs font-black uppercase tracking-widest">
                        <span className="text-slate-500">Ingresos (Ventas y Cobros)</span>
-                       <span className="text-green-600 font-mono">$18,450.00</span>
+                       <span className="text-green-600 font-mono">{data?.resumen_operaciones ? `$${Number(data.resumen_operaciones.ingresos).toLocaleString('en-US', {minimumFractionDigits: 2})}` : '—'}</span>
                     </div>
                     <div className="h-4 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100">
-                       <div className="h-full bg-green-500 rounded-full transition-all duration-1000" style={{ width: '85%' }}></div>
+                       <div className="h-full bg-green-500 rounded-full transition-all duration-1000" style={{ width: `${data?.resumen_operaciones?.ingresos_pct || 0}%` }}></div>
                     </div>
                  </div>
                  <div className="space-y-2">
                     <div className="flex justify-between text-xs font-black uppercase tracking-widest">
                        <span className="text-slate-500">Egresos (Compras y Gastos)</span>
-                       <span className="text-red-500 font-mono">$6,230.00</span>
+                       <span className="text-red-500 font-mono">{data?.resumen_operaciones ? `$${Number(data.resumen_operaciones.egresos).toLocaleString('en-US', {minimumFractionDigits: 2})}` : '—'}</span>
                     </div>
                     <div className="h-4 w-full bg-slate-50 rounded-full overflow-hidden border border-slate-100">
-                       <div className="h-full bg-red-500 rounded-full transition-all duration-1000" style={{ width: '35%' }}></div>
+                       <div className="h-full bg-red-500 rounded-full transition-all duration-1000" style={{ width: `${data?.resumen_operaciones?.egresos_pct || 0}%` }}></div>
                     </div>
                  </div>
               </div>
@@ -137,27 +136,47 @@ const MainDashboard = () => {
                     <h3 className="text-lg font-black uppercase tracking-tight">KODA Advisor</h3>
                  </div>
                  
-                 <div className="space-y-4">
-                    <div className="p-4 bg-red-500/20 border border-red-500/30 rounded-2xl space-y-2">
-                       <div className="flex items-center gap-2">
-                          <AlertTriangle size={14} className="text-red-400" />
-                          <strong className="text-[10px] font-black uppercase tracking-widest text-red-200">Stock Crítico</strong>
+                  <div className="space-y-4">
+                     {data?.alertas?.criticos_count > 0 ? (
+                       <div className="p-4 bg-red-500/20 border border-red-500/30 rounded-2xl space-y-2">
+                          <div className="flex items-center gap-2">
+                             <AlertTriangle size={14} className="text-red-400" />
+                             <strong className="text-[10px] font-black uppercase tracking-widest text-red-200">Stock Crítico</strong>
+                          </div>
+                          <p className="text-xs font-bold text-white/80 uppercase leading-relaxed">
+                             {data.alertas.criticos_count} producto(s) bajo el nivel mínimo operativo. Se sugiere emitir orden de reposición.
+                          </p>
                        </div>
-                       <p className="text-xs font-bold text-white/80 uppercase leading-relaxed">
-                          14 productos bajo el nivel mínimo operativo. Se sugiere emitir orden de reposición hoy.
-                       </p>
-                    </div>
+                     ) : (
+                       <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-2xl space-y-2">
+                          <div className="flex items-center gap-2">
+                             <ShieldCheck size={14} className="text-green-400" />
+                             <strong className="text-[10px] font-black uppercase tracking-widest text-green-200">Stock OK</strong>
+                          </div>
+                          <p className="text-xs font-bold text-white/60 uppercase leading-relaxed">Sin productos en nivel crítico de inventario.</p>
+                       </div>
+                     )}
 
-                    <div className="p-4 bg-amber-500/20 border border-amber-500/30 rounded-2xl space-y-2">
-                       <div className="flex items-center gap-2">
-                          <Users size={14} className="text-amber-400" />
-                          <strong className="text-[10px] font-black uppercase tracking-widest text-amber-200">Morosidad Alta</strong>
+                     {data?.alertas?.mora_count > 0 ? (
+                       <div className="p-4 bg-amber-500/20 border border-amber-500/30 rounded-2xl space-y-2">
+                          <div className="flex items-center gap-2">
+                             <Users size={14} className="text-amber-400" />
+                             <strong className="text-[10px] font-black uppercase tracking-widest text-amber-200">Morosidad Alta</strong>
+                          </div>
+                          <p className="text-xs font-bold text-white/80 uppercase leading-relaxed">
+                             {data.alertas.mora_count} factura(s) vencida(s) por un total de ${Number(data.alertas.mora_monto).toLocaleString('en-US', {minimumFractionDigits: 2})} USD.
+                          </p>
                        </div>
-                       <p className="text-xs font-bold text-white/80 uppercase leading-relaxed">
-                          El cliente 'Inversiones El Sol' superó los 30 días de crédito en el POS por un monto de $8,400.
-                       </p>
-                    </div>
-                 </div>
+                     ) : (
+                       <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-2xl space-y-2">
+                          <div className="flex items-center gap-2">
+                             <ShieldCheck size={14} className="text-green-400" />
+                             <strong className="text-[10px] font-black uppercase tracking-widest text-green-200">Cartera Sana</strong>
+                          </div>
+                          <p className="text-xs font-bold text-white/60 uppercase leading-relaxed">Sin facturas en estado de morosidad.</p>
+                       </div>
+                     )}
+                  </div>
 
                  <button className="w-full bg-white/10 text-white border border-white/20 font-black py-4 rounded-2xl uppercase text-[10px] tracking-widest hover:bg-white hover:text-slate-900 transition-all flex items-center justify-center gap-2">
                     Abrir Panel de Auditoría <ArrowRight size={14} />
@@ -166,25 +185,24 @@ const MainDashboard = () => {
               <div className="absolute -right-20 -bottom-20 w-64 h-64 bg-emerald-500/10 rounded-full blur-[80px]" />
            </article>
 
-           <article className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
-              <h3 className="text-sm font-black text-slate-800 uppercase tracking-tighter">Últimas Transacciones</h3>
-              <div className="space-y-3">
-                 {[
-                   { text: 'Factura POS emitida', sub: 'Terminal 01 · $120.00', color: 'text-koda-main bg-koda-main/10' },
-                   { text: 'Ajuste inventario aprobado', sub: 'Admin · -14 uds', color: 'text-amber-600 bg-amber-50' },
-                   { text: 'Cobro recibido Zelle', sub: 'Tesoreria · $430.00', color: 'text-green-600 bg-green-50' },
-                 ].map((t, i) => (
-                   <div key={i} className="flex gap-3 items-center group cursor-pointer">
-                      <div className={`w-2 h-2 rounded-full ${t.color.split(' ')[1]}`} />
-                      <div className="space-y-0.5 flex-1">
-                         <p className="text-xs font-black text-slate-700 uppercase leading-none group-hover:text-koda-main transition-colors">{t.text}</p>
-                         <p className="text-[9px] font-bold text-slate-400 uppercase">{t.sub}</p>
-                      </div>
-                      <ArrowRight size={12} className="text-slate-300 group-hover:text-koda-main transition-colors" />
-                   </div>
-                 ))}
-              </div>
-           </article>
+            <article className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
+               <h3 className="text-sm font-black text-slate-800 uppercase tracking-tighter">Últimas Transacciones</h3>
+               <div className="space-y-3">
+                  {(data?.ultimas_txs?.length > 0 ? data.ultimas_txs : []).map((t: any, i: number) => (
+                    <div key={i} className="flex gap-3 items-center group cursor-pointer">
+                       <div className="w-2 h-2 rounded-full bg-koda-main/30" />
+                       <div className="space-y-0.5 flex-1">
+                          <p className="text-xs font-black text-slate-700 uppercase leading-none group-hover:text-koda-main transition-colors">{t.text}</p>
+                          <p className="text-[9px] font-bold text-slate-400 uppercase">{t.sub}</p>
+                       </div>
+                       <ArrowRight size={12} className="text-slate-300 group-hover:text-koda-main transition-colors" />
+                    </div>
+                  ))}
+                  {(!data?.ultimas_txs || data.ultimas_txs.length === 0) && (
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Sin transacciones recientes.</p>
+                  )}
+               </div>
+            </article>
         </aside>
       </div>
     </div>

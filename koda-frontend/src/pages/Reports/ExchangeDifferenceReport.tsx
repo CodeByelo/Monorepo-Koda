@@ -15,6 +15,9 @@ import { api } from '@/api/client';
 const ExchangeDifferenceReport = () => {
   const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [modalMessage, setModalMessage] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showLossesOnly, setShowLossesOnly] = useState(false);
 
   useEffect(() => {
     const fetchDiff = async () => {
@@ -30,9 +33,26 @@ const ExchangeDifferenceReport = () => {
     fetchDiff();
   }, []);
 
+  const handleExport = async () => {
+    try {
+      await api.download('/reportes/exportar?reporte=diferencial', 'reporte_diferencial_cambiario.csv');
+    } catch (error) {
+      console.error("Error exporting differential:", error);
+      setModalMessage("Error al exportar reporte de diferencial cambiario.");
+    }
+  };
+
   const metrics = data?.metrics || [];
 
   const operations = data?.operations || [];
+  const filteredOperations = operations.filter((op: any) => {
+    const docName = op.id || op.documento || "";
+    const clientName = op.client || op.entidad || "";
+    const nameMatch = docName.toLowerCase().includes(searchQuery.toLowerCase()) || clientName.toLowerCase().includes(searchQuery.toLowerCase());
+    const lossMatch = showLossesOnly ? op.diffType !== 'success' : true;
+    return nameMatch && lossMatch;
+  });
+
   const insight = data?.insight || "Este reporte muestra la ganancia o pérdida realizada al momento de la transacción financiera. Para el ajuste por inflación o re-expresión de cuentas al cierre, utilice el módulo de Ajuste Cambiario de Saldos.";
 
   return (
@@ -53,7 +73,10 @@ const ExchangeDifferenceReport = () => {
             <p className="text-slate-500 text-xs font-bold uppercase tracking-tight">Análisis de impacto financiero por variación de tasa entre emisión y cobro.</p>
           </div>
           <div className="flex gap-2">
-             <button className="bg-[#0b5156] text-white px-8 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all">
+             <button 
+               onClick={handleExport}
+               className="bg-[#0b5156] text-white px-8 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all"
+             >
                 <Download size={14} /> Exportar Reporte
              </button>
           </div>
@@ -94,9 +117,23 @@ const ExchangeDifferenceReport = () => {
           <div className="flex gap-2 w-full md:w-auto">
              <div className="relative flex-1 md:flex-none">
                 <Search className="absolute left-3 top-2 text-slate-400" size={12} />
-                <input type="text" placeholder="Buscar factura o cliente..." className="w-full md:w-64 bg-white border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs font-bold text-[#0b5156] outline-none focus:border-[#0b5156] shadow-sm" />
+                <input 
+                  type="text" 
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Buscar factura o cliente..." 
+                  className="w-full md:w-64 bg-white border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs font-bold text-[#0b5156] outline-none focus:border-[#0b5156] shadow-sm" 
+                />
              </div>
-             <button className="p-1.5 bg-white text-slate-600 rounded-lg border border-slate-200 hover:bg-slate-50 shadow-sm transition-all">
+             <button 
+               onClick={() => setShowLossesOnly(!showLossesOnly)}
+               title="Mostrar solo pérdidas"
+               className={`p-1.5 rounded-lg border shadow-sm transition-all ${
+                 showLossesOnly 
+                   ? 'bg-[#0b5156] text-white border-[#0b5156]' 
+                   : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+               }`}
+             >
                 <Filter size={14} />
              </button>
           </div>
@@ -117,7 +154,7 @@ const ExchangeDifferenceReport = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50 text-xs">
-              {operations.length > 0 ? operations.map((op: any, i: number) => (
+              {filteredOperations.length > 0 ? filteredOperations.map((op: any, i: number) => (
                 <tr key={i} className="hover:bg-slate-50 transition-colors group">
                   <td className="py-2 px-4">
                     <strong className="text-[#0b5156] font-mono font-black">{op.id || op.documento}</strong>
@@ -154,6 +191,35 @@ const ExchangeDifferenceReport = () => {
             </p>
          </div>
       </div>
+      
+      {modalMessage && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-[#0b5156] p-4 text-white flex items-center justify-between">
+              <h3 className="text-xs font-black uppercase tracking-widest">Aviso del Sistema</h3>
+              <button 
+                onClick={() => setModalMessage(null)}
+                className="text-white/70 hover:text-white text-xs font-bold uppercase transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-slate-600 text-xs font-bold uppercase tracking-tight leading-relaxed">
+                {modalMessage}
+              </p>
+              <div className="flex justify-end gap-2">
+                <button 
+                  onClick={() => setModalMessage(null)}
+                  className="bg-[#0b5156] text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all"
+                >
+                  Aceptar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

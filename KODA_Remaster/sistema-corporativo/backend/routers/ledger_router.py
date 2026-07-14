@@ -252,7 +252,7 @@ class EventBuffer:
                 logger.error("EventBuffer: error en flush worker: %s", e)
 
     async def _flush_pending(self):
-        """Drenar la queue y hacer un INSERT batch único."""
+        """Drenar la queue, hacer un post a la API externa de clientes si aplica, y registrar localmente."""
         events: list[KodaEventInternal] = []
         while not self._queue.empty() and len(events) < self.MAX_BUFFER_SIZE:
             try:
@@ -264,38 +264,131 @@ class EventBuffer:
             return
 
         try:
+            # Agrupar eventos por tenant_id
+            from collections import defaultdict
+            events_by_tenant = defaultdict(list)
+            for e in events:
+                events_by_tenant[str(e.tenant_id)].append(e)
+
             async with db_session() as conn:
-                await conn.executemany(
-                    """
-                    INSERT INTO koda_event_ledger (
-                        event_id, event_type, event_version,
-                        aggregate_type, aggregate_id,
-                        gerencia_id, actor_id, tenant_id,
-                        payload, metadata, severity,
-                        occurred_at, recorded_at, idempotency_key
-                    ) VALUES (
-                        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14
+                tenant_ids = list(events_by_tenant.keys())
+                tenant_ids = [tid for tid in tenant_ids if tid and tid != "None"]
+                
+                settings_map = {}
+                if tenant_ids:
+                    rows = await conn.fetch(
+                        """
+                        SELECT tenant_id, replication_mode, replication_api_url, replication_api_key, bypass_local_db 
+                        FROM public.tenant_integration_settings 
+                        WHERE tenant_id = ANY($1::uuid[])
+                        """,
+                        tenant_ids
                     )
-                    ON CONFLICT (idempotency_key, occurred_at) DO NOTHING
-                    """,
-                    [
-                        (
-                            e.event_id, e.event_type, 1,
-                            e.aggregate_type.value, e.aggregate_id,
-                            e.gerencia_id, e.actor_id, e.tenant_id,
-                            json.dumps(e.payload), json.dumps(e.metadata.model_dump()),
-                            e.severity.value,
-                            e.occurred_at, e.recorded_at, e.idempotency_key
+                    for r in rows:
+                        settings_map[str(r['tenant_id'])] = r
+
+                local_events_to_insert = []
+                for tid, t_events in events_by_tenant.items():
+                    t_settings = settings_map.get(tid)
+                    if t_settings and t_settings['replication_mode'] == 'custom_api' and t_settings['replication_api_url']:
+                        # Replicación externa en segundo plano
+                        asyncio.create_task(
+                            replicate_events_to_client(
+                                t_settings['replication_api_url'],
+                                t_settings['replication_api_key'],
+                                t_events
+                            )
                         )
-                        for e in events
-                    ]
+                    
+                    bypass = t_settings['bypass_local_db'] if t_settings else False
+                    if not bypass:
+                        local_events_to_insert.extend(t_events)
+
+                if local_events_to_insert:
+                    await conn.executemany(
+                        """
+                        INSERT INTO koda_event_ledger (
+                            event_id, event_type, event_version,
+                            aggregate_type, aggregate_id,
+                            gerencia_id, actor_id, tenant_id,
+                            payload, metadata, severity,
+                            occurred_at, recorded_at, idempotency_key
+                        ) VALUES (
+                            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14
+                        )
+                        ON CONFLICT (idempotency_key, occurred_at) DO NOTHING
+                        """,
+                        [
+                            (
+                                e.event_id, e.event_type, 1,
+                                e.aggregate_type.value, e.aggregate_id,
+                                e.gerencia_id, e.actor_id, e.tenant_id,
+                                json.dumps(e.payload), json.dumps(e.metadata.model_dump()),
+                                e.severity.value,
+                                e.occurred_at, e.recorded_at, e.idempotency_key
+                            )
+                            for e in local_events_to_insert
+                        ]
+                    )
+                logger.info(
+                    "EventBuffer: %d eventos procesados (%d guardados localmente, %d omitidos/replicados).",
+                    len(events), len(local_events_to_insert), len(events) - len(local_events_to_insert)
                 )
-            logger.info("EventBuffer: %d eventos escritos en batch.", len(events))
         except Exception as e:
-            logger.error("EventBuffer: fallo en batch insert. Re-encolando %d eventos. Error: %s", len(events), e)
-            # Re-encolar en caso de fallo de DB para no perder eventos
+            logger.error("EventBuffer: fallo en flush de eventos. Re-encolando %d eventos. Error: %s", len(events), e)
             for event in events:
                 await self.enqueue(event)
+
+
+async def replicate_events_to_client(api_url: str, api_key: str, events: list[KodaEventInternal]):
+    """Envía en background la lista de eventos al API del cliente (External Node)."""
+    import httpx
+    try:
+        payload = {
+            "events": [
+                {
+                    "event_id": str(e.event_id),
+                    "event_type": e.event_type,
+                    "event_version": 1,
+                    "aggregate_type": e.aggregate_type.value,
+                    "aggregate_id": e.aggregate_id,
+                    "gerencia_id": e.gerencia_id,
+                    "actor_id": str(e.actor_id) if e.actor_id else None,
+                    "tenant_id": str(e.tenant_id),
+                    "payload": e.payload,
+                    "metadata": e.metadata.model_dump(),
+                    "severity": e.severity.value,
+                    "occurred_at": e.occurred_at.isoformat(),
+                    "recorded_at": e.recorded_at.isoformat(),
+                    "idempotency_key": e.idempotency_key
+                }
+                for e in events
+            ]
+        }
+        
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+            headers["X-KODA-API-Key"] = api_key
+            
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            res = await client.post(api_url, json=payload, headers=headers)
+            if res.status_code >= 400:
+                logger.error(
+                    "Replicacion: Servidor externo retorno status=%d para tenant=%s | URL=%s",
+                    res.status_code, events[0].tenant_id, api_url
+                )
+            else:
+                logger.info(
+                    "Replicacion: Exito enviando %d eventos al servidor externo del tenant=%s",
+                    len(events), events[0].tenant_id
+                )
+    except Exception as e:
+        logger.error(
+            "Replicacion: Error de conexion enviando eventos al servidor del cliente: %s | URL=%s",
+            e, api_url
+        )
+
 
 
 # Instancia global del buffer (singleton)

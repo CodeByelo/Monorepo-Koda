@@ -204,9 +204,15 @@ const FleetVehicles = () => {
             <h1 className="text-4xl font-black text-slate-800 tracking-tighter uppercase">Maestro de Vehículos</h1>
             <p className="text-slate-500 text-sm font-bold uppercase tracking-tight">{vehiculos.length} unidades registradas en el sistema.</p>
           </div>
-          <button onClick={fetchVehiculos} className="bg-slate-50 text-slate-600 p-2.5 rounded-xl border border-slate-200 hover:bg-white transition-all shadow-sm">
-            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-          </button>
+          <div className="flex items-center gap-2.5">
+            <button onClick={fetchVehiculos} className="bg-slate-50 text-slate-600 p-2.5 rounded-xl border border-slate-200 hover:bg-white transition-all shadow-sm">
+              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+            </button>
+            <button onClick={() => setModalData({ ...EMPTY })}
+              className="bg-[#0b5156] hover:bg-[#083a3d] text-white rounded-xl px-4 py-2.5 shadow-sm hover:scale-105 active:scale-95 transition-all font-black text-xs uppercase tracking-widest flex items-center gap-2">
+              <Plus className="w-4 h-4" /> Nuevo Vehículo
+            </button>
+          </div>
         </div>
       </header>
 
@@ -279,10 +285,7 @@ const FleetVehicles = () => {
         )}
       </div>
 
-      <button onClick={() => setModalData({ ...EMPTY })}
-        className="fixed bottom-6 right-5 z-40 bg-[#0b5156] hover:bg-[#083a3d] text-white rounded-2xl px-5 py-4 shadow-2xl shadow-[#0b5156]/40 flex items-center gap-2.5 transition-all hover:scale-105 active:scale-95 font-black text-xs uppercase tracking-widest">
-        <Plus className="w-5 h-5" /> Nuevo Vehículo
-      </button>
+
 
       {modalData && (
         <VehicleModal vehiculo={modalData} onClose={() => setModalData(null)} onSaved={fetchVehiculos} />

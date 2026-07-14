@@ -12,7 +12,9 @@ import {
   RefreshCw,
   LogOut,
   CheckCircle,
-  AlertTriangle
+  AlertTriangle,
+  X,
+  Zap
 } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { api } from '@/api/client';
@@ -60,6 +62,8 @@ const Logistics               = lazy(() => import('./pages/Logistics/Logistics')
 const FleetVehicles           = lazy(() => import('./pages/Logistics/FleetVehicles'));
 const FleetDrivers            = lazy(() => import('./pages/Logistics/FleetDrivers'));
 const FleetMaintenance        = lazy(() => import('./pages/Logistics/FleetMaintenance'));
+const GanttPlanning           = lazy(() => import('./pages/Logistics/GanttPlanning'));
+const PersonnelEngine         = lazy(() => import('./pages/Logistics/PersonnelEngine'));
 const CollectionsDashboard    = lazy(() => import('./pages/Collections/CollectionsDashboard'));
 const AccountsReceivable      = lazy(() => import('./pages/Collections/AccountsReceivable'));
 const PaymentApplication      = lazy(() => import('./pages/Collections/PaymentApplication'));
@@ -222,6 +226,7 @@ const AlertsCenter = () => {
   const [alerts, setAlerts] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [showManual, setShowManual] = useState(false);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -271,7 +276,7 @@ const AlertsCenter = () => {
         </Link>
       </div>
       <div className="flex gap-4 mt-8 flex-wrap">
-        <button onClick={() => showToast("El manual de usuario de Alertas Inteligentes estará disponible próximamente.", "error")} className="bg-[#0b5156] text-white px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-green-900/10 hover:bg-[#083a3e] transition-colors">Manual de esta opcion</button>
+        <button onClick={() => setShowManual(true)} className="bg-[#0b5156] text-white px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-green-900/10 hover:bg-[#083a3e] transition-colors">Manual de esta opcion</button>
         <Link to="/reportes">
           <button className="bg-white text-slate-600 px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest border border-slate-200 hover:bg-slate-50 transition-colors">Volver a Reportes</button>
         </Link>
@@ -418,6 +423,67 @@ const AlertsCenter = () => {
         type={toast.type} 
         onClose={() => setToast(null)} 
       />
+    )}
+    {/* Manual de Alertas Modal */}
+    {showManual && createPortal(
+      <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 animate-in fade-in zoom-in duration-300">
+         <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowManual(false)} />
+         <div className="relative bg-white w-full max-w-lg bg-white shadow-2xl rounded-3xl overflow-hidden border border-slate-200 animate-in zoom-in duration-300 flex flex-col max-h-[85vh]">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
+               <div className="space-y-1">
+                  <h2 className="text-xl font-black text-[#0b5156] uppercase tracking-tighter leading-none">Manual de Alertas Inteligentes</h2>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">Guía de Operaciones y Prioridades de Riesgo</p>
+               </div>
+               <button onClick={() => setShowManual(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-400">
+                  <X size={20} />
+               </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-6 text-xs text-slate-600 uppercase font-bold tracking-tight">
+               <div className="space-y-2">
+                  <h4 className="text-sm font-black text-[#0b5156] border-b pb-1">1. ¿Qué es el Centro de Alertas?</h4>
+                  <p className="leading-relaxed normal-case text-slate-500 font-medium">El módulo de Alertas Inteligentes monitorea continuamente el estado de la base de datos para alertar en tiempo real sobre riesgos de caja, cumplimiento tributario, stock crítico de inventario y tareas pendientes.</p>
+               </div>
+
+               <div className="space-y-3">
+                  <h4 className="text-sm font-black text-[#0b5156] border-b pb-1">2. Clasificación de Criticidades</h4>
+                  <div className="space-y-2">
+                     <div className="p-3 bg-red-50 rounded-xl border border-red-100 flex items-start gap-3">
+                        <span className="w-4 h-4 rounded-full bg-red-600 shrink-0 mt-0.5" />
+                        <div>
+                           <strong className="text-red-900 block mb-0.5">Alertas Críticas (Rojo)</strong>
+                           <span className="normal-case text-red-700/80 font-medium">Acciones urgentes que comprometen la continuidad operativa o conllevan sanciones legales (ej: facturas vencidas por pagar, cumplimiento fiscal pendiente, caja chica agotada).</span>
+                        </div>
+                     </div>
+                     <div className="p-3 bg-amber-50 rounded-xl border border-amber-100 flex items-start gap-3">
+                        <span className="w-4 h-4 rounded-full bg-amber-500 shrink-0 mt-0.5" />
+                        <div>
+                           <strong className="text-amber-900 block mb-0.5">Alertas Financieras (Naranja)</strong>
+                           <span className="normal-case text-amber-700/80 font-medium">Control de presupuestos y diferencias en el flujo de caja (ej: centros de costo sobre el 80% de su límite mensual, cuentas vencidas por cobrar).</span>
+                        </div>
+                     </div>
+                     <div className="p-3 bg-blue-50 rounded-xl border border-blue-100 flex items-start gap-3">
+                        <span className="w-4 h-4 rounded-full bg-[#0b5156] shrink-0 mt-0.5" />
+                        <div>
+                           <strong className="text-[#0b5156] block mb-0.5">Alertas Operativas (Azul)</strong>
+                           <span className="normal-case text-slate-600/80 font-medium">Sincronización del día a día (ej: productos en stock crítico, despachos sin chofer asignado, requisiciones pendientes).</span>
+                        </div>
+                     </div>
+                  </div>
+               </div>
+
+               <div className="space-y-2">
+                  <h4 className="text-sm font-black text-[#0b5156] border-b pb-1">3. Recomendación de Decisiones</h4>
+                  <p className="leading-relaxed normal-case text-slate-500 font-medium">El panel derecho sugiere un listado ordenado de acciones recomendadas. Es altamente recomendable ejecutarlas al inicio de la jornada laboral para asegurar la estabilidad del ERP.</p>
+               </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end shrink-0">
+               <button onClick={() => setShowManual(false)} className="px-8 py-2.5 bg-[#0b5156] text-white rounded-xl text-[10px] font-black uppercase shadow-lg hover:bg-[#083a3d] transition-all">Entendido</button>
+            </div>
+         </div>
+      </div>,
+      document.body
     )}
   </div>
   );
@@ -572,6 +638,8 @@ function App() {
           <Route path="/logistica/vehiculos" element={<FleetVehicles />} />
           <Route path="/logistica/choferes" element={<FleetDrivers />} />
           <Route path="/logistica/mantenimiento" element={<FleetMaintenance />} />
+          <Route path="/logistica/planificacion" element={<GanttPlanning />} />
+          <Route path="/logistica/personal" element={<PersonnelEngine />} />
           <Route path="/cobranzas" element={<CollectionsDashboard />} />
           <Route path="/cobranzas/cartera" element={<AccountsReceivable />} />
           <Route path="/cobranzas/aplicar" element={<PaymentApplication />} />

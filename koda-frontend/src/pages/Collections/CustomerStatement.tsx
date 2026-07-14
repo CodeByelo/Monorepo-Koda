@@ -245,8 +245,8 @@ const CustomerStatement = () => {
                    </tr>
                    <tr className="bg-[#0b5156] text-white">
                       <td colSpan={5} className="py-6 px-8 text-xs font-black uppercase tracking-[0.2em]">
-                         <div className="flex items-center gap-3">
-                            <CheckCircle2 size={18} className="opacity-50" /> Total Exigible al Cierre (Tasa BCV {currentRate.toFixed(2)}):
+                         <div className="flex items-center gap-2 text-xs font-black text-slate-500 uppercase bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
+                            <CheckCircle2 size={18} className="opacity-50" /> Total Exigible al Cierre (Tasa BCV {currentRate.toFixed(4)}):
                          </div>
                       </td>
                       <td colSpan={2} className="py-6 px-4 text-right font-mono text-xs font-black opacity-80 italic">Bs. {(totalExigibleUsd * currentRate).toLocaleString('es-VE', {minimumFractionDigits: 2})}</td>

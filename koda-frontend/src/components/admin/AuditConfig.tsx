@@ -62,15 +62,15 @@ const AuditConfig = () => {
 
   return (
     <div className="space-y-6">
-      <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-3xl p-8 text-white relative overflow-hidden shadow-xl">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500 opacity-10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
+      <div style={{ backgroundColor: '#0b5156' }} className="rounded-3xl p-8 text-white relative overflow-hidden shadow-xl">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
         <div className="relative z-10 flex items-start gap-5">
           <div className="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur flex items-center justify-center shrink-0 border border-white/20">
-            <ShieldCheck size={28} className="text-emerald-400" />
+            <ShieldCheck size={28} className="text-white" />
           </div>
           <div>
-            <h2 className="text-2xl font-black tracking-tight mb-2">Modo Seguro de Auditoría</h2>
-            <p className="text-slate-300 font-medium leading-relaxed max-w-2xl text-sm">
+            <h2 style={{ color: '#ffffff' }} className="text-2xl font-black tracking-tight mb-2">Modo Seguro de Auditoría</h2>
+            <p style={{ color: '#ffffff', opacity: 0.9 }} className="font-medium leading-relaxed max-w-2xl text-sm">
               Genera un acceso temporal de solo-lectura y estrictamente trazable para auditores externos o fiscales del SENIAT. El acceso será inmutable y expirará automáticamente.
             </p>
           </div>

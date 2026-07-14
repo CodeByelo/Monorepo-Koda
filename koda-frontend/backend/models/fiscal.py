@@ -41,6 +41,6 @@ class CorrelativoFiscal(Base):
     tenant_id = Column(UUID(as_uuid=True))
 
     id = Column(Integer, primary_key=True, index=True)
-    tipo_documento = Column(String(50), unique=True, index=True, nullable=False) # Ej: 'FACTURA', 'NOTA_CREDITO'
+    tipo_documento = Column(String(50), index=True, nullable=False) # Ej: 'FACTURA', 'NOTA_CREDITO'
     prefijo = Column(String(10), nullable=False) # Ej: 'FAC-'
     siguiente_numero = Column(Integer, default=1, nullable=False)

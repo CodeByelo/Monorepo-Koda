@@ -7,11 +7,14 @@ import {
   CheckCircle2,
   Info,
   Calendar,
-  FileText
+  FileText,
+  Zap,
+  ShieldAlert
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useState, useMemo, useEffect } from 'react';
 import { api } from '@/api/client';
+import { createPortal } from 'react-dom';
 
 interface JournalLine {
   id: string;
@@ -32,19 +35,30 @@ const ManualJournalEntry = () => {
     { id: '1', accountId: '', accountName: '', accountType: '', balance: 0, costCenter: '', debit: 0, credit: 0 }
   ]);
   const [accounts, setAccounts] = useState<any[]>([]);
+  const [costCenters, setCostCenters] = useState<any[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showNotification = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
 
   useEffect(() => {
-    const fetchAccounts = async () => {
+    const fetchAccountsAndCostCenters = async () => {
       try {
-        const res = await api.get<any[]>('/contabilidad/cuentas?activas=true');
-        setAccounts(res || []);
+        const [resAccs, resCCs] = await Promise.all([
+          api.get<any[]>('/contabilidad/cuentas?activas=true'),
+          api.get<any[]>('/contabilidad/centros-costo')
+        ]);
+        setAccounts(resAccs || []);
+        setCostCenters(resCCs || []);
       } catch (err) {
-        console.error("Error fetching accounts:", err);
+        console.error("Error fetching accounts or cost centers:", err);
       }
     };
-    fetchAccounts();
+    fetchAccountsAndCostCenters();
   }, []);
 
   const totals = useMemo(() => {
@@ -101,10 +115,11 @@ const ManualJournalEntry = () => {
     try {
       setIsSaving(true);
       const payload = {
-        fecha: date,
-        descripcion: description,
+        concepto: description,
+        referencia: `AJU-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`,
         lineas: lines.map(l => ({
           cuenta_codigo: l.accountId,
+          cuenta_nombre: l.accountName,
           debe: l.debit || 0,
           haber: l.credit || 0,
           centro_costo: l.costCenter || null
@@ -112,9 +127,10 @@ const ManualJournalEntry = () => {
       };
 
       await api.post('/contabilidad/asientos', payload);
-      // Notificación o confirmación en UI (ideal un toast central, usamos alert por simplicidad mientras)
-      alert("✅ Asiento guardado exitosamente.");
-      navigate('/contabilidad/diario');
+      showNotification("Asiento guardado exitosamente.", "success");
+      setTimeout(() => {
+        navigate('/contabilidad/diario');
+      }, 1500);
     } catch (error: any) {
       console.error("Error guardando asiento:", error);
       setErrorMsg(error.message || "Error al guardar el asiento. Verifique los datos e intente nuevamente.");
@@ -238,9 +254,9 @@ const ManualJournalEntry = () => {
                             className="w-full bg-slate-50 border border-slate-100 rounded-lg px-2 py-1.5 text-[11px] font-black text-[#0b5156] outline-none focus:border-[#0b5156] transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                           >
                              <option value="">N/A</option>
-                             <option value="ADM">Administración</option>
-                             <option value="VEN">Ventas</option>
-                             <option value="PROD">Producción</option>
+                             {costCenters.map(cc => (
+                                <option key={cc.codigo} value={cc.codigo}>{cc.codigo} - {cc.nombre}</option>
+                             ))}
                           </select>
                        </td>
                        <td className="py-2 px-4">
@@ -318,6 +334,17 @@ const ManualJournalEntry = () => {
             </p>
          </div>
       </div>
+
+      {/* Toast Notification */}
+      {toast && typeof document !== 'undefined' && createPortal(
+        <div className="fixed bottom-5 right-5 z-[9999] animate-in fade-in slide-in-from-bottom duration-300">
+          <div className={`px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 border ${toast.type === 'success' ? 'bg-[#0b5156] border-[#0b5156]/20 text-white' : 'bg-red-600 border-red-500 text-white'}`}>
+            {toast.type === 'success' ? <Zap size={20} /> : <ShieldAlert size={20} />}
+            <span className="font-bold text-xs tracking-wide uppercase font-mono">{toast.message}</span>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 };

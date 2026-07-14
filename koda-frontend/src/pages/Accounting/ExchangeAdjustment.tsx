@@ -4,7 +4,8 @@ import {
   TrendingUp,
   TrendingDown,
   Database,
-  AlertTriangle
+  AlertTriangle,
+  CheckCircle2
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useState, useMemo, useEffect } from 'react';
@@ -14,6 +15,13 @@ const ExchangeAdjustment = () => {
   const [rate, setRate] = useState(0);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 5000);
+  };
 
   useEffect(() => {
     setIsLoading(true);
@@ -58,19 +66,68 @@ const ExchangeAdjustment = () => {
     return Math.round(sum * 100) / 100;
   }, [processedAccounts]);
 
-  const handleGenerateEntry = () => {
+  const handleGenerateEntry = async () => {
     if (processedAccounts.length === 0) {
-      alert("No hay cuentas con saldos en divisas para ajustar.");
+      showToast("No hay cuentas con saldos en divisas para ajustar.", "error");
       return;
     }
-    const message = `🛡️ PROTOCOLO DE REEXPRESIÓN CAMBIARIA\n\nTasa: Bs. ${rate} (BCV)\nTotal Ajuste: Bs. ${totalDiff.toLocaleString('es-VE', { minimumFractionDigits: 2 })}\n\n¿Desea insertar el asiento automático en el Libro Diario?`;
-    if (window.confirm(message)) {
-      alert("✅ Asiento de Ajuste Cambiario generado exitosamente.");
+    if (!window.confirm(`🛡️ PROTOCOLO DE REEXPRESIÓN CAMBIARIA\n\nTasa: Bs. ${rate.toFixed(4)} (BCV)\nTotal Ajuste: Bs. ${totalDiff.toLocaleString('es-VE', { minimumFractionDigits: 2 })}\n\n¿Desea insertar el asiento automático en el Libro Diario?`)) {
+      return;
+    }
+    try {
+      setIsGenerating(true);
+      const hoy = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const referencia = `AJC-${hoy}`;
+
+      // Construir las líneas del asiento de ajuste cambiario
+      const lineas: any[] = [];
+      for (const acc of processedAccounts) {
+        if (Math.abs(acc.diff) < 0.01) continue;
+        if (acc.diff > 0) {
+          // Ganancia cambiaria → Débito Cuentas Bancarias, Crédito Ingresos por Diferencial
+          lineas.push({ cuenta_codigo: acc.code, cuenta_nombre: acc.name, debe: acc.diff, haber: 0 });
+          lineas.push({ cuenta_codigo: '4.2.01', cuenta_nombre: 'Ganancia por Diferencial Cambiario', debe: 0, haber: acc.diff });
+        } else {
+          // Pérdida cambiaria → Débito Pérdida Cambiaria, Crédito Cuentas Bancarias
+          const abs = Math.abs(acc.diff);
+          lineas.push({ cuenta_codigo: '5.2.01', cuenta_nombre: 'Pérdida por Diferencial Cambiario', debe: abs, haber: 0 });
+          lineas.push({ cuenta_codigo: acc.code, cuenta_nombre: acc.name, debe: 0, haber: abs });
+        }
+      }
+
+      if (lineas.length === 0) {
+        showToast("No hay diferencias cambiarias que ajustar en este período.", "error");
+        return;
+      }
+
+      await api.post<any>('/contabilidad/asientos', {
+        concepto: `Ajuste por Diferencial Cambiario — Tasa BCV Bs. ${rate.toFixed(4)}`,
+        referencia,
+        lineas,
+      });
+
+      showToast(`✅ Asiento cambiario ${referencia} generado exitosamente en el Libro Diario.`, "success");
+    } catch (err: any) {
+      console.error("Error generando asiento cambiario:", err);
+      showToast(err?.detail || err?.message || "Error al generar el asiento cambiario.", "error");
+    } finally {
+      setIsGenerating(false);
     }
   };
 
   return (
     <div className="space-y-1.5 animate-in fade-in duration-500 pb-4">
+      {/* Toast Notification */}
+      {toast && (
+        <div className={`fixed top-4 right-4 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-xl border text-sm font-bold transition-all animate-in fade-in slide-in-from-top-4 ${
+          toast.type === 'success'
+            ? 'bg-green-50 border-green-200 text-green-800'
+            : 'bg-red-50 border-red-200 text-red-800'
+        }`}>
+          {toast.type === 'success' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
+          <span>{toast.message}</span>
+        </div>
+      )}
       {/* Header */}
       <header className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
         <div className="flex justify-between items-start mb-2">
@@ -87,26 +144,28 @@ const ExchangeAdjustment = () => {
             <p className="text-slate-500 text-xs font-bold uppercase tracking-tight">Diferencial Cambiario: Ajuste de saldos en Bolívares según tasa oficial BCV.</p>
           </div>
           <div className="flex gap-3 items-center">
-             <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 flex items-center gap-3 shadow-sm group">
+             <div className="bg-slate-50 p-2 rounded-xl border border-slate-100 flex items-center gap-3 shadow-sm">
                 <div className="space-y-0.5 text-right">
                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block leading-none">Tasa BCV Oficial</span>
                    <p className="text-[10px] font-black text-koda-main uppercase leading-none italic">Actualizada hoy</p>
                 </div>
                 <div className="relative">
                    <span className="absolute left-2.5 top-2 text-[10px] font-black text-slate-400">Bs.</span>
-                   <input 
-                     type="number" 
+                   <input
+                     type="number"
                      value={rate}
                      onChange={(e) => setRate(parseFloat(e.target.value) || 0)}
-                     className="w-24 bg-white border border-slate-200 rounded-lg pl-8 pr-2.5 py-1.5 text-xs font-black font-mono text-koda-main outline-none focus:border-koda-main transition-all"
+                     className="w-36 bg-white border border-slate-200 rounded-lg pl-9 pr-2.5 py-1.5 text-xs font-black font-mono text-koda-main outline-none focus:border-koda-main transition-all"
                    />
                 </div>
              </div>
-             <button 
+             <button
               onClick={handleGenerateEntry}
-              className="bg-koda-main text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-koda-mainHover transition-all"
+              disabled={isGenerating}
+              className="bg-koda-main text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-koda-mainHover transition-all disabled:opacity-60 disabled:cursor-not-allowed"
              >
-                <Sparkles size={14} /> Generar Asiento
+                <Sparkles size={14} className={isGenerating ? 'animate-spin' : ''} />
+                {isGenerating ? 'Procesando...' : 'Generar Asiento'}
              </button>
           </div>
         </div>
@@ -200,7 +259,7 @@ const ExchangeAdjustment = () => {
               <div className="relative z-10 space-y-4">
                  <div className="flex items-center gap-2">
                     <Database size={18} className="text-white/40" />
-                    <h3 className="text-sm font-black uppercase tracking-tighter leading-none">Destino Contable</h3>
+                    <h3 className="text-sm font-black text-white uppercase tracking-tighter leading-none">Destino Contable</h3>
                  </div>
                  <div className="space-y-3">
                     <p className="text-[10px] font-bold text-white/60 uppercase leading-relaxed">

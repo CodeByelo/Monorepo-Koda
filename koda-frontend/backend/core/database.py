@@ -63,7 +63,8 @@ def _add_tenant_filter(execute_state):
                 with_loader_criteria(
                     Base,
                     lambda cls: cls.tenant_id == tenant_id if hasattr(cls, 'tenant_id') and cls.__name__ not in ('Profile', 'Organization') else True,
-                    include_aliases=True
+                    include_aliases=True,
+                    track_closure_variables=False
                 )
             )
 

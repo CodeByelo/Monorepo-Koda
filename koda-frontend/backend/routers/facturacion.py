@@ -90,8 +90,8 @@ def emitir_factura_fiscal(
     except (ValueError, IndexError):
         pass
 
-    if not cliente:
-        raise HTTPException(status_code=404, detail="Cliente no encontrado en la base de datos.")
+    if not cliente or (cliente.tenant_id and str(cliente.tenant_id) != str(current_user.tenant_id)):
+        raise HTTPException(status_code=404, detail="Cliente no encontrado en la base de datos de su empresa.")
 
     # --- 3. Obtener tasa BCV activa ---
     tasa_activa = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
@@ -131,8 +131,8 @@ def emitir_factura_fiscal(
             (Producto.sku == prod_key) | (Producto.id == prod_key if prod_key.isdigit() else False)
         ).with_for_update().first()
 
-        if not producto:
-            raise HTTPException(status_code=404, detail=f"Producto '{prod_key}' no encontrado en inventario.")
+        if not producto or (producto.tenant_id and str(producto.tenant_id) != str(current_user.tenant_id)):
+            raise HTTPException(status_code=404, detail=f"Producto '{prod_key}' no encontrado en su inventario.")
 
         if producto.stock < cantidad:
             raise HTTPException(
@@ -162,16 +162,16 @@ def emitir_factura_fiscal(
 
     # --- 6. Generar Número de Control Fiscal ---
     correlativo_obj = db.query(CorrelativoFiscal).filter(
-        CorrelativoFiscal.prefijo == "FACT"
+        CorrelativoFiscal.tipo_documento == "FACTURA"
     ).with_for_update().first()
 
     if not correlativo_obj:
-        correlativo_obj = CorrelativoFiscal(prefijo="FACT", ultimo_numero=0)
+        correlativo_obj = CorrelativoFiscal(tipo_documento="FACTURA", prefijo="FAC-", siguiente_numero=1, tenant_id=current_user.tenant_id)
         db.add(correlativo_obj)
         db.flush()
 
-    correlativo_obj.ultimo_numero += 1
-    numero_seq = correlativo_obj.ultimo_numero
+    numero_seq = correlativo_obj.siguiente_numero
+    correlativo_obj.siguiente_numero += 1
     numero_factura = f"FACT-{str(numero_seq).zfill(8)}"
     numero_control = f"00-{str(numero_seq).zfill(8)}"
 
@@ -206,7 +206,7 @@ def emitir_factura_fiscal(
         total_usd=monto_total,
         metodo_pago=metodo_pago,
         tasa_cambio_bs=tasa_bs,
-        estado="EMITIDA",
+        estado="ACTIVA",
         creado_por=current_user.id,
         tenant_id=current_user.tenant_id
     )
@@ -287,5 +287,5 @@ def emitir_factura_fiscal(
         "tasa_bcv": float(tasa_bs),
         "emitido_por": current_user.email,
         "ip_origen": ip_registrada,
-        "estado": "EMITIDA",
+        "estado": "ACTIVA",
     }

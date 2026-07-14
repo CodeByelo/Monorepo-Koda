@@ -1625,6 +1625,31 @@ const Logistics = () => {
 
         {activeTab === 'tablero' && (
           <div className="w-full space-y-6 text-slate-800">
+            {/* Banner de Integración de Cronogramas y Asignación de Conductores */}
+            <div className="bg-[#0b5156]/5 border border-[#0b5156]/20 rounded-3xl p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-6 shadow-sm">
+              <div className="space-y-1 max-w-xl">
+                <span className="bg-[#0b5156] text-white text-[9px] font-black uppercase px-2 py-0.5 rounded tracking-widest">Nueva Integración</span>
+                <h4 className="text-slate-800 font-black text-sm uppercase tracking-tight mt-1.5">Planificación y Asignación de Choferes desde Cronograma</h4>
+                <p className="text-slate-500 text-xs font-semibold leading-relaxed normal-case">
+                  Ahora puedes organizar la matriz de despachos hoy/mañana usando el **Cronograma Gantt Semanal** y vincular conductores al bot de Telegram corporativo para recibir sus hojas de ruta de forma automatizada y asíncrona.
+                </p>
+              </div>
+              <div className="flex gap-2 w-full md:w-auto shrink-0">
+                <button
+                  onClick={() => navigate('/logistica/planificacion')}
+                  className="bg-[#0b5156] text-white hover:bg-[#083a3d] px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all shadow-sm"
+                >
+                  Ir al Cronograma
+                </button>
+                <button
+                  onClick={() => navigate('/logistica/personal')}
+                  className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all shadow-sm"
+                >
+                  Asignar Conductores
+                </button>
+              </div>
+            </div>
+
             {/* Panel de Alertas Críticas */}
             {choferes.some(c => c.licencia_alerta) && (
               <div className="bg-rose-50 border border-rose-250 rounded-3xl p-5 flex items-start gap-3 shadow-sm animate-in fade-in slide-in-from-top-4 duration-300">

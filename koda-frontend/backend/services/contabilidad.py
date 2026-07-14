@@ -8,7 +8,7 @@ from backend.models.operations import Producto
 
 class ContabilidadService:
     @staticmethod
-    def generar_asiento_venta(venta, db: Session):
+    def generar_asiento_venta(venta, db: Session, tenant_id: str = None):
         """
         Crea un asiento contable automático para el registro de una venta (factura).
         Afecta:
@@ -19,7 +19,11 @@ class ContabilidadService:
           - HABER: 2.1.03 IGTF por Pagar (monto IGTF, si aplica)
         """
         periodo_asiento = (venta.fecha or datetime.now(timezone.utc)).strftime("%Y-%m")
-        cierre = db.query(CierrePeriodo).filter(CierrePeriodo.periodo == periodo_asiento).first()
+        
+        cierre_query = db.query(CierrePeriodo).filter(CierrePeriodo.periodo == periodo_asiento)
+        if tenant_id:
+            cierre_query = cierre_query.filter(CierrePeriodo.tenant_id == tenant_id)
+        cierre = cierre_query.first()
         if cierre:
             raise HTTPException(status_code=403, detail=f"No se pueden registrar asientos en el período {periodo_asiento} porque está CERRADO.")
 
@@ -40,7 +44,8 @@ class ContabilidadService:
                 cuenta_codigo="1.1.02",
                 cuenta_nombre="Cuentas por Cobrar Comerciales",
                 debe_usd=cxc_monto,
-                haber_usd=Decimal("0.00")
+                haber_usd=Decimal("0.00"),
+                tenant_id=tenant_id
             ))
             total_debe += cxc_monto
 
@@ -50,7 +55,8 @@ class ContabilidadService:
                 cuenta_codigo="1.1.05",
                 cuenta_nombre="Anticipo de Retención de IVA",
                 debe_usd=retencion,
-                haber_usd=Decimal("0.00")
+                haber_usd=Decimal("0.00"),
+                tenant_id=tenant_id
             ))
             total_debe += retencion
 
@@ -60,7 +66,8 @@ class ContabilidadService:
                 cuenta_codigo="4.1.01",
                 cuenta_nombre="Ventas de Mercancía",
                 debe_usd=Decimal("0.00"),
-                haber_usd=subtotal
+                haber_usd=subtotal,
+                tenant_id=tenant_id
             ))
             total_haber += subtotal
 
@@ -70,7 +77,8 @@ class ContabilidadService:
                 cuenta_codigo="2.1.02",
                 cuenta_nombre="IVA Débito Fiscal por Pagar",
                 debe_usd=Decimal("0.00"),
-                haber_usd=iva
+                haber_usd=iva,
+                tenant_id=tenant_id
             ))
             total_haber += iva
 
@@ -80,7 +88,8 @@ class ContabilidadService:
                 cuenta_codigo="2.1.03",
                 cuenta_nombre="IGTF por Pagar",
                 debe_usd=Decimal("0.00"),
-                haber_usd=igtf
+                haber_usd=igtf,
+                tenant_id=tenant_id
             ))
             total_haber += igtf
 
@@ -101,13 +110,14 @@ class ContabilidadService:
             total_haber_usd=total_haber,
             tasa_cambio_bs=Decimal(str(venta.tasa_cambio_bs)),
             estado="ACTIVO",
-            detalles=detalles
+            detalles=detalles,
+            tenant_id=tenant_id
         )
         db.add(asiento)
         return asiento
 
     @staticmethod
-    def generar_asiento_costo_ventas(venta, detalles_venta, db: Session):
+    def generar_asiento_costo_ventas(venta, detalles_venta, db: Session, tenant_id: str = None):
         """
         Crea un asiento contable automático para registrar el costo de ventas y la salida de inventario.
         Afecta:
@@ -116,7 +126,10 @@ class ContabilidadService:
         """
         total_costo = Decimal("0.00")
         for item in detalles_venta:
-            producto = db.query(Producto).filter(Producto.id == item.producto_id).first()
+            prod_query = db.query(Producto).filter(Producto.id == item.producto_id)
+            if tenant_id:
+                prod_query = prod_query.filter(Producto.tenant_id == tenant_id)
+            producto = prod_query.first()
             if producto:
                 costo_usd = Decimal(str(producto.costo_usd or 0))
                 cantidad = Decimal(str(item.cantidad or 0))
@@ -132,13 +145,15 @@ class ContabilidadService:
                 cuenta_codigo="5.1.01",
                 cuenta_nombre="Costo de Ventas",
                 debe_usd=total_costo,
-                haber_usd=Decimal("0.00")
+                haber_usd=Decimal("0.00"),
+                tenant_id=tenant_id
             ),
             AsientoDetalle(
                 cuenta_codigo="1.1.03",
                 cuenta_nombre="Inventario de Mercancía",
                 debe_usd=Decimal("0.00"),
-                haber_usd=total_costo
+                haber_usd=total_costo,
+                tenant_id=tenant_id
             )
         ]
 
@@ -150,24 +165,31 @@ class ContabilidadService:
             total_haber_usd=total_costo,
             tasa_cambio_bs=Decimal(str(venta.tasa_cambio_bs)),
             estado="ACTIVO",
-            detalles=detalles_asiento
+            detalles=detalles_asiento,
+            tenant_id=tenant_id
         )
         db.add(asiento)
         return asiento
 
     @staticmethod
-    def generar_asiento_pago(pago, db: Session):
+    def generar_asiento_pago(pago, db: Session, tenant_id: str = None):
         """
         Crea un asiento contable automático para el registro de un pago recibido.
         Afecta:
           - DEBE: 1.1.01 Caja y Bancos (monto del pago)
           - HABER: 1.1.02 Cuentas por Cobrar Comerciales (monto del pago)
         """
-        cta_banco = db.query(CuentaContable).filter(CuentaContable.codigo == "1.1.01").first()
+        cta_banco_query = db.query(CuentaContable).filter(CuentaContable.codigo == "1.1.01")
+        if tenant_id:
+            cta_banco_query = cta_banco_query.filter(CuentaContable.tenant_id == tenant_id)
+        cta_banco = cta_banco_query.first()
         if not cta_banco:
             raise HTTPException(status_code=400, detail="Cuenta contable 1.1.01 (Caja y Bancos) no encontrada.")
             
-        cta_cxc = db.query(CuentaContable).filter(CuentaContable.codigo == "1.1.02").first()
+        cta_cxc_query = db.query(CuentaContable).filter(CuentaContable.codigo == "1.1.02")
+        if tenant_id:
+            cta_cxc_query = cta_cxc_query.filter(CuentaContable.tenant_id == tenant_id)
+        cta_cxc = cta_cxc_query.first()
         if not cta_cxc:
             raise HTTPException(status_code=400, detail="Cuenta contable 1.1.02 (Cuentas por Cobrar) no encontrada.")
 
@@ -186,15 +208,18 @@ class ContabilidadService:
                     cuenta_codigo="1.1.01",
                     cuenta_nombre=cta_banco.nombre,
                     debe_usd=monto,
-                    haber_usd=Decimal("0.00")
+                    haber_usd=Decimal("0.00"),
+                    tenant_id=tenant_id
                 ),
                 AsientoDetalle(
                     cuenta_codigo="1.1.02",
                     cuenta_nombre=cta_cxc.nombre,
                     debe_usd=Decimal("0.00"),
-                    haber_usd=monto
+                    haber_usd=monto,
+                    tenant_id=tenant_id
                 )
-            ]
+            ],
+            tenant_id=tenant_id
         )
         db.add(asiento)
         return asiento

@@ -25,8 +25,11 @@ const JournalBook = () => {
   const [kpis, setKpis] = useState<any[]>([]);
   const [totals, setTotals] = useState({ debe: 0, haber: 0 });
 
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
   const handleDownload = async (endpoint: string, filename: string) => {
     try {
+      setDownloadError(null);
       const token = localStorage.getItem('koda_token') || localStorage.getItem('sgd_token');
       const baseUrl = (window.location.hostname.includes('.ts.net') || window.location.hostname.includes('cloudflare')) ? '/api-facturacion' : '/api';
       const response = await fetch(baseUrl + endpoint, {
@@ -45,36 +48,39 @@ const JournalBook = () => {
       window.URL.revokeObjectURL(blobUrl);
     } catch (error) {
       console.error('Error downloading file:', error);
-      alert('Error al descargar el archivo. Verifique su sesion.');
+      setDownloadError('Error al descargar el archivo. Verifique su sesión.');
+      setTimeout(() => setDownloadError(null), 4000);
     }
   };
 
   useEffect(() => {
-    api.get<PaginatedResponse<any>>(`/contabilidad/libro-diario?limit=${limit}&offset=${offset}`).then((res) => {
+    api.get<PaginatedResponse<any>>(`/contabilidad/asientos?limit=${limit}&offset=${offset}`).then((res) => {
       const list = res?.data || [];
       setTotalRecords(res?.total_records || 0);
-      const totalDebe = list.reduce((s, e) => s + Number(e.debe || 0), 0);
-      const totalHaber = list.reduce((s, e) => s + Number(e.haber || 0), 0);
+      const totalDebe = list.reduce((s, e) => s + Number(e.total_debe_usd || e.total_debe || 0), 0);
+      const totalHaber = list.reduce((s, e) => s + Number(e.total_haber_usd || e.total_haber || 0), 0);
       setTotals({ debe: totalDebe, haber: totalHaber });
       setKpis([
         { label: 'Asientos (Pág)', value: String(list.length), color: 'text-[#0b5156]' },
-        { label: 'Total Débitos (Pág)', value: `$${totalDebe.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`, color: 'text-slate-800' },
-        { label: 'Total Créditos (Pág)', value: `$${totalHaber.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`, color: 'text-slate-800' },
-        { label: 'Diferencia (Pág)', value: `$${Math.abs(totalDebe - totalHaber).toFixed(2)}`, color: 'text-green-600' },
+        { label: 'Total Débitos (Pág)', value: `Bs. ${totalDebe.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`, color: 'text-slate-800' },
+        { label: 'Total Créditos (Pág)', value: `Bs. ${totalHaber.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`, color: 'text-slate-800' },
+        { label: 'Diferencia (Pág)', value: `Bs. ${Math.abs(totalDebe - totalHaber).toFixed(2)}`, color: 'text-green-600' },
       ]);
       setEntries(list.map((e) => ({
         id: e.referencia || `AST-${e.id}`,
         rawId: e.id,
         date: e.fecha,
-        source: 'Sistema',
+        source: e.referencia?.startsWith('FAC-') ? 'Ventas' : e.referencia?.startsWith('NOM-') ? 'Nómina' : 'Sistema',
+        sourceColor: e.referencia?.startsWith('FAC-') ? 'bg-blue-100 text-blue-700' : e.referencia?.startsWith('NOM-') ? 'bg-purple-100 text-purple-700' : 'bg-slate-200 text-slate-600',
         desc: e.concepto,
-        status: 'Posteado',
-        statusColor: 'bg-green-100 text-green-700',
-        lines: (e.lines || []).map((line: any) => ({
-          account: line.account,
-          name: line.name,
-          debit: line.debit > 0 ? `$${Number(line.debit).toFixed(2)}` : '',
-          credit: line.credit > 0 ? `$${Number(line.credit).toFixed(2)}` : ''
+        status: e.estado === 'ACTIVO' ? 'Posteado' : 'Borrador',
+        statusColor: e.estado === 'ACTIVO' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700',
+        isWarning: e.estado !== 'ACTIVO',
+        lines: (e.detalles || []).map((det: any) => ({
+          account: det.cuenta_codigo,
+          name: det.cuenta_nombre,
+          debit: Number(det.debe_usd || det.debe || 0) > 0 ? `Bs. ${Number(det.debe_usd || det.debe).toLocaleString('es-VE', { minimumFractionDigits: 2 })}` : '',
+          credit: Number(det.haber_usd || det.haber || 0) > 0 ? `Bs. ${Number(det.haber_usd || det.haber).toLocaleString('es-VE', { minimumFractionDigits: 2 })}` : ''
         })),
       })));
     }).catch(console.error);
@@ -97,15 +103,15 @@ const JournalBook = () => {
             <h1 className="text-3xl font-black text-[#0b5156] tracking-tighter uppercase leading-none">Libro Diario General</h1>
             <p className="text-slate-500 text-xs font-bold uppercase tracking-tight">Registro cronológico detallado de todos los movimientos contables de la organización.</p>
           </div>
-          <div className="flex gap-2 flex-wrap justify-end">
+           <div className="flex gap-2 flex-wrap justify-end">
              <Link to="/contabilidad/asiento-manual" className="bg-[#0b5156] text-white px-4 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all">
                 <Plus size={14} /> Nuevo Asiento
              </Link>
              <button onClick={() => handleDownload('/contabilidad/asientos/exportar-pdf', 'libro_diario.pdf')} className="bg-white text-[#0b5156] px-4 py-2.5 rounded-xl text-[10px] font-black uppercase border border-[#0b5156]/20 flex items-center gap-2 hover:bg-[#0b5156]/5 transition-all">
                 <Printer size={14} /> Imprimir Libro
              </button>
-             <button onClick={() => handleDownload('/contabilidad/libro-diario/exportar-txt', 'libro_diario.txt')} className="bg-white text-[#0b5156] px-4 py-2.5 rounded-xl text-[10px] font-black uppercase border border-[#0b5156]/20 flex items-center gap-2 hover:bg-[#0b5156]/5 transition-all">
-                <Download size={14} /> Exportar TXT (Legal)
+             <button onClick={() => handleDownload('/contabilidad/asientos/exportar-pdf', 'libro_diario_txt.pdf')} className="bg-white text-[#0b5156] px-4 py-2.5 rounded-xl text-[10px] font-black uppercase border border-[#0b5156]/20 flex items-center gap-2 hover:bg-[#0b5156]/5 transition-all">
+                <Download size={14} /> Exportar PDF (Legal)
              </button>
           </div>
         </div>

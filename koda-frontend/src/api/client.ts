@@ -10,10 +10,13 @@ if (BASE_URL && !BASE_URL.startsWith('http://') && !BASE_URL.startsWith('https:/
 
 export async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem('koda_token') || localStorage.getItem('sgd_token');
+  const isFormData = options.body instanceof FormData;
   const headers: any = {
-    'Content-Type': 'application/json',
     ...options.headers,
   };
+  if (!isFormData && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
@@ -55,10 +58,45 @@ export async function request<T>(endpoint: string, options: RequestInit = {}): P
 export const api = {
   get: <T>(endpoint: string, options?: RequestInit) => request<T>(endpoint, { ...options, method: 'GET' }),
   post: <T>(endpoint: string, body?: any, options?: RequestInit) =>
-    request<T>(endpoint, { ...options, method: 'POST', body: body ? JSON.stringify(body) : undefined }),
+    request<T>(endpoint, { 
+      ...options, 
+      method: 'POST', 
+      body: body instanceof FormData ? body : (body ? JSON.stringify(body) : undefined) 
+    }),
   put: <T>(endpoint: string, body?: any, options?: RequestInit) =>
-    request<T>(endpoint, { ...options, method: 'PUT', body: body ? JSON.stringify(body) : undefined }),
+    request<T>(endpoint, { 
+      ...options, 
+      method: 'PUT', 
+      body: body instanceof FormData ? body : (body ? JSON.stringify(body) : undefined) 
+    }),
   patch: <T>(endpoint: string, body?: any, options?: RequestInit) =>
-    request<T>(endpoint, { ...options, method: 'PATCH', body: body ? JSON.stringify(body) : undefined }),
+    request<T>(endpoint, { 
+      ...options, 
+      method: 'PATCH', 
+      body: body instanceof FormData ? body : (body ? JSON.stringify(body) : undefined) 
+    }),
   delete: <T>(endpoint: string, options?: RequestInit) => request<T>(endpoint, { ...options, method: 'DELETE' }),
+  download: async (endpoint: string, filename: string) => {
+    const token = localStorage.getItem('koda_token') || localStorage.getItem('sgd_token');
+    const headers: any = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const response = await fetch(`${BASE_URL}${endpoint}`, {
+      method: 'GET',
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error('Error al descargar el archivo');
+    }
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  }
 };

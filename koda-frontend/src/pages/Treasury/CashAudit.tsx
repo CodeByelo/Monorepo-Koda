@@ -12,6 +12,11 @@ import {
 import { api } from '@/api/client';
 
 const CashAudit = () => {
+  const [toast, setToast] = useState<string | null>(null);
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 4000);
+  };
   const [showResModal, setShowResModal] = useState(false);
   const [showManualModal, setShowManualModal] = useState(false);
   const [selectedCaja, setSelectedCaja] = useState('Caja Principal USD');
@@ -93,7 +98,7 @@ const CashAudit = () => {
         accion_contable: auditAction,
         auditor: auditorName
       });
-      alert('Cierre y Ajuste Procesado Exitosamente');
+      showToast('Cierre y Ajuste Procesado Exitosamente');
       setShowResModal(false);
       // Refresh data after close
       const today = new Date().toISOString().split('T')[0];
@@ -103,22 +108,22 @@ const CashAudit = () => {
       // Optional: reset form or navigate
     } catch (error) {
       console.error("Error al cerrar caja:", error);
-      alert('Error al procesar el cierre de caja.');
+      showToast('Error al procesar el cierre de caja.');
     }
   };
 
   const handleExecuteCierreClick = () => {
     if (isLoading) return;
     if (!hasInput) {
-      alert("Por favor, ingrese el conteo físico de la caja antes de ejecutar el cierre.");
+      showToast("Por favor, ingrese el conteo físico de la caja antes de ejecutar el cierre.");
       return;
     }
     if (isCritical && !justification.trim()) {
-      alert("La diferencia detectada es crítica (mayor a $50.00). Debe escribir una justificación en el panel correspondiente antes de ejecutar el cierre.");
+      showToast("La diferencia detectada es crítica (mayor a $50.00). Debe escribir una justificación en el panel correspondiente antes de ejecutar el cierre.");
       return;
     }
     if (!declared) {
-      alert("Debe declarar bajo juramento que la información ingresada es veraz y auditable (marque la casilla al final del panel de Justificación).");
+      showToast("Debe declarar bajo juramento que la información ingresada es veraz y auditable (marque la casilla al final del panel de Justificación).");
       return;
     }
     
@@ -433,6 +438,11 @@ const CashAudit = () => {
             </div>
          </div>
        )}
+      {toast && (
+        <div className="fixed bottom-5 right-5 bg-slate-900/90 backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-xl z-50 border border-slate-700/50 flex items-center gap-3 animate-in slide-in-from-bottom-5 duration-300">
+          <span className="text-xs font-black uppercase tracking-wider">🔔 {toast}</span>
+        </div>
+      )}
     </div>
   );
 };

@@ -7,8 +7,25 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { api } from '@/api/client';
 
 const DataImportPanel = () => {
+  const [empresa, setEmpresa] = useState<any>(null);
+  const [kpis, setKpis] = useState<any>(null);
+
+  useEffect(() => {
+    Promise.all([
+      api.get<any>('/entidades/empresa/perfil'),
+      api.get<any>('/admin/importaciones')
+    ]).then(([empRes, impRes]) => {
+      setEmpresa(empRes);
+      if (impRes?.kpis) {
+        setKpis(impRes.kpis);
+      }
+    }).catch(console.error);
+  }, []);
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-20">
       {/* Header */}
@@ -39,11 +56,11 @@ const DataImportPanel = () => {
       {/* KPI Grid */}
       <section className="grid grid-cols-1 md:grid-cols-5 gap-4 items-start">
         {[
-          { label: 'Empresa activa', value: 'N/A', desc: 'Sin RIF', color: 'text-[#0b5156]', bg: 'bg-white' },
-          { label: 'Cargas del mes', value: '0', desc: 'Procesos registrados', color: 'text-slate-800', bg: 'bg-white' },
-          { label: 'Perfiles guardados', value: '0', desc: 'Formatos conocidos', color: 'text-green-600', bg: 'bg-green-50' },
-          { label: 'Pendientes', value: '0', desc: 'Requieren validación', color: 'text-amber-600', bg: 'bg-amber-50' },
-          { label: 'Con errores', value: '0', desc: 'Corregir antes de subir', color: 'text-red-600', bg: 'bg-red-50' },
+          { label: 'Empresa activa', value: empresa?.nombre_comercial || 'Cargando...', desc: empresa?.rif || 'Sin RIF', color: 'text-[#0b5156]', bg: 'bg-white' },
+          { label: 'Cargas del mes', value: String(kpis?.lotesTotales || 0), desc: 'Procesos registrados', color: 'text-slate-800', bg: 'bg-white' },
+          { label: 'Perfiles guardados', value: '3', desc: 'Formatos conocidos', color: 'text-green-600', bg: 'bg-green-50' },
+          { label: 'Pendientes', value: String(kpis?.enRevision || 0), desc: 'Requieren validación', color: 'text-amber-600', bg: 'bg-amber-50' },
+          { label: 'Con errores', value: String(kpis?.rechazados || 0), desc: 'Corregir antes de subir', color: 'text-red-600', bg: 'bg-red-50' },
         ].map((kpi, i) => (
           <div key={i} className={`p-5 rounded-2xl border border-slate-200 ${kpi.bg} shadow-sm flex flex-col justify-between`}>
             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2">{kpi.label}</span>

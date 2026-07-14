@@ -15,9 +15,9 @@ import { api } from '@/api/client';
 
 const JournalAudit = () => {
   const logs: any[] = [];
-  
   const [auditData, setAuditData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     const fetchAudit = async () => {
@@ -33,6 +33,32 @@ const JournalAudit = () => {
     };
     fetchAudit();
   }, []);
+
+  const handleExportLog = async () => {
+    try {
+      setIsExporting(true);
+      const token = localStorage.getItem('koda_token') || localStorage.getItem('sgd_token');
+      const baseUrl = (window.location.hostname.includes('.ts.net') || window.location.hostname.includes('cloudflare')) ? '/api-facturacion' : '/api';
+      const response = await fetch(`${baseUrl}/contabilidad/auditoria-ia`, {
+        headers: { 'Authorization': 'Bearer ' + (token || '') },
+      });
+      if (!response.ok) throw new Error('Error ' + response.status);
+      const data = await response.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `auditoria_forense_${new Date().toISOString().slice(0,10)}.json`);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode?.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Error exportando log:', err);
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   return (
     <div className="space-y-4 animate-in fade-in duration-500 pb-20">
@@ -55,8 +81,8 @@ const JournalAudit = () => {
              <button disabled className="bg-white text-slate-400 px-6 py-2 rounded-xl text-[10px] font-black uppercase border border-slate-200 flex items-center gap-2 cursor-not-allowed">
                 <Lock size={14} /> Solo Lectura
              </button>
-             <button className="bg-[#0b5156] text-white px-8 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all">
-                <Download size={14} /> Exportar Log SHA-256
+             <button onClick={handleExportLog} disabled={isExporting} className="bg-[#0b5156] text-white px-8 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all disabled:opacity-60">
+                <Download size={14} className={isExporting ? 'animate-bounce' : ''} /> {isExporting ? 'Exportando...' : 'Exportar Log SHA-256'}
              </button>
           </div>
         </div>
@@ -177,7 +203,7 @@ const JournalAudit = () => {
                <ShieldAlert size={24} className="text-white" />
             </div>
             <div className="space-y-1.5">
-               <h3 className="text-sm font-black uppercase tracking-tighter">Certificación Forense KODA</h3>
+               <h3 className="text-sm font-black text-white uppercase tracking-tighter">Certificación Forense KODA</h3>
                <p className="text-[10px] font-bold text-white/80 uppercase leading-relaxed max-w-4xl">
                   Este log es de <strong>solo lectura</strong> y no puede ser modificado ni eliminado, incluso por usuarios con privilegios administrativos. Cada entrada está encadenada mediante un hash criptográfico SHA-256 para garantizar la integridad de la prueba ante auditorías externas o procesos legales.
                </p>

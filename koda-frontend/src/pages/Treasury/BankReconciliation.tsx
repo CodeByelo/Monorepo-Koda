@@ -125,12 +125,12 @@ const BankReconciliation = () => {
         movimiento_id: selectedMov?.id,
         estado: 'Conciliado'
       });
-      alert('Movimiento conciliado exitosamente.');
+      showToast('Movimiento conciliado exitosamente.', 'success');
       setShowQuickReg(false);
       fetchData();
     } catch (error) {
       console.error("Error conciliando movimiento:", error);
-      alert('Error al conciliar.');
+      showToast('Error al conciliar.', 'error');
     }
   };
 

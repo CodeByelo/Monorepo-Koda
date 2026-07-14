@@ -57,6 +57,19 @@ class CuentaContable(Base):
     padre_codigo = Column(String(50), nullable=True)
 
 
+class MatrizIntegracion(Base):
+    __tablename__ = "matriz_integracion"
+    __table_args__ = {'schema': 'public'}
+
+    id = Column(Integer, primary_key=True, index=True)
+    evento = Column(String(100), unique=True, nullable=False)  # e.g. VENTA_CONTADO, IVA_DEBITO, etc.
+    cuenta_debe_codigo = Column(String(50), nullable=True)
+    cuenta_haber_codigo = Column(String(50), nullable=True)
+    activo = Column(Boolean, default=True, nullable=False)
+    ultima_modificacion = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    usuario_modificacion = Column(String(100), nullable=True)
+
+
 class CuentaPorCobrar(Base):
     __tablename__ = "cuentas_por_cobrar"
     __table_args__ = {'schema': 'public'}
@@ -298,7 +311,7 @@ class DeclaracionIVA(Base):
     tenant_id = Column(UUID(as_uuid=True))
 
     id = Column(Integer, primary_key=True, index=True)
-    periodo = Column(String(7), unique=True, index=True, nullable=False)
+    periodo = Column(String(7), index=True, nullable=False)
     debito_fiscal_usd = Column(Numeric(15, 2), default=0)
     credito_fiscal_mes_usd = Column(Numeric(15, 2), default=0)
     retenciones_usd = Column(Numeric(15, 2), default=0)
@@ -457,6 +470,8 @@ class CentroCosto(Base):
     codigo = Column(String(20), unique=True, nullable=False)
     nombre = Column(String(150), nullable=False)
     activo = Column(Boolean, default=True, nullable=False)
+    responsable = Column(String(150), nullable=True)
+    presupuesto = Column(Numeric(15, 2), nullable=True)
 
 
 class AuditoriaLog(Base):
@@ -881,3 +896,16 @@ class GastoCajaChica(Base):
     estado = Column(String(20), default="PROCESADO", nullable=False)
 
     fondo = relationship("FondoCajaChica")
+
+
+class TelegramCommand(Base):
+    __tablename__ = "telegram_commands"
+    __table_args__ = {'schema': 'public'}
+    tenant_id = Column(UUID(as_uuid=True))
+
+    id = Column(Integer, primary_key=True, index=True)
+    trigger_command = Column(String(50), nullable=False)
+    response_text = Column(Text, nullable=False)
+    internal_action = Column(String(100), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+

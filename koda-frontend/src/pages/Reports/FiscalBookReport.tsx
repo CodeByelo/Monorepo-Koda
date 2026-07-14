@@ -16,6 +16,7 @@ const FiscalBookReport = () => {
   const [periodo, setPeriodo] = useState(currentMonth);
   const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [modalMessage, setModalMessage] = useState<string | null>(null);
 
   useEffect(() => {
     fetchReportData();
@@ -47,11 +48,10 @@ const FiscalBookReport = () => {
 
   const handleDownloadPDF = async () => {
     try {
-      await api.get(`/reportes/fiscal/exportar?periodo=${periodo}&formato=pdf`);
-      alert("PDF Cifrado generado y descargado exitosamente.");
+      await api.download(`/reportes/fiscal/exportar?periodo=${periodo}&formato=pdf`, `reporte_fiscal_${periodo}.pdf`);
     } catch (error) {
       console.error("Error generating PDF:", error);
-      alert("Error al generar PDF.");
+      setModalMessage("Error al generar PDF.");
     }
   };
 
@@ -243,6 +243,35 @@ const FiscalBookReport = () => {
              </div>
           </div>
         </>
+      )}
+
+      {modalMessage && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 print:hidden">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-[#0b5156] p-4 text-white flex items-center justify-between">
+              <h3 className="text-xs font-black uppercase tracking-widest">Aviso del Sistema</h3>
+              <button 
+                onClick={() => setModalMessage(null)}
+                className="text-white/70 hover:text-white text-xs font-bold uppercase transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-slate-600 text-xs font-bold uppercase tracking-tight leading-relaxed">
+                {modalMessage}
+              </p>
+              <div className="flex justify-end gap-2">
+                <button 
+                  onClick={() => setModalMessage(null)}
+                  className="bg-[#0b5156] text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all"
+                >
+                  Aceptar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

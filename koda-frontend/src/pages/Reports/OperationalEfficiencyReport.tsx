@@ -13,6 +13,7 @@ import { api } from '@/api/client';
 const OperationalEfficiencyReport = () => {
   const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [modalMessage, setModalMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchEfficiency = async () => {
@@ -27,6 +28,19 @@ const OperationalEfficiencyReport = () => {
     };
     fetchEfficiency();
   }, []);
+
+  const handleExport = async () => {
+    try {
+      await api.download('/reportes/exportar?reporte=eficiencia', 'reporte_eficiencia_operativa.csv');
+    } catch (error) {
+      console.error("Error exporting efficiency:", error);
+      setModalMessage("Error al exportar reporte de eficiencia.");
+    }
+  };
+
+  const handleAdjustFixed = () => {
+    setModalMessage("Para ajustar los gastos fijos por sucursal, diríjase al Módulo de Configuración -> Parámetros Generales.");
+  };
 
   const metrics = data?.metrics || [];
 
@@ -51,10 +65,16 @@ const OperationalEfficiencyReport = () => {
             <p className="text-slate-500 text-xs font-bold uppercase tracking-tight">Monitor de sostenibilidad por sucursal. Ventas requeridas vs Gastos totales.</p>
           </div>
           <div className="flex gap-2">
-             <button className="bg-white text-slate-500 px-6 py-2 rounded-xl text-[10px] font-black uppercase border border-slate-200 hover:bg-slate-50 transition-all flex items-center gap-2">
+             <button 
+               onClick={handleAdjustFixed}
+               className="bg-white text-slate-500 px-6 py-2 rounded-xl text-[10px] font-black uppercase border border-slate-200 hover:bg-slate-50 transition-all flex items-center gap-2"
+             >
                 Ajustar Gastos Fijos
              </button>
-             <button className="bg-[#0b5156] text-white px-8 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all">
+             <button 
+               onClick={handleExport}
+               className="bg-[#0b5156] text-white px-8 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all"
+             >
                 <Download size={14} /> Exportar Plan de Viabilidad
              </button>
           </div>
@@ -146,6 +166,35 @@ const OperationalEfficiencyReport = () => {
             </p>
          </div>
       </div>
+
+      {modalMessage && (
+         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+           <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-200">
+             <div className="bg-[#0b5156] p-4 text-white flex items-center justify-between">
+               <h3 className="text-xs font-black uppercase tracking-widest">Aviso del Sistema</h3>
+               <button 
+                 onClick={() => setModalMessage(null)}
+                 className="text-white/70 hover:text-white text-xs font-bold uppercase transition-colors"
+               >
+                 ✕
+               </button>
+             </div>
+             <div className="p-6 space-y-4">
+               <p className="text-slate-600 text-xs font-bold uppercase tracking-tight leading-relaxed">
+                 {modalMessage}
+               </p>
+               <div className="flex justify-end gap-2">
+                 <button 
+                   onClick={() => setModalMessage(null)}
+                   className="bg-[#0b5156] text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all"
+                 >
+                   Aceptar
+                 </button>
+               </div>
+             </div>
+           </div>
+         </div>
+       )}
     </div>
   );
 };

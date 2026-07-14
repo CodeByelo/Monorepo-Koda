@@ -101,9 +101,14 @@ def _get_or_create_empresa(db: Session) -> Empresa:
         db.refresh(emp)
     return emp
 
+import os
+from fastapi import File, UploadFile
+import secrets
+
 @router.get("/empresa/perfil", dependencies=[Depends(role_required(['Admin']))])
 def obtener_perfil(db: Session = Depends(get_db)):
     emp = _get_or_create_empresa(db)
+    logo_exists = os.path.exists("backend/static/logo.png")
     return {
         "rif": emp.rif,
         "razon_social": emp.razon_social,
@@ -112,6 +117,7 @@ def obtener_perfil(db: Session = Depends(get_db)):
         "telefono": emp.telefono,
         "direccion": emp.direccion,
         "tipo_contribuyente": emp.tipo_contribuyente,
+        "logo_url": "/api/static/logo.png" if logo_exists else None,
     }
 
 @router.put("/empresa/perfil", dependencies=[Depends(role_required(['Admin']))])
@@ -136,9 +142,23 @@ def crear_sucursal(data: SucursalCreate, db: Session = Depends(get_db)):
     return s
 
 @router.post("/empresa/logo")
-def subir_logo():
-    return {"ok": True, "message": "Logo registrado"}
+async def subir_logo(file: UploadFile = File(...)):
+    os.makedirs("backend/static", exist_ok=True)
+    logo_path = "backend/static/logo.png"
+    with open(logo_path, "wb") as buffer:
+        buffer.write(await file.read())
+    return {"ok": True, "message": "Logo registrado exitosamente", "logo_url": "/api/static/logo.png"}
 
 @router.post("/empresa/api-tokens")
-def crear_token():
-    return {"ok": True, "token": "koda_dev_token"}
+def crear_token(current_user=Depends(role_required(['Admin']))):
+    secure_token = f"koda_live_{secrets.token_hex(24)}"
+    return {"ok": True, "token": secure_token}
+
+@router.delete("/empresa/logo")
+def eliminar_logo():
+    logo_path = "backend/static/logo.png"
+    if os.path.exists(logo_path):
+        os.remove(logo_path)
+        return {"ok": True, "message": "Logo eliminado exitosamente"}
+    else:
+        raise HTTPException(status_code=404, detail="No hay ningún logo registrado.")

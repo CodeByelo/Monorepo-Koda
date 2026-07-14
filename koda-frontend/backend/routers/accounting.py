@@ -29,7 +29,7 @@ def listar_asientos(
     limit = min(max(1, limit), 100)
     offset = max(0, offset)
 
-    q = db.query(AsientoContable)
+    q = db.query(AsientoContable).filter(AsientoContable.tenant_id == current_user.tenant_id)
     if fecha:
         try:
             dt = datetime.strptime(fecha, "%Y-%m-%d").date()
@@ -54,13 +54,17 @@ def listar_asientos(
     }
 
 @router.get("/asientos/exportar-pdf")
-def exportar_asientos_pdf(fecha: Optional[str] = None, db: Session = Depends(get_db)):
+def exportar_asientos_pdf(
+    fecha: Optional[str] = None, 
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
     from reportlab.lib.pagesizes import letter
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib import colors
 
-    q = db.query(AsientoContable)
+    q = db.query(AsientoContable).filter(AsientoContable.tenant_id == current_user.tenant_id)
     if fecha:
         try:
             dt = datetime.strptime(fecha, "%Y-%m-%d").date()
@@ -125,7 +129,10 @@ def obtener_asiento(
     """
     Obtiene el detalle de un asiento contable especifico por ID.
     """
-    asiento = db.query(AsientoContable).filter(AsientoContable.id == id).first()
+    asiento = db.query(AsientoContable).filter(
+        AsientoContable.id == id,
+        AsientoContable.tenant_id == current_user.tenant_id
+    ).first()
     if not asiento:
         raise HTTPException(status_code=404, detail="Asiento contable no encontrado")
     return asiento

@@ -30,6 +30,9 @@ import { api } from '@/api/client';
 // Interfaces para la respuesta del backend
 interface TelemetryData {
   gerencia_id: number;
+  nombre: string;
+  siglas: string | null;
+  categoria: string | null;
   volumen_actividad: number;
   friccion_porcentaje: number;
   tiempo_promedio_horas: number | null;
@@ -73,12 +76,55 @@ const DEFAULT_GERENCIA: GerenciaConfig = {
   glowColor: 'rgba(148, 163, 184, 0.4)'
 };
 
+function getInitials(name: string): string {
+  const safeName = name || 'Gerencia';
+  const clean = safeName.replace(/gerencia/i, '').replace(/nacional/i, '').replace(/de/i, '').replace(/la/i, '').replace(/y/i, '').trim();
+  const words = clean.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) {
+    return (words[0][0] + (words[1][0] || '')).toUpperCase();
+  }
+  return safeName.substring(0, 3).toUpperCase();
+}
+
+function getGerenciaConfig(id: number, name: string): GerenciaConfig {
+  const safeName = name || 'Gerencia';
+  const nameLower = safeName.toLowerCase();
+  
+  if (nameLower.includes('general')) return { name: safeName, acronym: 'GG', icon: Briefcase, color: '#3B82F6', glowColor: 'rgba(59, 130, 246, 0.4)' };
+  if (nameLower.includes('auditor')) return { name: safeName, acronym: 'AUD', icon: ShieldAlert, color: '#8B5CF6', glowColor: 'rgba(139, 92, 246, 0.4)' };
+  if (nameLower.includes('juríd') || nameLower.includes('jurid')) return { name: safeName, acronym: 'JUR', icon: Scale, color: '#06B6D4', glowColor: 'rgba(6, 182, 212, 0.4)' };
+  if (nameLower.includes('planific') || nameLower.includes('presup')) return { name: safeName, acronym: 'PLAN', icon: Target, color: '#EC4899', glowColor: 'rgba(236, 72, 153, 0.4)' };
+  if (nameLower.includes('administr')) return { name: safeName, acronym: 'ADM', icon: Landmark, color: '#0EA5E9', glowColor: 'rgba(14, 165, 233, 0.4)' };
+  if (nameLower.includes('gestión hum') || nameLower.includes('gestion hum') || nameLower.includes('personal') || nameLower.includes('recursos hum')) return { name: safeName, acronym: 'RRHH', icon: Users, color: '#F43F5E', glowColor: 'rgba(244, 63, 94, 0.4)' };
+  if (nameLower.includes('tecnolog') || nameLower.includes('tic') || nameLower.includes('comunic')) return { name: safeName, acronym: 'TIC', icon: Cpu, color: '#10B981', glowColor: 'rgba(16, 185, 129, 0.4)' };
+  if (nameLower.includes('proyect')) return { name: safeName, acronym: 'PROY', icon: Target, color: '#D97706', glowColor: 'rgba(217, 119, 6, 0.4)' };
+  if (nameLower.includes('adecuac') || nameLower.includes('mejor')) return { name: safeName, acronym: 'ADEC', icon: Settings, color: '#F97316', glowColor: 'rgba(249, 115, 22, 0.4)' };
+  if (nameLower.includes('asho') || nameLower.includes('seguridad lab')) return { name: safeName, acronym: 'ASHO', icon: Heart, color: '#EF4444', glowColor: 'rgba(239, 68, 68, 0.4)' };
+  if (nameLower.includes('atención') || nameLower.includes('atencion') || nameLower.includes('ciudadano')) return { name: safeName, acronym: 'ATC', icon: MessageSquare, color: '#EC4899', glowColor: 'rgba(236, 72, 153, 0.4)' };
+  if (nameLower.includes('comercial') || nameLower.includes('venta')) return { name: safeName, acronym: 'COM', icon: TrendingUp, color: '#6366F1', glowColor: 'rgba(99, 102, 241, 0.4)' };
+  if (nameLower.includes('energía') || nameLower.includes('energia') || nameLower.includes('eficienc')) return { name: safeName, acronym: 'EE', icon: Zap, color: '#F59E0B', glowColor: 'rgba(245, 158, 11, 0.4)' };
+  if (nameLower.includes('comun')) return { name: safeName, acronym: 'COMU', icon: Globe, color: '#A855F7', glowColor: 'rgba(168, 85, 247, 0.4)' };
+  if (nameLower.includes('operac')) return { name: safeName, acronym: 'OP', icon: Activity, color: '#EF4444', glowColor: 'rgba(239, 68, 68, 0.4)' };
+
+  const initials = getInitials(safeName);
+  const colorList = ['#3B82F6', '#8B5CF6', '#06B6D4', '#EC4899', '#0EA5E9', '#F43F5E', '#10B981', '#D97706', '#F97316', '#EF4444', '#6366F1', '#A855F7'];
+  const color = colorList[id % colorList.length];
+  
+  return {
+    name: safeName,
+    acronym: initials,
+    icon: HelpCircle,
+    color,
+    glowColor: `${color}66`
+  };
+}
+
 // Componente para la cabecera de la red analítica
 const NetworkHeader = ({ loading, onRefresh }: { loading: boolean; onRefresh: () => void }) => (
-  <header className="bg-[#0B0B14]/85 border border-[#1E1E38]/60 backdrop-blur-xl p-6 rounded-3xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-[0_4px_30px_rgba(0,0,0,0.4)]">
+  <header className="bg-[#0A0A0F]/85 border border-slate-800 backdrop-blur-xl p-6 rounded-3xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-[0_4px_30px_rgba(0,0,0,0.4)]">
     <div className="space-y-1">
-      <div className="bg-[#10B981]/10 px-3 py-1 rounded-full w-fit mb-2 border border-[#10B981]/30">
-        <span className="text-[9px] font-black text-[#10B981] uppercase tracking-widest flex items-center gap-1.5">
+      <div className="bg-[#0b5156]/10 px-3 py-1 rounded-full w-fit mb-2 border border-[#0b5156]/30">
+        <span className="text-[9px] font-black text-[#0b5156] uppercase tracking-widest flex items-center gap-1.5">
           <Activity size={10} className="animate-pulse" /> Telemetría Pasiva en Tiempo Real
         </span>
       </div>
@@ -90,14 +136,14 @@ const NetworkHeader = ({ loading, onRefresh }: { loading: boolean; onRefresh: ()
       <button 
         onClick={onRefresh}
         disabled={loading}
-        className="flex items-center gap-2 bg-[#1E1E38]/80 text-white border border-[#2D2D54]/80 px-4 py-2.5 rounded-xl font-bold text-xs hover:bg-[#2D2D54] transition-all duration-300 disabled:opacity-50 active:scale-95 text-slate-300"
+        className="flex items-center gap-2 bg-[#112224]/80 text-white border border-[#162c2d]/80 px-4 py-2.5 rounded-xl font-bold text-xs hover:bg-[#162c2d] transition-all duration-300 disabled:opacity-50 active:scale-95 text-slate-300"
       >
         <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
         Sincronizar
       </button>
       <Link 
         to="/" 
-        className="flex items-center gap-2 bg-[#10B981] text-black px-4 py-2.5 rounded-xl font-black text-xs hover:bg-[#0D9488] transition-all duration-300 shadow-[0_0_15px_rgba(16,185,129,0.3)] active:scale-95"
+        className="flex items-center gap-2 bg-[#0b5156] text-white px-4 py-2.5 rounded-xl font-black text-xs hover:bg-[#083a3e] border border-[#0b5156]/50 transition-all duration-300 shadow-[0_0_15px_rgba(11,81,86,0.3)] active:scale-95"
       >
         Volver al Panel
       </Link>
@@ -154,7 +200,7 @@ export default function OmniscienceDashboard() {
 
   // Mapeamos la respuesta al grafo
   const mappedNodes = data.map((item, index) => {
-    const config = GERENCIA_MAP[item.gerencia_id] || DEFAULT_GERENCIA;
+    const config = getGerenciaConfig(item.gerencia_id, item.nombre);
     const angle = (index / data.length) * 2 * Math.PI - Math.PI / 2; // Iniciar arriba
     const x = centerX + radiusX * Math.cos(angle);
     const y = centerY + radiusY * Math.sin(angle);
@@ -166,7 +212,7 @@ export default function OmniscienceDashboard() {
       
       {/* Background neon glows */}
       <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-emerald-950/10 rounded-full blur-3xl pointer-events-none"></div>
-      <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-red-950/10 rounded-full blur-3xl pointer-events-none"></div>
+      <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-emerald-950/5 rounded-full blur-3xl pointer-events-none"></div>
 
       <NetworkHeader loading={loading} onRefresh={fetchTelemetry} />
 
@@ -177,14 +223,14 @@ export default function OmniscienceDashboard() {
           <p className="text-slate-400 font-bold text-xs uppercase max-w-md mx-auto">{error}</p>
           <button 
             onClick={fetchTelemetry}
-            className="bg-red-600 hover:bg-red-700 text-white font-black px-6 py-2.5 rounded-xl uppercase text-xs tracking-wider transition-all duration-300"
+            className="bg-[#0b5156] hover:bg-[#083a3e] border border-[#0b5156]/50 text-white font-black px-6 py-2.5 rounded-xl uppercase text-xs tracking-wider transition-all duration-300"
           >
             Reintentar Conexión
           </button>
         </div>
       ) : loading ? (
         <div className="flex flex-col justify-center items-center flex-1 space-y-4 min-h-[50vh] z-10">
-          <div className="w-12 h-12 border-4 border-[#10B981] border-t-transparent rounded-full animate-spin"></div>
+          <div className="w-12 h-12 border-4 border-[#0b5156] border-t-transparent rounded-full animate-spin"></div>
           <div className="text-center text-emerald-400 font-bold text-xs uppercase tracking-widest animate-pulse">
             Mapeando Red del Ledger Inmutable...
           </div>
@@ -193,7 +239,7 @@ export default function OmniscienceDashboard() {
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-4 gap-6 relative z-10 items-stretch">
           
           {/* TOPOLOGÍA NETWORK CONTAINER */}
-          <div className="lg:col-span-3 bg-[#0B0B14]/85 border border-[#1E1E38]/60 backdrop-blur-xl rounded-3xl shadow-[0_4px_30px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col justify-between min-h-[600px] relative">
+          <div className="lg:col-span-3 bg-[#0A0A0F]/85 border border-slate-800 backdrop-blur-xl rounded-3xl shadow-[0_4px_30px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col justify-between min-h-[600px] relative">
             
             {/* Visual indicators */}
             <div className="absolute top-4 left-6 flex gap-4 text-[9px] font-black uppercase tracking-widest text-slate-400">
@@ -247,7 +293,7 @@ export default function OmniscienceDashboard() {
                         y1={centerY} 
                         x2={node.x} 
                         y2={node.y} 
-                        stroke="#1E1E38" 
+                        stroke="#162c2d" 
                         strokeWidth="1.5" 
                         strokeOpacity="0.4"
                       />
@@ -280,13 +326,13 @@ export default function OmniscienceDashboard() {
                     <animate attributeName="r" values="45;55;45" dur="4s" repeatCount="indefinite" />
                     <animate attributeName="stroke-opacity" values="0.2;0.05;0.2" dur="4s" repeatCount="indefinite" />
                   </circle>
-                  <circle r="36" fill="#0A0A0F" stroke="#10B981" strokeWidth="2.5" filter="url(#glow-emerald)" />
+                  <circle r="36" fill="#0A0A0F" stroke="#0b5156" strokeWidth="2.5" filter="url(#glow-emerald)" />
                   <foreignObject x="-20" y="-20" width="40" height="40">
                     <div className="w-full h-full flex items-center justify-center text-emerald-400">
                       <ShieldAlert size={24} className="animate-pulse" />
                     </div>
                   </foreignObject>
-                  <text y="55" textAnchor="middle" fill="#10B981" className="text-[10px] font-black uppercase tracking-widest font-mono">Ledger Core</text>
+                  <text y="55" textAnchor="middle" fill="#0b5156" className="text-[10px] font-black uppercase tracking-widest font-mono">Ledger Core</text>
                 </g>
 
                 {/* NODOS DE GERENCIAS */}
@@ -324,7 +370,7 @@ export default function OmniscienceDashboard() {
                       {/* Main Node Circle */}
                       <circle 
                         r="22" 
-                        fill={isSelected ? '#14142B' : '#0B0B14'} 
+                        fill={isSelected ? '#112224' : '#0A0A0F'} 
                         stroke={getStrokeColor(node.estado_salud)} 
                         strokeWidth={isSelected ? 3 : 1.5} 
                         filter={getGlowFilter(node.estado_salud)}
@@ -346,7 +392,7 @@ export default function OmniscienceDashboard() {
                           width="36" 
                           height="14" 
                           rx="4" 
-                          fill="#1E1E38" 
+                          fill="#0b5156" 
                           stroke={node.config.color} 
                           strokeWidth="0.5"
                           opacity="0.9"
@@ -377,21 +423,21 @@ export default function OmniscienceDashboard() {
             </div>
             
             {/* Footer indicators */}
-            <div className="p-6 border-t border-[#1E1E38]/60 bg-[#07070D] flex justify-between items-center text-[10px] font-black uppercase text-slate-500 tracking-wider">
+            <div className="p-6 border-t border-slate-800 bg-[#07070D] flex justify-between items-center text-[10px] font-black uppercase text-slate-550 tracking-wider">
               <span>Auditoría Interna Activa</span>
               <span>Koda ERP Enterprise Edition v2.0</span>
             </div>
           </div>
 
           {/* SIDEBAR DETALLE DE NODO (Glassmorphism panel) */}
-          <div className="bg-[#0B0B14]/85 border border-[#1E1E38]/60 backdrop-blur-xl rounded-3xl p-6 shadow-[0_4px_30px_rgba(0,0,0,0.5)] flex flex-col justify-between min-h-[600px] z-10 relative">
+          <div className="bg-[#0A0A0F]/85 border border-slate-800 backdrop-blur-xl rounded-3xl p-6 shadow-[0_4px_30px_rgba(0,0,0,0.5)] flex flex-col justify-between min-h-[600px] z-10 relative">
             {selectedNode ? (
               <div className="space-y-6 flex-1 flex flex-col justify-between">
                 
                 {/* Node info header */}
                 <div className="space-y-4">
                   <div className="flex justify-between items-start">
-                    <div className="bg-[#1E1E38] px-3 py-1 rounded-full border border-[#2D2D54]">
+                    <div className="bg-[#112224] px-3 py-1 rounded-full border border-[#162c2d]">
                       <span className="text-[9px] font-mono font-black tracking-widest text-white">ID: {selectedNode.gerencia_id}</span>
                     </div>
                     <button 
@@ -403,76 +449,76 @@ export default function OmniscienceDashboard() {
                   </div>
 
                   <div className="flex items-center gap-3">
-                    <div className="p-3 rounded-2xl bg-[#1E1E38]" style={{ border: `1.5px solid ${selectedNode.config.color}` }}>
-                      {React.createElement(selectedNode.config.icon, { size: 20, style: { color: selectedNode.config.color } })}
+                    <div className="p-2 rounded-xl bg-[#112224] shrink-0" style={{ border: `1.5px solid ${selectedNode.config.color}` }}>
+                      {React.createElement(selectedNode.config.icon, { size: 18, style: { color: selectedNode.config.color } })}
                     </div>
-                    <div>
-                      <h2 className="text-lg font-black leading-tight tracking-tight text-white">{selectedNode.config.name}</h2>
-                      <p className="text-[9px] font-bold uppercase text-slate-400 tracking-wider mt-0.5">Categoría: Operativa</p>
+                    <div className="min-w-0">
+                      <h2 className="text-sm font-black leading-tight tracking-tight text-white break-words">{selectedNode.config.name}</h2>
+                      <p className="text-[8px] font-bold uppercase text-slate-400 tracking-wider mt-0.5">Categoría: {selectedNode.categoria || 'Operativa'}</p>
                     </div>
                   </div>
                   
                   {/* Health status indicator card */}
-                  <div className={`p-4 rounded-2xl border flex items-center justify-between bg-white/[0.02] ${getHealthBorderClass(selectedNode.estado_salud)}`}>
+                  <div className={`p-3 rounded-xl border flex items-center justify-between bg-white/[0.01] ${getHealthBorderClass(selectedNode.estado_salud)}`}>
                     <div className="space-y-0.5">
-                      <p className="text-[9px] font-black uppercase text-slate-500 tracking-widest">Salud Operativa</p>
-                      <p className="text-sm font-black uppercase tracking-tight text-white">{selectedNode.estado_salud}</p>
+                      <p className="text-[8px] font-black uppercase text-slate-500 tracking-widest">Salud Operativa</p>
+                      <p className="text-xs font-black uppercase tracking-tight text-white">{selectedNode.estado_salud}</p>
                     </div>
-                    {selectedNode.estado_salud === 'Optimo' && <CheckCircle size={22} className="text-emerald-500" />}
-                    {selectedNode.estado_salud === 'Advertencia' && <AlertTriangle size={22} className="text-amber-500 animate-pulse" />}
-                    {selectedNode.estado_salud === 'Critico' && <ShieldAlert size={22} className="text-red-500 animate-bounce" />}
+                    {selectedNode.estado_salud === 'Optimo' && <CheckCircle size={18} className="text-emerald-500" />}
+                    {selectedNode.estado_salud === 'Advertencia' && <AlertTriangle size={18} className="text-amber-500 animate-pulse" />}
+                    {selectedNode.estado_salud === 'Critico' && <ShieldAlert size={18} className="text-red-500 animate-bounce" />}
                   </div>
                 </div>
 
                 {/* Metrics Breakdown */}
-                <div className="space-y-4 my-auto">
+                <div className="space-y-3 my-auto">
                   
-                  <div className="bg-white/[0.02] border border-[#1E1E38] p-4 rounded-2xl space-y-1">
-                    <div className="flex justify-between items-center text-[9px] font-black uppercase text-slate-400 tracking-wider">
-                      <span>Volumen de Actividad</span>
-                      <FileText size={12} className="text-blue-400" />
+                  <div className="bg-white/[0.01] border border-[#162c2d] p-3 rounded-xl space-y-1">
+                    <div className="flex justify-between items-center text-[8px] font-black uppercase text-slate-400 tracking-wider">
+                      <span>Actividad Real</span>
+                      <FileText size={10} className="text-emerald-400" />
                     </div>
-                    <h4 className="text-2xl font-black text-white tracking-tight">{selectedNode.volumen_actividad}</h4>
-                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-tight">Eventos registrados en los últimos 30 días</p>
+                    <h4 className="text-xl font-black text-white tracking-tight">{selectedNode.volumen_actividad} eventos</h4>
+                    <p className="text-[8px] font-bold text-slate-550 uppercase tracking-tight">Últimos 30 días</p>
                   </div>
 
-                  <div className="bg-white/[0.02] border border-[#1E1E38] p-4 rounded-2xl space-y-1">
-                    <div className="flex justify-between items-center text-[9px] font-black uppercase text-slate-400 tracking-wider">
-                      <span>Índice de Fricción</span>
-                      <AlertTriangle size={12} className="text-amber-400" />
+                  <div className="bg-white/[0.01] border border-[#162c2d] p-3 rounded-xl space-y-1">
+                    <div className="flex justify-between items-center text-[8px] font-black uppercase text-slate-400 tracking-wider">
+                      <span>Fricción Operativa</span>
+                      <AlertTriangle size={10} className="text-amber-400" />
                     </div>
-                    <h4 className="text-2xl font-black text-white tracking-tight">{selectedNode.friccion_porcentaje}%</h4>
-                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-tight">Eventos de severidad Warning/Critical</p>
+                    <h4 className="text-xl font-black text-white tracking-tight">{selectedNode.friccion_porcentaje}%</h4>
+                    <p className="text-[8px] font-bold text-slate-550 uppercase tracking-tight">Anomalías detectadas</p>
                   </div>
 
-                  <div className="bg-white/[0.02] border border-[#1E1E38] p-4 rounded-2xl space-y-1">
-                    <div className="flex justify-between items-center text-[9px] font-black uppercase text-slate-400 tracking-wider">
-                      <span>Tiempo Promedio Resol.</span>
-                      <Clock size={12} className="text-emerald-400" />
+                  <div className="bg-white/[0.01] border border-[#162c2d] p-3 rounded-xl space-y-1">
+                    <div className="flex justify-between items-center text-[8px] font-black uppercase text-slate-400 tracking-wider">
+                      <span>Tiempo Promedio</span>
+                      <Clock size={10} className="text-emerald-400" />
                     </div>
-                    <h4 className="text-2xl font-black text-white tracking-tight">
+                    <h4 className="text-xl font-black text-white tracking-tight">
                       {selectedNode.tiempo_promedio_horas !== null 
                         ? `${selectedNode.tiempo_promedio_horas} hrs` 
                         : 'N/D'}
                     </h4>
-                    <p className="text-[9px] font-bold text-slate-500 uppercase tracking-tight">Intervalo ticket.creado &rarr; ticket.cerrado</p>
+                    <p className="text-[8px] font-bold text-slate-550 uppercase tracking-tight">Resolución promedio</p>
                   </div>
 
                 </div>
 
                 {/* Advice or system recommendation based on health */}
-                <div className="bg-[#1E1E38]/50 border border-[#2D2D54] p-4 rounded-2xl text-[10px] leading-relaxed text-slate-300 font-bold uppercase tracking-wide">
-                  <span className="text-[#10B981] font-black block mb-1">Diagnóstico del Búnker:</span>
-                  {selectedNode.estado_salud === 'Optimo' && 'Operaciones fluidas. La tasa de incidentes es baja y los tiempos de resolución se mantienen óptimos. No se requiere intervención.'}
-                  {selectedNode.estado_salud === 'Advertencia' && 'Se detecta incremento moderado de anomalías o cuellos de botella en la resolución. Monitorear los canales de soporte.'}
-                  {selectedNode.estado_salud === 'Critico' && 'ALERTA DE SEGURIDAD OPERACIONAL: Alto volumen de eventos de fricción o tiempos excesivos. Se sugiere revisión inmediata de la gerencia.'}
+                <div className="bg-[#112224]/50 border border-[#162c2d] p-3 rounded-xl text-[9px] leading-relaxed text-slate-350 font-bold uppercase tracking-wide">
+                  <span className="text-[#0b5156] font-black block mb-1">Diagnóstico del Búnker:</span>
+                  {selectedNode.estado_salud === 'Optimo' && 'Operaciones estables. Todo fluye de manera óptima.'}
+                  {selectedNode.estado_salud === 'Advertencia' && 'Se sugiere monitoreo por incremento leve de fricción.'}
+                  {selectedNode.estado_salud === 'Critico' && 'Revisión inmediata: Alta tasa de eventos de fricción.'}
                 </div>
 
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center flex-1 text-center p-6 space-y-4">
-                <div className="p-4 rounded-3xl bg-[#1E1E38]/50 border border-[#2D2D54] text-slate-400">
-                  <Activity size={32} className="animate-pulse" />
+                <div className="p-4 rounded-3xl bg-[#112224]/50 border border-[#162c2d] text-slate-450">
+                  <Activity size={32} className="animate-pulse text-[#0b5156]" />
                 </div>
                 <h3 className="text-sm font-black uppercase tracking-wider text-slate-300">Seleccione un Nodo</h3>
                 <p className="text-[10px] text-slate-500 font-black uppercase max-w-[200px]">Haga clic en cualquiera de las gerencias de la red para desplegar su telemetría detallada en este panel.</p>

@@ -43,6 +43,46 @@ def principal_dashboard(db: Session = Depends(get_db)):
     ventas_mes = ventas_periodo(db, datetime.now(timezone.utc).strftime("%Y-%m")).all()
     utilidad = sum(to_float(v.subtotal) for v in ventas_mes) * 0.25
     tasa = tasa_actual(db)
+
+    # ── Resumen 7 días reales ──────────────────────────────────────────────────
+    desde_7d = datetime.now(timezone.utc) - timedelta(days=7)
+    ventas_7d = db.query(Venta).filter(Venta.fecha >= desde_7d, Venta.estado == "ACTIVA").all()
+    ingresos_7d = sum(to_float(v.total) for v in ventas_7d)
+    max_ingreso = max(ingresos_7d, 1)
+
+    from backend.models.operations import AjusteInventario
+    compras_7d = db.query(AjusteInventario).filter(
+        AjusteInventario.fecha_solicitud >= desde_7d,
+        AjusteInventario.estado == "APROBADO"
+    ).all()
+    egresos_7d = sum(to_float(getattr(aj, 'costo_total', None) or 0) for aj in compras_7d)
+
+    # ── Alertas reales ────────────────────────────────────────────────────────
+    criticos = db.query(Producto).filter(Producto.stock <= Producto.stock_minimo).count() if hasattr(Producto, 'stock_minimo') else 0
+    mora_count = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.estado == "VENCIDA").count()
+    mora_monto = db.query(func.sum(CuentaPorCobrar.monto_total_usd - CuentaPorCobrar.monto_pagado_usd)).filter(
+        CuentaPorCobrar.estado == "VENCIDA"
+    ).scalar() or 0
+
+    # ── Últimas transacciones reales ──────────────────────────────────────────
+    from backend.models.erp_extended import CuentaPorCobrar as CPC
+    from backend.models.operations import Cliente
+    ultimas_ventas = db.query(Venta).filter(Venta.estado == "ACTIVA").order_by(Venta.fecha.desc()).limit(3).all()
+    ultimas_txs = []
+    # Fix N+1: solo cargamos los clientes de esas 3 ventas, no toda la tabla
+    venta_cliente_ids = [v.cliente_id for v in ultimas_ventas if v.cliente_id]
+    if venta_cliente_ids:
+        clientes_map = {c.id: c.nombre for c in db.query(Cliente).filter(Cliente.id.in_(venta_cliente_ids)).all()}
+    else:
+        clientes_map = {}
+    for v in ultimas_ventas:
+        nombre_cliente = clientes_map.get(v.cliente_id, "Consumidor Final")
+        ultimas_txs.append({
+            "text": f"Factura {v.numero_factura}",
+            "sub": f"{nombre_cliente} · ${to_float(v.total):.2f}",
+            "tipo": "ingreso"
+        })
+
     return {
         "tasa_bcv": tasa,
         "kpis": [
@@ -51,7 +91,18 @@ def principal_dashboard(db: Session = Depends(get_db)):
             {"label": "Valor del Inventario", "value": _fmt_money(to_float(valor_inv)), "desc": "Costo Promedio Ponderado"},
             {"label": "Utilidad Neta (Mes)", "value": _fmt_money(utilidad), "desc": "P&G Consolidado"},
         ],
-        "alertas": [],
+        "resumen_operaciones": {
+            "ingresos": ingresos_7d,
+            "ingresos_pct": min(round((ingresos_7d / max(ingresos_7d + egresos_7d, 1)) * 100), 100),
+            "egresos": egresos_7d,
+            "egresos_pct": min(round((egresos_7d / max(ingresos_7d + egresos_7d, 1)) * 100), 100),
+        },
+        "alertas": {
+            "criticos_count": criticos,
+            "mora_count": mora_count,
+            "mora_monto": to_float(mora_monto),
+        },
+        "ultimas_txs": ultimas_txs,
     }
 
 
@@ -120,22 +171,28 @@ class NotaCreditoCreate(BaseModel):
 
 
 @router.post("/ventas/notas-credito")
-def crear_nota_credito(payload: NotaCreditoCreate, db: Session = Depends(get_db)):
-    venta = db.query(Venta).filter(Venta.numero_factura == payload.numero_factura).first()
+def crear_nota_credito(payload: NotaCreditoCreate, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    venta = db.query(Venta).filter(
+        Venta.numero_factura == payload.numero_factura,
+        Venta.tenant_id == current_user.tenant_id
+    ).first()
     if not venta:
-        raise HTTPException(status_code=404, detail=f"Factura {payload.numero_factura} no encontrada.")
+        raise HTTPException(status_code=404, detail=f"Factura {payload.numero_factura} no encontrada en su organización.")
 
-    clientes = db.query(Cliente).all()
+    clientes = db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).all()
     if not clientes:
         raise HTTPException(status_code=400, detail="Debe registrar al menos un cliente en el sistema.")
 
-    cxc = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.venta_id == venta.id).first()
+    cxc = db.query(CuentaPorCobrar).filter(
+        CuentaPorCobrar.venta_id == venta.id,
+        CuentaPorCobrar.tenant_id == current_user.tenant_id
+    ).first()
     if cxc:
         cliente_id = cxc.cliente_id
     else:
         cliente_id = clientes[0].id
 
-    cant_notas = db.query(NotaCredito).count()
+    cant_notas = db.query(NotaCredito).filter(NotaCredito.tenant_id == current_user.tenant_id).count()
     tipo_str = payload.tipo.upper() if payload.tipo else "CREDITO"
     # Determinar prefijo según tipo de nota
     prefijo = "ND" if "DEBIT" in tipo_str else "NC"
@@ -152,7 +209,8 @@ def crear_nota_credito(payload: NotaCreditoCreate, db: Session = Depends(get_db)
         motivo=payload.motivo,
         tipo="DEBITO" if "DEBIT" in tipo_str else "CREDITO",
         estado="EMITIDA",
-        fecha=datetime.now(timezone.utc)
+        fecha=datetime.now(timezone.utc),
+        tenant_id=current_user.tenant_id
     )
     db.add(nota)
 
@@ -428,19 +486,138 @@ def cerrar_conteo(conteo_id: int, db: Session = Depends(get_db)):
     return {"message": "Conteo conciliado y stock actualizado correctamente"}
 
 
+class CentroCostoCreate(BaseModel):
+    codigo: str
+    nombre: str
+    responsable: Optional[str] = None
+    presupuesto: Optional[float] = None
+
+class CentroCostoUpdate(BaseModel):
+    nombre: Optional[str] = None
+    responsable: Optional[str] = None
+    presupuesto: Optional[float] = None
+    activo: Optional[bool] = None
+
+@router.get("/contabilidad/centros-costo/exportar")
+def exportar_centros_costo(db: Session = Depends(get_db)):
+    """Exporta los centros de costo en formato CSV compatible con Excel."""
+    import io
+    import csv
+    from fastapi.responses import StreamingResponse
+    from backend.models.erp_extended import CentroCosto
+
+    centros = db.query(CentroCosto).order_by(CentroCosto.codigo).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=';')
+    
+    # Escribir cabecera
+    writer.writerow(["ID", "CODIGO", "NOMBRE DESCRIPTIVO", "RESPONSABLE ASIGNADO", "PRESUPUESTO ASIGNADO (USD)"])
+    
+    # Escribir filas
+    for cc in centros:
+        presupuesto = float(cc.presupuesto) if cc.presupuesto else 0.0
+        writer.writerow([
+            cc.id,
+            cc.codigo or "",
+            cc.nombre or "",
+            cc.responsable or "Gerencia General",
+            f"{presupuesto:.2f}"
+        ])
+        
+    output.seek(0)
+    filename = "Matriz-Centros-Costo.csv"
+    
+    # Codificar en UTF-8 con BOM para que Excel en español lo lea perfectamente
+    content = "\ufeff" + output.getvalue()
+    
+    return StreamingResponse(
+        io.BytesIO(content.encode('utf-8-sig')),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
 @router.get("/contabilidad/centros-costo")
-def centros_costo(db: Session = Depends(get_db)):
-    return db.query(CentroCosto).filter(CentroCosto.activo == True).all()
+def centros_costo(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    return db.query(CentroCosto).filter(
+        CentroCosto.activo == True,
+        CentroCosto.tenant_id == current_user.tenant_id
+    ).all()
+
+@router.post("/contabilidad/centros-costo")
+def crear_centro_costo(body: CentroCostoCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    existing = db.query(CentroCosto).filter(
+        CentroCosto.codigo == body.codigo,
+        CentroCosto.tenant_id == current_user.tenant_id
+    ).first()
+    if existing:
+        raise HTTPException(400, detail=f"Ya existe un centro de costo con el código {body.codigo}")
+    
+    centro = CentroCosto(
+        codigo=body.codigo,
+        nombre=body.nombre,
+        responsable=body.responsable,
+        presupuesto=body.presupuesto,
+        activo=True,
+        tenant_id=current_user.tenant_id
+    )
+    db.add(centro)
+    db.commit()
+    db.refresh(centro)
+    return centro
+
+@router.put("/contabilidad/centros-costo/{id}")
+def actualizar_centro_costo(id: int, body: CentroCostoUpdate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    centro = db.query(CentroCosto).filter(
+        CentroCosto.id == id,
+        CentroCosto.tenant_id == current_user.tenant_id
+    ).first()
+    if not centro:
+        raise HTTPException(404, detail="Centro de costo no encontrado")
+    
+    if body.nombre is not None:
+        centro.nombre = body.nombre
+    if body.responsable is not None:
+        centro.responsable = body.responsable
+    if body.presupuesto is not None:
+        centro.presupuesto = body.presupuesto
+    if body.activo is not None:
+        centro.activo = body.activo
+        
+    db.commit()
+    db.refresh(centro)
+    return centro
+
+@router.delete("/contabilidad/centros-costo/{id}")
+def eliminar_centro_costo(id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    centro = db.query(CentroCosto).filter(
+        CentroCosto.id == id,
+        CentroCosto.tenant_id == current_user.tenant_id
+    ).first()
+    if not centro:
+        raise HTTPException(404, detail="Centro de costo no encontrado")
+        
+    used = db.query(AsientoDetalle).join(AsientoContable).filter(
+        AsientoDetalle.centro_costo == centro.codigo,
+        AsientoContable.tenant_id == current_user.tenant_id
+    ).first()
+    if used:
+        raise HTTPException(400, detail="No se puede eliminar el centro de costo porque tiene transacciones registradas.")
+        
+    db.delete(centro)
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/contabilidad/libro-diario", response_model=PaginatedLibroDiarioResponse)
-def libro_diario(limit: int = 50, offset: int = 0, db: Session = Depends(get_db)):
+def libro_diario(limit: int = 50, offset: int = 0, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     from backend.models.accounting import AsientoDetalle
     limit = min(max(1, limit), 100)
     offset = max(0, offset)
 
-    total_records = db.query(AsientoContable).count()
-    asientos = db.query(AsientoContable).order_by(AsientoContable.fecha.desc()).offset(offset).limit(limit).all()
+    total_records = db.query(AsientoContable).filter(AsientoContable.tenant_id == current_user.tenant_id).count()
+    asientos = db.query(AsientoContable).filter(AsientoContable.tenant_id == current_user.tenant_id).order_by(AsientoContable.fecha.desc()).offset(offset).limit(limit).all()
     data = []
     for a in asientos:
         lines = []
@@ -469,8 +646,11 @@ def libro_diario(limit: int = 50, offset: int = 0, db: Session = Depends(get_db)
 
 
 @router.get("/contabilidad/ajuste-inflacion")
-def ajuste_inflacion(db: Session = Depends(get_db)):
-    productos = db.query(Producto).filter(Producto.stock > 0).all()
+def ajuste_inflacion(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    productos = db.query(Producto).filter(
+        Producto.stock > 0,
+        Producto.tenant_id == current_user.tenant_id
+    ).all()
     tasa = Decimal(str(tasa_actual(db)))
     
     # Obtener el INPC de cierre (Mayo 2026 = 124.0)
@@ -478,10 +658,6 @@ def ajuste_inflacion(db: Session = Depends(get_db)):
     inpc_cierre = Decimal(str(inpc_cierre_obj.indice)) if inpc_cierre_obj else Decimal("124.0000")
     
     # Mapeo de meses de adquisición simulados para los productos
-    # producto_id % 3 asigna diferentes fechas de adquisición:
-    # 0 -> Octubre 2025 (INPC: 100.0)
-    # 1 -> Diciembre 2025 (INPC: 107.2)
-    # 2 -> Marzo 2026 (INPC: 117.3)
     meses_origen = {
         0: (2025, 10, "Octubre 2025"),
         1: (2025, 12, "Diciembre 2025"),
@@ -543,10 +719,10 @@ def ajuste_inflacion(db: Session = Depends(get_db)):
 
 
 @router.post("/contabilidad/ajuste-inflacion/ejecutar")
-def ejecutar_ajuste_inflacion(body: dict, db: Session = Depends(get_db)):
+def ejecutar_ajuste_inflacion(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     periodo = body.get("periodo", "2026-05")
-    # Calcular los montos reales del ajuste
-    data = ajuste_inflacion(db)
+    # Calcular los montos reales del ajuste (pasando current_user)
+    data = ajuste_inflacion(db, current_user)
     total_axi = Decimal(str(data["totales"]["axi"]))
     
     if total_axi <= 0:
@@ -558,6 +734,7 @@ def ejecutar_ajuste_inflacion(body: dict, db: Session = Depends(get_db)):
         referencia=f"AXI-{periodo.replace('-', '')}",
         total_debe=total_axi,
         total_haber=total_axi,
+        tenant_id=current_user.tenant_id,
         detalles=[
             AsientoDetalle(
                 cuenta_codigo="1.1.03", 
@@ -687,8 +864,8 @@ def conceptos_islr():
 
 
 @router.get("/tesoreria/transferencias-internas")
-def transferencias_internas(db: Session = Depends(get_db)):
-    rows = db.query(TransferenciaTesoreria).order_by(TransferenciaTesoreria.fecha.desc()).limit(30).all()
+def transferencias_internas(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    rows = db.query(TransferenciaTesoreria).filter(TransferenciaTesoreria.tenant_id == current_user.tenant_id).order_by(TransferenciaTesoreria.fecha.desc()).limit(30).all()
     return [
         {
             "id": f"TRF-{str(t.id).zfill(4)}", 
@@ -709,8 +886,8 @@ def transferencias_internas(db: Session = Depends(get_db)):
 
 
 @router.get("/tesoreria/cuentas")
-def obtener_cuentas(db: Session = Depends(get_db)):
-    cuentas = db.query(CuentaBancaria).filter(CuentaBancaria.activa == True).all()
+def obtener_cuentas(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    cuentas = db.query(CuentaBancaria).filter(CuentaBancaria.activa == True, CuentaBancaria.tenant_id == current_user.tenant_id).all()
     return [
         {
             "id": c.id,
@@ -724,11 +901,11 @@ def obtener_cuentas(db: Session = Depends(get_db)):
 
 
 @router.get("/tesoreria/flujo-caja")
-def obtener_flujo_caja(db: Session = Depends(get_db)):
+def obtener_flujo_caja(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     from backend.models.erp_extended import CuentaPorCobrar, CuentaPorPagar
     
-    cxc = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.estado == "PENDIENTE").all()
-    cxp = db.query(CuentaPorPagar).filter(CuentaPorPagar.estado == "PENDIENTE").all()
+    cxc = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.estado == "PENDIENTE", CuentaPorCobrar.tenant_id == current_user.tenant_id).all()
+    cxp = db.query(CuentaPorPagar).filter(CuentaPorPagar.estado == "PENDIENTE", CuentaPorPagar.tenant_id == current_user.tenant_id).all()
     
     proyecciones = []
     
@@ -776,11 +953,11 @@ def obtener_flujo_caja(db: Session = Depends(get_db)):
 
 
 @router.get("/tesoreria/turnos")
-def obtener_auditoria_turnos(db: Session = Depends(get_db)):
+def obtener_auditoria_turnos(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     import json
     from backend.models.erp_extended import AuditoriaLog
     
-    logs = db.query(AuditoriaLog).filter(AuditoriaLog.accion == "CIERRE_ARQUEO").all()
+    logs = db.query(AuditoriaLog).filter(AuditoriaLog.accion == "CIERRE_ARQUEO", AuditoriaLog.tenant_id == current_user.tenant_id).all()
     
     cajeros_monitoreados = set()
     desviacion_total = 0.0
@@ -852,12 +1029,18 @@ def obtener_auditoria_turnos(db: Session = Depends(get_db)):
 
 
 @router.post("/tesoreria/transferencias-internas")
-def registrar_transferencia(body: dict, db: Session = Depends(get_db)):
+def registrar_transferencia(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     origen_id = body.get("origen_id")
     destino_id = body.get("destino_id")
     monto_usd = float(body.get("monto_usd", 0.0))
     tasa_cambio_bs = float(body.get("tasa_cambio_bs", 1.0))
     concepto = body.get("concepto", "Transferencia Interna")
+
+    # Validar que ambas cuentas pertenezcan al tenant
+    origen_ok = db.query(CuentaBancaria).filter(CuentaBancaria.id == origen_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
+    destino_ok = db.query(CuentaBancaria).filter(CuentaBancaria.id == destino_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
+    if not origen_ok or not destino_ok:
+        raise HTTPException(status_code=400, detail="Cuentas bancarias no válidas o no pertenecen a su inquilino.")
 
     trf = TransferenciaTesoreria(
         cuenta_origen_id=origen_id,
@@ -865,7 +1048,8 @@ def registrar_transferencia(body: dict, db: Session = Depends(get_db)):
         monto_usd=monto_usd,
         tasa_cambio_bs=tasa_cambio_bs,
         concepto=concepto,
-        estado="PENDIENTE"
+        estado="PENDIENTE",
+        tenant_id=current_user.tenant_id
     )
     db.add(trf)
     db.commit()
@@ -873,16 +1057,16 @@ def registrar_transferencia(body: dict, db: Session = Depends(get_db)):
 
 
 @router.post("/tesoreria/transferencias-internas/{id}/confirmar")
-def confirmar_transferencia(id: int, db: Session = Depends(get_db)):
-    trf = db.query(TransferenciaTesoreria).filter(TransferenciaTesoreria.id == id).first()
+def confirmar_transferencia(id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    trf = db.query(TransferenciaTesoreria).filter(TransferenciaTesoreria.id == id, TransferenciaTesoreria.tenant_id == current_user.tenant_id).first()
     if not trf:
         raise HTTPException(status_code=404, detail="Transferencia no encontrada")
         
     if trf.estado == "COMPLETADO":
         return {"ok": True, "message": "Ya completada"}
         
-    origen = db.query(CuentaBancaria).filter(CuentaBancaria.id == trf.cuenta_origen_id).first()
-    destino = db.query(CuentaBancaria).filter(CuentaBancaria.id == trf.cuenta_destino_id).first()
+    origen = db.query(CuentaBancaria).filter(CuentaBancaria.id == trf.cuenta_origen_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
+    destino = db.query(CuentaBancaria).filter(CuentaBancaria.id == trf.cuenta_destino_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
     
     if origen and destino:
         if origen.moneda == "USD":
@@ -905,8 +1089,8 @@ def confirmar_transferencia(id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/tesoreria/prestamos/resumen")
-def resumen_prestamos_uvc(db: Session = Depends(get_db)):
-    loans = db.query(PrestamoUVC).all()
+def resumen_prestamos_uvc(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    loans = db.query(PrestamoUVC).filter(PrestamoUVC.tenant_id == current_user.tenant_id).all()
     
     tasa_uvc_hoy = 42.15
     tasa_uvc_ayer = 42.12
@@ -955,7 +1139,7 @@ def resumen_prestamos_uvc(db: Session = Depends(get_db)):
 
 
 @router.post("/tesoreria/prestamos-uvc")
-def registrar_prestamo_uvc(body: dict, db: Session = Depends(get_db)):
+def registrar_prestamo_uvc(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     desc = body.get("descripcion", "Préstamo Comercial UVC")
     monto_uvc = float(body.get("monto_uvc", 0.0))
     tasa = float(body.get("tasa", 12.0))
@@ -970,7 +1154,8 @@ def registrar_prestamo_uvc(body: dict, db: Session = Depends(get_db)):
         saldo_usd=saldo_usd,
         tasa_cambio_bs=tasa_cambio_bs,
         estado="ACTIVO",
-        fecha_inicio=datetime.now(timezone.utc)
+        fecha_inicio=datetime.now(timezone.utc),
+        tenant_id=current_user.tenant_id
     )
     db.add(nuevo_prestamo)
     db.commit()
@@ -978,9 +1163,9 @@ def registrar_prestamo_uvc(body: dict, db: Session = Depends(get_db)):
 
 
 @router.get("/tesoreria/presupuesto")
-def presupuesto_tesoreria(periodo: str = None, db: Session = Depends(get_db)):
+def presupuesto_tesoreria(periodo: str = None, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     periodo = periodo or datetime.now(timezone.utc).strftime("%Y-%m")
-    partidas = db.query(PresupuestoPartida).filter(PresupuestoPartida.periodo == periodo).all()
+    partidas = db.query(PresupuestoPartida).filter(PresupuestoPartida.periodo == periodo, PresupuestoPartida.tenant_id == current_user.tenant_id).all()
     return {"periodo": periodo, "partidas": [
         {"centro": p.centro_costo, "concepto": p.concepto, "presupuestado": to_float(p.presupuestado_usd), "ejecutado": to_float(p.ejecutado_usd)}
         for p in partidas
@@ -988,20 +1173,20 @@ def presupuesto_tesoreria(periodo: str = None, db: Session = Depends(get_db)):
 
 
 @router.get("/tesoreria/presupuesto/desviacion")
-def desviacion_presupuestaria(periodo: str = None, db: Session = Depends(get_db)):
+def desviacion_presupuestaria(periodo: str = None, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     periodo = periodo or datetime.now(timezone.utc).strftime("%Y-%m")
-    partidas = db.query(PresupuestoPartida).filter(PresupuestoPartida.periodo == periodo).all()
+    partidas = db.query(PresupuestoPartida).filter(PresupuestoPartida.periodo == periodo, PresupuestoPartida.tenant_id == current_user.tenant_id).all()
     
     # Get rates dynamically from actual bank movements
     from backend.models.erp_extended import MovimientoBancario
     from sqlalchemy import func
     
     # tasa_plan: the oldest/initial rate for this period
-    oldest_mov = db.query(MovimientoBancario).order_by(MovimientoBancario.fecha.asc()).first()
+    oldest_mov = db.query(MovimientoBancario).filter(MovimientoBancario.tenant_id == current_user.tenant_id).order_by(MovimientoBancario.fecha.asc()).first()
     tasa_plan = to_float(oldest_mov.tasa_cambio_bs) if oldest_mov else 36.42
     
     # tasa_real: the most recent rate available
-    newest_mov = db.query(MovimientoBancario).order_by(MovimientoBancario.fecha.desc()).first()
+    newest_mov = db.query(MovimientoBancario).filter(MovimientoBancario.tenant_id == current_user.tenant_id).order_by(MovimientoBancario.fecha.desc()).first()
     tasa_real_raw = to_float(newest_mov.tasa_cambio_bs) if newest_mov else 42.15
     # If tasa_real is 1.0 (likely a placeholder), fallback to 1.16x of plan to simulate realistic deviation
     tasa_real = tasa_real_raw if tasa_real_raw > 5.0 else tasa_plan * 1.16
@@ -1077,9 +1262,9 @@ def desviacion_presupuestaria(periodo: str = None, db: Session = Depends(get_db)
         }
     }
 @router.get("/tesoreria/inversiones/resumen")
-def resumen_inversiones(db: Session = Depends(get_db)):
+def resumen_inversiones(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     from backend.models.erp_extended import ColocacionInversion
-    placements = db.query(ColocacionInversion).filter(ColocacionInversion.estado == "ACTIVO").all()
+    placements = db.query(ColocacionInversion).filter(ColocacionInversion.estado == "ACTIVO", ColocacionInversion.tenant_id == current_user.tenant_id).all()
     
     tasa_real = 42.15
     
@@ -1135,7 +1320,7 @@ def resumen_inversiones(db: Session = Depends(get_db)):
 
 
 @router.post("/tesoreria/inversiones")
-def registrar_inversion(body: dict, db: Session = Depends(get_db)):
+def registrar_inversion(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     from backend.models.erp_extended import ColocacionInversion
     nombre = body.get("nombre", "Colocación Plazo Fijo")
     plazo_dias = int(body.get("plazo_dias", 30))
@@ -1150,7 +1335,8 @@ def registrar_inversion(body: dict, db: Session = Depends(get_db)):
         tasa_interes_anual=tasa_interes,
         tasa_cambio_inicial=tasa_cambio,
         fecha_inicio=datetime.now(timezone.utc),
-        estado="ACTIVO"
+        estado="ACTIVO",
+        tenant_id=current_user.tenant_id
     )
     db.add(nueva_inv)
     db.commit()
@@ -1158,13 +1344,13 @@ def registrar_inversion(body: dict, db: Session = Depends(get_db)):
 
 
 @router.post("/tesoreria/importar")
-def importar_extracto_bancario(body: dict, db: Session = Depends(get_db)):
+def importar_extracto_bancario(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     from backend.models.erp_extended import MovimientoBancario, CuentaBancaria
     
     cuenta_id = body.get("cuenta_id")
     movs = body.get("movimientos", [])
     
-    cuenta = db.query(CuentaBancaria).filter(CuentaBancaria.id == cuenta_id).first()
+    cuenta = db.query(CuentaBancaria).filter(CuentaBancaria.id == cuenta_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
     if not cuenta:
         return {"ok": False, "message": "Cuenta bancaria no encontrada"}
         
@@ -1190,7 +1376,8 @@ def importar_extracto_bancario(body: dict, db: Session = Depends(get_db)):
             tasa_cambio_bs=tasa_cambio,
             tipo=tipo,
             referencia=ref,
-            estado="ACTIVO"
+            estado="ACTIVO",
+            tenant_id=current_user.tenant_id
         )
         db.add(nuevo_mov)
         
@@ -1199,19 +1386,21 @@ def importar_extracto_bancario(body: dict, db: Session = Depends(get_db)):
     return {"ok": True, "count": len(movs)}
 
 @router.get("/tesoreria/movimientos-caja")
-def movimientos_caja(db: Session = Depends(get_db)):
+def movimientos_caja(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     from backend.models.erp_extended import MovimientoBancario
     
     cuentas_caja = db.query(CuentaBancaria).filter(
         CuentaBancaria.activa == True,
-        CuentaBancaria.banco.like("%Caja%")
+        CuentaBancaria.banco.like("%Caja%"),
+        CuentaBancaria.tenant_id == current_user.tenant_id
     ).all()
     cuenta_ids = [c.id for c in cuentas_caja]
     
     saldo_caja = sum(to_float(c.saldo_actual_usd) for c in cuentas_caja)
     
     movs = db.query(MovimientoBancario).filter(
-        MovimientoBancario.cuenta_id.in_(cuenta_ids)
+        MovimientoBancario.cuenta_id.in_(cuenta_ids),
+        MovimientoBancario.tenant_id == current_user.tenant_id
     ).order_by(MovimientoBancario.fecha.desc()).all()
     
     no_deducibles = 0.0
@@ -1254,7 +1443,7 @@ def movimientos_caja(db: Session = Depends(get_db)):
 
 
 @router.post("/tesoreria/movimientos-caja")
-def registrar_movimiento_caja(body: dict, db: Session = Depends(get_db)):
+def registrar_movimiento_caja(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     from backend.models.erp_extended import MovimientoBancario
     
     cuenta_id = body.get("cuenta_id")
@@ -1264,7 +1453,7 @@ def registrar_movimiento_caja(body: dict, db: Session = Depends(get_db)):
     referencia = body.get("referencia", "")
     tasa_cambio_bs = float(body.get("tasa_cambio_bs", 1.0))
     
-    cuenta = db.query(CuentaBancaria).filter(CuentaBancaria.id == cuenta_id).first()
+    cuenta = db.query(CuentaBancaria).filter(CuentaBancaria.id == cuenta_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
     if not cuenta:
         raise HTTPException(status_code=404, detail="Cuenta no encontrada")
         
@@ -1278,7 +1467,8 @@ def registrar_movimiento_caja(body: dict, db: Session = Depends(get_db)):
         tasa_cambio_bs=tasa_cambio_bs,
         tipo=tipo,
         referencia=referencia,
-        estado="ACTIVO"
+        estado="ACTIVO",
+        tenant_id=current_user.tenant_id
     )
     db.add(mov)
     db.commit()
@@ -1287,13 +1477,13 @@ def registrar_movimiento_caja(body: dict, db: Session = Depends(get_db)):
 import re
 
 @router.get("/contabilidad/auditoria-ia")
-def auditoria_ia(db: Session = Depends(get_db)):
+def auditoria_ia(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     # 1. Reglas de Negocio Contables / Tributarias (Auditoría Forense Estática)
     alertas = []
     
     # Alerta 1: RIFs inválidos
     from backend.models.operations import Cliente, Proveedor
-    clientes = db.query(Cliente).all()
+    clientes = db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).all()
     for c in clientes:
         if not re.match(r'^[VEJPG]-\d{8}-\d$', c.rif):
             alertas.append({
@@ -1302,7 +1492,7 @@ def auditoria_ia(db: Session = Depends(get_db)):
                 "mensaje": f"El cliente {c.nombre} tiene un RIF con formato inválido ({c.rif}). Debe ser V-XXXXXXXX-X o J-XXXXXXXX-X."
             })
             
-    proveedores = db.query(Proveedor).all()
+    proveedores = db.query(Proveedor).filter(Proveedor.tenant_id == current_user.tenant_id).all()
     for p in proveedores:
         if not re.match(r'^[VEJPG]-\d{8}-\d$', p.rif):
             alertas.append({
@@ -1314,6 +1504,7 @@ def auditoria_ia(db: Session = Depends(get_db)):
     # Alerta 2: Transacciones en USD sin IGTF
     from backend.models.operations import Venta
     ventas_dudosas = db.query(Venta).filter(
+        Venta.tenant_id == current_user.tenant_id,
         Venta.metodo_pago.in_(["Divisa", "Efectivo USD", "Efectivo"]),
         Venta.igtf_usd == 0
     ).all()
@@ -1327,6 +1518,7 @@ def auditoria_ia(db: Session = Depends(get_db)):
     # Alerta 3: Descuadres de diario
     from backend.models.accounting import AsientoContable
     asientos_descuadrados = db.query(AsientoContable).filter(
+        AsientoContable.tenant_id == current_user.tenant_id,
         AsientoContable.total_debe_usd != AsientoContable.total_haber_usd
     ).all()
     for a in asientos_descuadrados:
@@ -1351,8 +1543,8 @@ def auditoria_ia(db: Session = Depends(get_db)):
 # ---- A. CUENTAS BANCARIAS ----
 
 @router.get("/tesoreria/bancos")
-def listar_bancos(db: Session = Depends(get_db)):
-    cuentas = db.query(CuentaBancaria).all()
+def listar_bancos(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    cuentas = db.query(CuentaBancaria).filter(CuentaBancaria.tenant_id == current_user.tenant_id).all()
     result = []
     for c in cuentas:
         saldo_usd = to_float(c.saldo_actual_usd)
@@ -1383,7 +1575,7 @@ def listar_bancos(db: Session = Depends(get_db)):
 
 
 @router.post("/tesoreria/bancos")
-def crear_banco(payload: dict, db: Session = Depends(get_db)):
+def crear_banco(payload: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     nombre = payload.get("nombre") or payload.get("name", "")
     numero = payload.get("numero") or payload.get("numero_cuenta", "")
     moneda = payload.get("moneda", "VES")
@@ -1394,6 +1586,7 @@ def crear_banco(payload: dict, db: Session = Depends(get_db)):
         moneda=moneda,
         activa=True,
         saldo_actual_usd=0.0,
+        tenant_id=current_user.tenant_id
     )
     db.add(cuenta)
     db.commit()
@@ -1404,7 +1597,7 @@ def crear_banco(payload: dict, db: Session = Depends(get_db)):
 # ---- B. MOVIMIENTOS BANCARIOS ----
 
 @router.get("/tesoreria/movimientos")
-def listar_movimientos_bancarios(periodo: str = None, db: Session = Depends(get_db)):
+def listar_movimientos_bancarios(periodo: str = None, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     from sqlalchemy import extract
     periodo = periodo or datetime.now(timezone.utc).strftime("%Y-%m")
     try:
@@ -1415,6 +1608,7 @@ def listar_movimientos_bancarios(periodo: str = None, db: Session = Depends(get_
     movs = db.query(MovimientoBancario).filter(
         extract('year', MovimientoBancario.fecha) == int(anio),
         extract('month', MovimientoBancario.fecha) == int(mes),
+        MovimientoBancario.tenant_id == current_user.tenant_id
     ).order_by(MovimientoBancario.fecha.desc()).all()
 
     result = []
@@ -1423,7 +1617,7 @@ def listar_movimientos_bancarios(periodo: str = None, db: Session = Depends(get_
         tasa = to_float(m.tasa_cambio_bs) or 36.42
         monto_bs = monto_usd * tasa
         tipo = m.tipo
-        cuenta = db.query(CuentaBancaria).filter(CuentaBancaria.id == m.cuenta_id).first()
+        cuenta = db.query(CuentaBancaria).filter(CuentaBancaria.id == m.cuenta_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
         result.append({
             "id": f"MOV-{m.id:05d}",
             "fecha": m.fecha.strftime("%d/%m/%Y") if m.fecha else "",
@@ -1452,11 +1646,17 @@ from fastapi import UploadFile, File
 async def importar_movimientos_csv(
     file: UploadFile = File(...),
     cuenta_id: int = 1,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
     content = await file.read()
     text = content.decode("utf-8-sig", errors="replace")
     
+    # Validar cuenta bancaria pertenece al tenant
+    cuenta = db.query(CuentaBancaria).filter(CuentaBancaria.id == cuenta_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
+    if not cuenta:
+        raise HTTPException(status_code=404, detail="Cuenta bancaria no encontrada.")
+
     # Auto-detect delimiter
     sample = text[:2048]
     delimiter = ","
@@ -1497,15 +1697,19 @@ async def importar_movimientos_csv(
             monto_usd=monto_usd,
             tasa_cambio_bs=tasa_act,
             tipo="INGRESO" if monto_usd >= 0 else "EGRESO",
-            estado="ACTIVO"
+            estado="ACTIVO",
+            tenant_id=current_user.tenant_id
         )
         db.add(mov)
         inserted += 1
 
     # Update account balance
-    cuenta = db.query(CuentaBancaria).filter(CuentaBancaria.id == cuenta_id).first()
+    cuenta = db.query(CuentaBancaria).filter(CuentaBancaria.id == cuenta_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
     if cuenta:
-        total_usd = sum(to_float(m.monto_usd) for m in db.query(MovimientoBancario).filter(MovimientoBancario.cuenta_id == cuenta_id).all())
+        total_usd = sum(to_float(m.monto_usd) for m in db.query(MovimientoBancario).filter(
+            MovimientoBancario.cuenta_id == cuenta_id,
+            MovimientoBancario.tenant_id == current_user.tenant_id
+        ).all())
         cuenta.saldo_actual_usd = total_usd
 
     db.commit()
@@ -1515,7 +1719,7 @@ async def importar_movimientos_csv(
 # ---- C. CONCILIACIÓN BANCARIA ----
 
 @router.get("/tesoreria/conciliacion")
-def resumen_conciliacion(periodo: str = None, db: Session = Depends(get_db)):
+def resumen_conciliacion(periodo: str = None, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     from sqlalchemy import extract
     periodo = periodo or datetime.now(timezone.utc).strftime("%Y-%m")
     try:
@@ -1526,6 +1730,7 @@ def resumen_conciliacion(periodo: str = None, db: Session = Depends(get_db)):
     movs = db.query(MovimientoBancario).filter(
         extract('year', MovimientoBancario.fecha) == int(anio),
         extract('month', MovimientoBancario.fecha) == int(mes),
+        MovimientoBancario.tenant_id == current_user.tenant_id
     ).all()
 
     total_entradas = sum(to_float(m.monto_usd) for m in movs if to_float(m.monto_usd) > 0)
@@ -1533,7 +1738,7 @@ def resumen_conciliacion(periodo: str = None, db: Session = Depends(get_db)):
     conciliados = [m for m in movs if m.estado == "CONCILIADO"]
     pendientes = [m for m in movs if m.estado != "CONCILIADO"]
 
-    cuentas = db.query(CuentaBancaria).filter(CuentaBancaria.activa == True).all()
+    cuentas = db.query(CuentaBancaria).filter(CuentaBancaria.activa == True, CuentaBancaria.tenant_id == current_user.tenant_id).all()
     saldos_bancos = []
     for c in cuentas:
         saldo_usd = to_float(c.saldo_actual_usd)
@@ -1572,9 +1777,10 @@ def resumen_conciliacion(periodo: str = None, db: Session = Depends(get_db)):
 
 
 @router.get("/tesoreria/conciliacion/pendientes")
-def movimientos_pendientes_conciliar(db: Session = Depends(get_db)):
+def movimientos_pendientes_conciliar(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     movs = db.query(MovimientoBancario).filter(
-        MovimientoBancario.estado != "CONCILIADO"
+        MovimientoBancario.estado != "CONCILIADO",
+        MovimientoBancario.tenant_id == current_user.tenant_id
     ).order_by(MovimientoBancario.fecha.desc()).limit(100).all()
 
     return [
@@ -1593,10 +1799,10 @@ def movimientos_pendientes_conciliar(db: Session = Depends(get_db)):
 
 
 @router.post("/tesoreria/conciliacion/relacionar")
-def relacionar_movimiento(payload: dict, db: Session = Depends(get_db)):
+def relacionar_movimiento(payload: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     mov_id = payload.get("movimiento_id")
     
-    mov = db.query(MovimientoBancario).filter(MovimientoBancario.id == mov_id).first()
+    mov = db.query(MovimientoBancario).filter(MovimientoBancario.id == mov_id, MovimientoBancario.tenant_id == current_user.tenant_id).first()
     if not mov:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Movimiento no encontrado")
@@ -1607,7 +1813,7 @@ def relacionar_movimiento(payload: dict, db: Session = Depends(get_db)):
 
 
 @router.post("/tesoreria/conciliacion/cerrar")
-def cerrar_conciliacion(payload: dict, db: Session = Depends(get_db)):
+def cerrar_conciliacion(payload: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     periodo = payload.get("periodo", datetime.now(timezone.utc).strftime("%Y-%m"))
     from sqlalchemy import extract
     try:
@@ -1618,7 +1824,8 @@ def cerrar_conciliacion(payload: dict, db: Session = Depends(get_db)):
     movs = db.query(MovimientoBancario).filter(
         extract('year', MovimientoBancario.fecha) == int(anio),
         extract('month', MovimientoBancario.fecha) == int(mes),
-        MovimientoBancario.estado != "CONCILIADO"
+        MovimientoBancario.estado != "CONCILIADO",
+        MovimientoBancario.tenant_id == current_user.tenant_id
     ).all()
     
     for m in movs:
@@ -1629,11 +1836,11 @@ def cerrar_conciliacion(payload: dict, db: Session = Depends(get_db)):
 
 
 @router.post("/tesoreria/conciliacion/marcar")
-def marcar_movimiento_revisado(payload: dict, db: Session = Depends(get_db)):
+def marcar_movimiento_revisado(payload: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     mov_id = payload.get("id") or payload.get("movimiento_id")
     estado = payload.get("estado", "CONCILIADO")
     
-    mov = db.query(MovimientoBancario).filter(MovimientoBancario.id == mov_id).first()
+    mov = db.query(MovimientoBancario).filter(MovimientoBancario.id == mov_id, MovimientoBancario.tenant_id == current_user.tenant_id).first()
     if not mov:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Movimiento no encontrado")
@@ -1646,10 +1853,10 @@ def marcar_movimiento_revisado(payload: dict, db: Session = Depends(get_db)):
 # ---- D. ARQUEO DE CAJA ----
 
 @router.get("/tesoreria/arqueo")
-def obtener_arqueo(fecha: str = None, caja: str = "Caja Principal USD", db: Session = Depends(get_db)):
+def obtener_arqueo(fecha: str = None, caja: str = "Caja Principal USD", db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     fecha = fecha or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     
-    fondo = db.query(FondoCajaChica).filter(FondoCajaChica.nombre.ilike(f"%{caja[:10]}%")).first()
+    fondo = db.query(FondoCajaChica).filter(FondoCajaChica.nombre.ilike(f"%{caja[:10]}%"), FondoCajaChica.tenant_id == current_user.tenant_id).first()
     
     saldo_usd = 0.0
     saldo_ves = 0.0
@@ -1659,7 +1866,7 @@ def obtener_arqueo(fecha: str = None, caja: str = "Caja Principal USD", db: Sess
         saldo_ves = saldo_usd * 36.42
     else:
         # Fallback: calculate from GastoCajaChica
-        gastos = db.query(GastoCajaChica).all()
+        gastos = db.query(GastoCajaChica).filter(GastoCajaChica.tenant_id == current_user.tenant_id).all()
         total_gastos_usd = sum(to_float(g.monto_usd) for g in gastos)
         saldo_usd = max(0.0, 1000.0 - total_gastos_usd)  # Assume $1000 starting fund
         saldo_ves = saldo_usd * 36.42
@@ -1677,7 +1884,7 @@ def obtener_arqueo(fecha: str = None, caja: str = "Caja Principal USD", db: Sess
 
 
 @router.post("/tesoreria/arqueo/cerrar")
-def cerrar_arqueo(payload: dict, db: Session = Depends(get_db)):
+def cerrar_arqueo(payload: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     caja = payload.get("caja", "Caja Principal USD")
     diferencia_usd = float(payload.get("diferencia_usd", 0))
     fisico_usd = float(payload.get("fisico_usd", 0))
@@ -1698,12 +1905,13 @@ def cerrar_arqueo(payload: dict, db: Session = Depends(get_db)):
             "resolucion": accion_contable,
             "justificacion": justificacion,
         }),
-        fecha=datetime.now(timezone.utc)
+        fecha=datetime.now(timezone.utc),
+        tenant_id=current_user.tenant_id
     )
     db.add(log)
     
     # Adjust Fondo available balance to match physical
-    fondo = db.query(FondoCajaChica).filter(FondoCajaChica.nombre.ilike(f"%{caja[:10]}%")).first()
+    fondo = db.query(FondoCajaChica).filter(FondoCajaChica.nombre.ilike(f"%{caja[:10]}%"), FondoCajaChica.tenant_id == current_user.tenant_id).first()
     if fondo:
         fondo.disponible_usd = fisico_usd
 
@@ -1724,7 +1932,8 @@ def generar_pdf_arqueo(
     caja: str = "Caja Principal USD",
     justificacion: str = "",
     fisico_ves: float = 0.0,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
     from fastapi.responses import HTMLResponse
     fecha = fecha or datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -1766,9 +1975,9 @@ def generar_pdf_arqueo(
 # ---- E. CAJA CHICA ----
 
 @router.get("/tesoreria/caja-chica")
-def obtener_caja_chica(db: Session = Depends(get_db)):
-    fondos = db.query(FondoCajaChica).all()
-    gastos = db.query(GastoCajaChica).order_by(GastoCajaChica.fecha.desc()).limit(50).all()
+def obtener_caja_chica(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    fondos = db.query(FondoCajaChica).filter(FondoCajaChica.tenant_id == current_user.tenant_id).all()
+    gastos = db.query(GastoCajaChica).filter(GastoCajaChica.tenant_id == current_user.tenant_id).order_by(GastoCajaChica.fecha.desc()).limit(50).all()
     
     total_fondo_usd = sum(to_float(f.asignado_usd) for f in fondos)
     saldo_disponible = sum(to_float(f.disponible_usd) for f in fondos)
@@ -1776,7 +1985,7 @@ def obtener_caja_chica(db: Session = Depends(get_db)):
     
     movs_fmt = []
     for g in gastos:
-        fondo_obj = db.query(FondoCajaChica).filter(FondoCajaChica.id == g.fondo_id).first()
+        fondo_obj = db.query(FondoCajaChica).filter(FondoCajaChica.id == g.fondo_id, FondoCajaChica.tenant_id == current_user.tenant_id).first()
         movs_fmt.append({
             "id": g.id,
             "date": g.fecha.strftime("%d/%m/%Y") if g.fecha else "",
@@ -1819,10 +2028,10 @@ def obtener_caja_chica(db: Session = Depends(get_db)):
 
 
 @router.post("/tesoreria/caja-chica/reponer")
-def reponer_caja_chica(payload: dict, db: Session = Depends(get_db)):
+def reponer_caja_chica(payload: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     fondo_id = payload.get("fondo_id")
     
-    fondos = db.query(FondoCajaChica).all() if not fondo_id else [db.query(FondoCajaChica).filter(FondoCajaChica.id == fondo_id).first()]
+    fondos = db.query(FondoCajaChica).filter(FondoCajaChica.tenant_id == current_user.tenant_id).all() if not fondo_id else [db.query(FondoCajaChica).filter(FondoCajaChica.id == fondo_id, FondoCajaChica.tenant_id == current_user.tenant_id).first()]
     
     for fondo in fondos:
         if fondo:
@@ -1833,12 +2042,12 @@ def reponer_caja_chica(payload: dict, db: Session = Depends(get_db)):
 
 
 @router.post("/tesoreria/caja-chica/fondos")
-def ajustar_fondo_caja_chica(payload: dict, db: Session = Depends(get_db)):
+def ajustar_fondo_caja_chica(payload: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     fondo_id = payload.get("fondo_id")
     nuevo_monto = float(payload.get("monto_usd", 0))
     
     if fondo_id:
-        fondo = db.query(FondoCajaChica).filter(FondoCajaChica.id == fondo_id).first()
+        fondo = db.query(FondoCajaChica).filter(FondoCajaChica.id == fondo_id, FondoCajaChica.tenant_id == current_user.tenant_id).first()
         if fondo:
             diff = nuevo_monto - to_float(fondo.asignado_usd)
             fondo.asignado_usd = nuevo_monto
@@ -1854,7 +2063,8 @@ def ajustar_fondo_caja_chica(payload: dict, db: Session = Depends(get_db)):
         responsable=responsable,
         asignado_usd=nuevo_monto,
         disponible_usd=nuevo_monto,
-        estado="ACTIVO"
+        estado="ACTIVO",
+        tenant_id=current_user.tenant_id
     )
     db.add(fondo)
     db.commit()
@@ -1862,7 +2072,7 @@ def ajustar_fondo_caja_chica(payload: dict, db: Session = Depends(get_db)):
 
 
 @router.post("/tesoreria/caja-chica/movimiento")
-def registrar_gasto_caja_chica(payload: dict, db: Session = Depends(get_db)):
+def registrar_gasto_caja_chica(payload: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     fondo_id = int(payload.get("fondo_id", 1))
     concepto = payload.get("concepto", "")
     monto_usd = float(payload.get("monto_usd", 0))
@@ -1871,7 +2081,7 @@ def registrar_gasto_caja_chica(payload: dict, db: Session = Depends(get_db)):
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Monto debe ser mayor a cero.")
 
-    fondo = db.query(FondoCajaChica).filter(FondoCajaChica.id == fondo_id).first()
+    fondo = db.query(FondoCajaChica).filter(FondoCajaChica.id == fondo_id, FondoCajaChica.tenant_id == current_user.tenant_id).first()
     if not fondo:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Fondo no encontrado.")
@@ -1882,7 +2092,8 @@ def registrar_gasto_caja_chica(payload: dict, db: Session = Depends(get_db)):
         concepto=concepto,
         monto_usd=monto_usd,
         soporte="N/A",
-        estado="PROCESADO"
+        estado="PROCESADO",
+        tenant_id=current_user.tenant_id
     )
     db.add(gasto)
     
@@ -2069,16 +2280,23 @@ def kpis_cobranzas(db: Session = Depends(get_db)):
 # ---- H. DASHBOARD DE TESORERÍA ----
 
 @router.get("/tesoreria/dashboard")
-def dashboard_tesoreria(db: Session = Depends(get_db)):
+def dashboard_tesoreria(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     from backend.models.erp_extended import CuentaPorCobrar, CuentaPorPagar
     
     # --- Cuentas bancarias ---
-    cuentas = db.query(CuentaBancaria).filter(CuentaBancaria.activa == True).all()
+    cuentas = db.query(CuentaBancaria).filter(CuentaBancaria.activa == True, CuentaBancaria.tenant_id == current_user.tenant_id).all()
     total_usd = sum(to_float(c.saldo_actual_usd) for c in cuentas)
     tasa_ref = 36.42
-    tasa_obj = db.query(TasaBCV).order_by(TasaBCV.fecha.desc()).first()
-    if tasa_obj:
-        tasa_ref = to_float(tasa_obj.valor_ves)
+    
+    # Try getting TasaBCV, fallback to TasaCambio
+    try:
+        from backend.models.core import TasaCambio
+        tasa_obj = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
+        if tasa_obj:
+            tasa_ref = to_float(tasa_obj.valor_ves)
+    except Exception:
+        pass
+        
     total_bs = total_usd * tasa_ref
 
     bancos_fmt = []
@@ -2098,11 +2316,11 @@ def dashboard_tesoreria(db: Session = Depends(get_db)):
     
     cxc_total = sum(
         to_float(c.monto_total_usd) - to_float(c.monto_pagado_usd)
-        for c in db.query(CuentaPorCobrar).filter(CuentaPorCobrar.estado == "PENDIENTE").all()
+        for c in db.query(CuentaPorCobrar).filter(CuentaPorCobrar.estado == "PENDIENTE", CuentaPorCobrar.tenant_id == current_user.tenant_id).all()
     )
     cxp_total = sum(
         to_float(c.monto_total_usd) - to_float(c.monto_pagado_usd)
-        for c in db.query(CuentaPorPagar).filter(CuentaPorPagar.estado == "PENDIENTE").all()
+        for c in db.query(CuentaPorPagar).filter(CuentaPorPagar.estado == "PENDIENTE", CuentaPorPagar.tenant_id == current_user.tenant_id).all()
     )
 
     # --- Alertas ---
@@ -2112,7 +2330,7 @@ def dashboard_tesoreria(db: Session = Depends(get_db)):
     if cxp_total > cxc_total * 1.5:
         alertas.append({"tipo": "flujo", "gravedad": "ALTA", "mensaje": f"Egresos proyectados (${cxp_total:,.2f}) superan ingresos (${cxc_total:,.2f}) por 1.5x."})
     
-    pendientes_conc = db.query(MovimientoBancario).filter(MovimientoBancario.estado != "CONCILIADO").count()
+    pendientes_conc = db.query(MovimientoBancario).filter(MovimientoBancario.estado != "CONCILIADO", MovimientoBancario.tenant_id == current_user.tenant_id).count()
     if pendientes_conc > 10:
         alertas.append({"tipo": "conciliacion", "gravedad": "MEDIA", "mensaje": f"Hay {pendientes_conc} movimientos bancarios sin conciliar."})
 
@@ -2142,8 +2360,8 @@ def dashboard_tesoreria(db: Session = Depends(get_db)):
 # ---- I. TRANSFERENCIAS — CONFIRMAR ----
 
 @router.post("/tesoreria/transferencias-internas/{transferencia_id}/confirmar")
-def confirmar_transferencia(transferencia_id: int, db: Session = Depends(get_db)):
-    transferencia = db.query(TransferenciaTesoreria).filter(TransferenciaTesoreria.id == transferencia_id).first()
+def confirmar_transferencia(transferencia_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    transferencia = db.query(TransferenciaTesoreria).filter(TransferenciaTesoreria.id == transferencia_id, TransferenciaTesoreria.tenant_id == current_user.tenant_id).first()
     if not transferencia:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Transferencia no encontrada")
@@ -2151,8 +2369,8 @@ def confirmar_transferencia(transferencia_id: int, db: Session = Depends(get_db)
     transferencia.estado = "CONFIRMADA"
     
     # Apply balances
-    cuenta_origen = db.query(CuentaBancaria).filter(CuentaBancaria.id == transferencia.cuenta_origen_id).first()
-    cuenta_destino = db.query(CuentaBancaria).filter(CuentaBancaria.id == transferencia.cuenta_destino_id).first()
+    cuenta_origen = db.query(CuentaBancaria).filter(CuentaBancaria.id == transferencia.cuenta_origen_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
+    cuenta_destino = db.query(CuentaBancaria).filter(CuentaBancaria.id == transferencia.cuenta_destino_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
     monto_bs = to_float(transferencia.monto_bs)
     tasa = to_float(tasa_actual(db)) or 36.42
     monto_usd = monto_bs / tasa if tasa > 0 else 0.0
@@ -2169,13 +2387,13 @@ def confirmar_transferencia(transferencia_id: int, db: Session = Depends(get_db)
 # ---- INVERSIONES — EXPORT EXCEL ----
 
 @router.get("/tesoreria/inversiones/exportar")
-def exportar_inversiones_excel(db: Session = Depends(get_db)):
+def exportar_inversiones_excel(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment
     from fastapi.responses import StreamingResponse
     import io as _io
     
-    colocaciones = db.query(ColocacionInversion).all()
+    colocaciones = db.query(ColocacionInversion).filter(ColocacionInversion.tenant_id == current_user.tenant_id).all()
     
     wb = openpyxl.Workbook()
     ws = wb.active

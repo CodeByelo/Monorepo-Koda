@@ -127,7 +127,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       // Intentamos una petición ligera que requiera autenticación.
       // Si el middleware no nos rebota con 403, significa que la licencia ya está activa.
-      await api.get('/empresa/perfil');
+      await api.get('/entidades/empresa/perfil');
       setLicenseError(null);
       return true;
     } catch (err: any) {

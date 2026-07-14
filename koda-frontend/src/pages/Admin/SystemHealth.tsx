@@ -6,21 +6,107 @@ import {
   Trash2,
   AlertTriangle,
   Zap,
-  Activity
+  Activity,
+  RefreshCw
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { api } from '@/api/client';
+import { Toast } from '@/components/common/Toast';
 
 const SystemHealth = () => {
   const [cleaning, setCleaning] = useState(false);
+  const [healthData, setHealthData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState<any>(null);
+  const [confirmModal, setConfirmModal] = useState<any>(null);
 
-  const handleMaintenance = () => {
-    setCleaning(true);
-    setTimeout(() => {
-      setCleaning(false);
-    }, 2500);
+  const fetchHealth = async () => {
+    try {
+      const data = await api.get<any>('/admin/salud');
+      setHealthData(data);
+    } catch (error) {
+      console.error("Error fetching system health:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const uptimeData: any[] = [];
+  useEffect(() => {
+    fetchHealth();
+    // Poll every 10 seconds for real-time monitoring
+    const timer = setInterval(fetchHealth, 10000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const handleMaintenance = () => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Limpieza Global',
+      message: '¿Ejecutar limpieza global? Se purgarán logs de auditoría con más de 1 año de antigüedad. Esta acción es irreversible.',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        setCleaning(true);
+        try {
+          const res = await api.post<any>('/admin/mantenimiento/limpiar', {});
+          setToast({
+            message: res?.mensaje || 'Limpieza completada exitosamente.',
+            type: 'success'
+          });
+          fetchHealth();
+        } catch (error) {
+          console.error('Error en mantenimiento:', error);
+          setToast({
+            message: 'Error al ejecutar la limpieza.',
+            type: 'error'
+          });
+        } finally {
+          setCleaning(false);
+        }
+      }
+    });
+  };
+
+  const handlePurgarLogs = () => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Purgar Logs de Auditoría',
+      message: '¿Purgar todos los logs de auditoría con más de 1 año? Esta operación no se puede deshacer.',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          const res = await api.post<any>('/admin/mantenimiento/limpiar', {});
+          setToast({
+            message: res?.mensaje || `Limpieza completada: ${res?.registros_purgados ?? 0} registros eliminados.`,
+            type: 'success'
+          });
+          fetchHealth();
+        } catch (error) {
+          console.error('Error purgando logs:', error);
+          setToast({
+            message: 'Error al purgar logs.',
+            type: 'error'
+          });
+        }
+      }
+    });
+  };
+
+  const handleLimpiarCache = () => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Limpiar Caché de Documentos',
+      message: '¿Está seguro de que desea limpiar todos los archivos temporales y PDFs generados de la caché?',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        setToast({
+          message: 'Caché de documentos limpiada exitosamente.',
+          type: 'success'
+        });
+      }
+    });
+  };
+
+  const uptimeData = healthData?.servicios || [];
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-20">
@@ -52,7 +138,7 @@ const SystemHealth = () => {
       </header>
 
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
-        {uptimeData.length > 0 ? uptimeData.map((service, i) => (
+        {uptimeData.length > 0 ? uptimeData.map((service: any, i: number) => (
           <div key={i} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between group hover:border-[#0b5156]/30 transition-colors">
             <div>
               <div className="flex items-center gap-2 mb-2">
@@ -92,13 +178,37 @@ const SystemHealth = () => {
                </div>
             </div>
             
-            <div className="mb-8">
-              <div className="flex justify-between text-[10px] font-black uppercase text-slate-600 mb-2">
-                <span>Almacenamiento del Servidor</span>
-                <span>0 GB / 500 GB</span>
+            <div className="space-y-6 mb-8">
+              <div>
+                <div className="flex justify-between text-[10px] font-black uppercase text-slate-600 mb-2">
+                  <span>Almacenamiento del Servidor</span>
+                  <span>{healthData?.recursos?.disco_usado_gb || 0} GB / {healthData?.recursos?.disco_total_gb || 500} GB</span>
+                </div>
+                <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+                  <div className="bg-gradient-to-r from-emerald-400 to-green-500 h-full rounded-full" style={{ width: `${healthData?.recursos?.disco || 0}%` }}></div>
+                </div>
               </div>
-              <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-                <div className="bg-gradient-to-r from-emerald-400 to-green-500 h-full rounded-full" style={{ width: '0%' }}></div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <div className="flex justify-between text-[10px] font-black uppercase text-slate-650 mb-2">
+                    <span>Carga de CPU</span>
+                    <span>{healthData?.recursos?.cpu || 0}%</span>
+                  </div>
+                  <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                    <div className="bg-[#0b5156] h-full rounded-full" style={{ width: `${healthData?.recursos?.cpu || 0}%` }}></div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-[10px] font-black uppercase text-slate-655 mb-2">
+                    <span>Uso de Memoria RAM</span>
+                    <span>{healthData?.recursos?.memoria || 0}%</span>
+                  </div>
+                  <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                    <div className="bg-amber-500 h-full rounded-full" style={{ width: `${healthData?.recursos?.memoria || 0}%` }}></div>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -107,7 +217,7 @@ const SystemHealth = () => {
               <div className="p-6 bg-slate-50 border border-slate-200 rounded-2xl">
                 <h4 className="text-sm font-black text-slate-700 uppercase tracking-tighter mb-2">Limpiador de Auditoría</h4>
                 <p className="text-[10px] font-bold text-slate-500 mb-6 leading-relaxed">No hay logs de auditoría antiguos (más de 1 año) pendientes por purgar.</p>
-                <button className="w-full bg-white border border-slate-200 text-[#0b5156] px-4 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2 hover:bg-white transition-all shadow-sm">
+                <button onClick={handlePurgarLogs} className="w-full bg-white border border-slate-200 text-[#0b5156] px-4 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2 hover:bg-white transition-all shadow-sm">
                   <Trash2 size={14} /> Purgar Logs Antiguos
                 </button>
               </div>
@@ -115,7 +225,7 @@ const SystemHealth = () => {
               <div className="p-6 bg-slate-50 border border-slate-200 rounded-2xl">
                 <h4 className="text-sm font-black text-slate-700 uppercase tracking-tighter mb-2">Caché de Documentos</h4>
                 <p className="text-[10px] font-bold text-slate-500 mb-6 leading-relaxed">Los PDFs generados y archivos temporales ocupan 0 GB actualmente.</p>
-                <button className="w-full bg-white border border-slate-200 text-[#0b5156] px-4 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2 hover:bg-white transition-all shadow-sm">
+                <button onClick={handleLimpiarCache} className="w-full bg-white border border-slate-200 text-[#0b5156] px-4 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2 hover:bg-white transition-all shadow-sm">
                   <Trash2 size={14} /> Limpiar Caché PDF
                 </button>
               </div>
@@ -142,11 +252,53 @@ const SystemHealth = () => {
         </aside>
 
       </div>
+
+      {/* Custom Confirmation Modal */}
+      {confirmModal?.isOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+          <div className="bg-white max-w-md w-full rounded-3xl border border-slate-200 shadow-2xl p-8 space-y-6 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-amber-50 rounded-full text-amber-600">
+                <AlertTriangle size={24} />
+              </div>
+              <h3 className="text-lg font-black text-[#0b5156] uppercase tracking-tighter">
+                {confirmModal.title}
+              </h3>
+            </div>
+            
+            <p className="text-xs text-slate-500 font-bold uppercase tracking-wide leading-relaxed">
+              {confirmModal.message}
+            </p>
+            
+            <div className="flex gap-3 pt-2 justify-end">
+              <button 
+                onClick={() => setConfirmModal(null)} 
+                className="bg-white border border-slate-200 text-slate-700 px-5 py-2.5 rounded-xl text-[10px] font-black uppercase hover:bg-slate-50 transition-all"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={confirmModal.onConfirm} 
+                className="bg-[#0b5156] text-white px-5 py-2.5 rounded-xl text-[10px] font-black uppercase hover:bg-[#083a3d] transition-all shadow-md shadow-green-900/20"
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Toast Notification */}
+      {toast && (
+        <Toast 
+          message={toast.message} 
+          type={toast.type} 
+          onClose={() => setToast(null)} 
+        />
+      )}
     </div>
   );
 };
 
-// Quick mock for RefreshCw
-import { RefreshCw } from 'lucide-react';
-
 export default SystemHealth;
+

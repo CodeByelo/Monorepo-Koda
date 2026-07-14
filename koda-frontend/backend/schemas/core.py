@@ -19,8 +19,10 @@ class UserLogin(BaseModel):
     username: Optional[str] = None
     password: str
 
+import uuid
+
 class UserResponse(BaseModel):
-    id: int
+    id: uuid.UUID
     nombre: str
     email: EmailStr
     rol: str

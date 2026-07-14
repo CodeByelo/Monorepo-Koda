@@ -60,7 +60,9 @@ const Returns = () => {
 
   const handleProcessReturn = async () => {
     if (!formData.proveedorId || !formData.motivo || !formData.montoUsd) {
-      alert("Debes llenar el Proveedor, Motivo y Monto a Reclamar");
+      window.dispatchEvent(new CustomEvent('koda-notification', {
+        detail: { type: 'error', message: "Debes llenar el Proveedor, Motivo y Monto a Reclamar" }
+      }));
       return;
     }
     
@@ -83,7 +85,9 @@ const Returns = () => {
       setFormData({ proveedorId: '', facturaId: '', motivo: '', montoUsd: '' });
       fetchData(); // reload
     } catch (error: any) {
-      alert("Error al registrar devolución: " + error.message);
+      window.dispatchEvent(new CustomEvent('koda-notification', {
+        detail: { type: 'error', message: "Error al registrar devolución: " + error.message }
+      }));
     } finally {
       setIsProcessing(false);
     }
@@ -102,7 +106,9 @@ const Returns = () => {
       setSelectedReturnId('');
       fetchData();
     } catch (error: any) {
-      alert("Error al actualizar: " + error.message);
+      window.dispatchEvent(new CustomEvent('koda-notification', {
+        detail: { type: 'error', message: "Error al actualizar: " + error.message }
+      }));
     } finally {
       setIsProcessing(false);
     }

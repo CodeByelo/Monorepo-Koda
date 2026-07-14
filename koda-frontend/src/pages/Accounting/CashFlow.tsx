@@ -19,6 +19,7 @@ const CashFlow = () => {
   const [periodo, setPeriodo] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
   const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchCashFlow();
@@ -58,7 +59,8 @@ const CashFlow = () => {
       window.URL.revokeObjectURL(urlBlob);
     } catch (error) {
       console.error(`Error exportando:`, error);
-      alert(`Error al exportar a PDF`);
+      setExportError('Error al exportar a PDF. Intente nuevamente.');
+      setTimeout(() => setExportError(null), 4000);
     }
   };
 

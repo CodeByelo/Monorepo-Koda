@@ -29,10 +29,18 @@ const FinancialConsolidation = () => {
             <p className="text-slate-500 text-xs font-bold uppercase tracking-tight">Generación de estados financieros consolidados con eliminación inter-compañía.</p>
           </div>
           <div className="flex gap-2">
-             <button className="bg-[#0b5156] text-white px-8 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all">
+             <button
+               disabled
+               title="Esta función requiere el módulo Multi-Entidad. Próximamente disponible."
+               className="bg-[#0b5156]/40 text-white px-8 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 cursor-not-allowed opacity-60"
+             >
                 <Zap size={14} /> Ejecutar Eliminaciones
              </button>
-             <button className="bg-white text-slate-500 px-6 py-2 rounded-xl text-[10px] font-black uppercase border border-slate-200 hover:bg-slate-50 transition-all">
+             <button
+               disabled
+               title="Esta función requiere el módulo Multi-Entidad. Próximamente disponible."
+               className="bg-white text-slate-400 px-6 py-2 rounded-xl text-[10px] font-black uppercase border border-slate-200 cursor-not-allowed opacity-60"
+             >
                 <Printer size={14} /> Exportar Balance
              </button>
           </div>

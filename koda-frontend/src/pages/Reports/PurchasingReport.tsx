@@ -13,13 +13,16 @@ import { useState, useEffect } from 'react';
 import { api } from '@/api/client';
 
 const PurchasingReport = () => {
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const [periodo, setPeriodo] = useState(currentMonth);
   const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const fetchPurchasing = async () => {
       try {
-        const res = await api.get<any>('/reportes/compras');
+        setIsLoading(true);
+        const res = await api.get<any>(`/reportes/compras?periodo=${periodo}`);
         setData(res);
       } catch (error) {
         console.error("Error fetching purchasing report:", error);
@@ -28,7 +31,16 @@ const PurchasingReport = () => {
       }
     };
     fetchPurchasing();
-  }, []);
+  }, [periodo]);
+
+  const handleExport = async () => {
+    try {
+      await api.download(`/reportes/exportar?reporte=compras&periodo=${periodo}`, `reporte_compras_${periodo}.csv`);
+    } catch (error) {
+      console.error("Error exporting purchases:", error);
+      alert("Error al exportar compras.");
+    }
+  };
 
   const metrics = data?.metrics || [];
 
@@ -36,6 +48,17 @@ const PurchasingReport = () => {
   const categories = data?.categories || [];
   const chartData = data?.chartData || [];
   const insight = data?.insight || "No hay datos suficientes para generar un insight.";
+
+  const handleShowSuppliers = () => {
+    if (suppliers.length === 0) {
+      alert("No hay proveedores registrados para este período.");
+      return;
+    }
+    alert(
+      "Evaluación Completa de Proveedores:\n\n" +
+      suppliers.map((s: any, i: number) => `${i + 1}. ${s.name} - Calidad: ${s.quality}/10 - Monto total: ${s.amount} (${s.condition})`).join("\n")
+    );
+  };
 
   return (
     <div className="space-y-1.5 animate-in fade-in duration-500 pb-4">
@@ -54,14 +77,19 @@ const PurchasingReport = () => {
             <h1 className="text-xl font-black text-[#0b5156] tracking-tighter uppercase leading-none">Análisis Analítico de Compras</h1>
             <p className="text-slate-500 text-xs font-bold uppercase tracking-tight">Control de egresos, evaluación de proveedores y eficiencia de abastecimiento.</p>
           </div>
-          <div className="flex gap-2">
-             <button className="bg-white text-slate-500 px-6 py-2 rounded-xl text-[10px] font-black uppercase border border-slate-200 hover:bg-slate-50 transition-all flex items-center gap-2">
+          <div className="flex gap-2 items-center">
+             <button 
+               onClick={handleExport}
+               className="bg-white text-slate-500 px-6 py-2 rounded-xl text-[10px] font-black uppercase border border-slate-200 hover:bg-slate-50 transition-all flex items-center gap-2"
+             >
                 <Download size={14} /> Reporte de Gastos
              </button>
-             <select className="bg-[#0b5156] text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase outline-none shadow-lg shadow-green-900/20 cursor-pointer">
-                <option>Abril 2026</option>
-                <option>Marzo 2026</option>
-             </select>
+             <input 
+               type="month"
+               value={periodo}
+               onChange={(e) => setPeriodo(e.target.value)}
+               className="bg-[#0b5156] text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase outline-none shadow-lg shadow-green-900/20 cursor-pointer"
+             />
           </div>
         </div>
       </header>
@@ -106,7 +134,7 @@ const PurchasingReport = () => {
          <div className="h-36 flex items-end justify-between gap-4 px-4">
             {chartData.length > 0 ? chartData.map((d: any, i: number) => (
               <div key={i} className="flex-1 flex flex-col items-center gap-2 group">
-                <span className={`text-[10px] font-black transition-all ${d.active ? 'text-[#0b5156]' : 'text-slate-300'}`}>${d.value || d.valor}k</span>
+                <span className={`text-[10px] font-black transition-all ${d.active ? 'text-[#0b5156]' : 'text-slate-300'}`}>${d.value ?? d.valor ?? 0}k</span>
                 <div 
                   className={`w-full max-w-[40px] rounded-t-lg transition-all duration-500
                     ${d.active 
@@ -127,7 +155,7 @@ const PurchasingReport = () => {
          <article className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="p-3 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                <h2 className="text-xs font-black text-[#0b5156] uppercase tracking-tighter">Evaluación de Proveedores Críticos</h2>
-               <button className="text-[10px] font-black text-slate-400 uppercase hover:text-[#0b5156]">Ver Todos</button>
+               <button onClick={handleShowSuppliers} className="text-[10px] font-black text-slate-400 uppercase hover:text-[#0b5156]">Ver Todos</button>
             </div>
             <div className="p-2 space-y-1">
                {suppliers.length > 0 ? suppliers.map((s: any, i: number) => (
@@ -190,9 +218,22 @@ const PurchasingReport = () => {
                {insight}
             </p>
          </div>
-         <button className="px-6 py-1.5 bg-white text-emerald-900 hover:text-emerald-700 text-[10px] font-black uppercase rounded-lg hover:bg-slate-100 transition-all shadow-md">
-            Ver Detalles
-         </button>
+         <>
+           <style>{`
+             .nota-abastecimiento-btn {
+                color: #0b5156 !important;
+             }
+             .nota-abastecimiento-btn:hover {
+                color: #083a3d !important;
+             }
+           `}</style>
+           <Link 
+             to="/reportes/matriz-abc" 
+             className="nota-abastecimiento-btn px-6 py-1.5 bg-white text-[10px] font-black uppercase rounded-lg hover:bg-slate-100 transition-all shadow-md flex items-center justify-center"
+           >
+              Ver Detalles
+           </Link>
+         </>
       </div>
     </div>
   );

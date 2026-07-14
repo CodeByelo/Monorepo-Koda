@@ -9,11 +9,14 @@ import {
   ShieldCheck,
   X,
   ChevronRight,
-  AlertCircle
+  AlertCircle,
+  Zap,
+  ShieldAlert
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { api } from '@/api/client';
+import { createPortal } from 'react-dom';
 
 const PeriodClosing = () => {
   const currentMonth = new Date().toISOString().slice(0, 7);
@@ -25,6 +28,12 @@ const PeriodClosing = () => {
   const [data, setData] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showNotification = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
 
   useEffect(() => {
     fetchData();
@@ -53,28 +62,28 @@ const PeriodClosing = () => {
     if (confirm(`¿Está seguro que desea ejecutar el cierre final para el periodo ${periodo}?`)) {
       try {
         await api.post('/contabilidad/cierre/ejecutar', { periodo });
-        alert("Cierre ejecutado exitosamente.");
+        showNotification("Cierre ejecutado exitosamente.", "success");
         fetchData();
-      } catch (error) {
+      } catch (error: any) {
         console.error("Error al ejecutar cierre:", error);
-        alert("Error al ejecutar cierre.");
+        showNotification(error.message || "Error al ejecutar cierre.", "error");
       }
     }
   };
 
   const handleReabrir = async () => {
-    if (!reopenPeriod) return alert("Seleccione un periodo");
-    if (reopenJustification.trim().length < 10) return alert("Justificación debe tener al menos 10 caracteres");
+    if (!reopenPeriod) return showNotification("Seleccione un periodo", "error");
+    if (reopenJustification.trim().length < 10) return showNotification("Justificación debe tener al menos 10 caracteres", "error");
     
     try {
       await api.post('/contabilidad/cierre/reabrir', { periodo: reopenPeriod, justificacion: reopenJustification });
-      alert("Periodo reabierto exitosamente.");
+      showNotification("Periodo reabierto exitosamente.", "success");
       setShowReopenModal(false);
       setReopenJustification('');
       fetchData();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error al reabrir periodo:", error);
-      alert("Error al reabrir periodo.");
+      showNotification(error.message || "Error al reabrir periodo.", "error");
     }
   };
 
@@ -150,13 +159,13 @@ const PeriodClosing = () => {
                  <p className="text-[10px] font-bold text-slate-400 uppercase leading-tight">Estado de checklist</p>
                </div>
             </div>
-            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between h-24 hover:border-[#0b5156]/20 transition-all">
-               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Asientos Pendientes</span>
-               <div className="space-y-1">
-                 <strong className="text-lg font-black text-red-500 tracking-tighter font-mono uppercase">{metrics.pendientes}</strong>
-                 <p className="text-[10px] font-bold text-slate-400 uppercase leading-tight">Requieren revisión</p>
-               </div>
-            </div>
+             <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between h-24 hover:border-[#0b5156]/20 transition-all">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Tareas Pendientes</span>
+                <div className="space-y-1">
+                  <strong className="text-lg font-black text-red-500 tracking-tighter font-mono uppercase">{metrics.pendientes}</strong>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase leading-tight">Pasos por completar</p>
+                </div>
+             </div>
             <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between h-24 hover:border-[#0b5156]/20 transition-all">
                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Vencimiento Cierre</span>
                <div className="space-y-1">
@@ -263,18 +272,24 @@ const PeriodClosing = () => {
 
             {/* Warning Sidebar */}
             <aside className="space-y-4">
-               <article className="bg-red-500 p-4 rounded-2xl text-white shadow-2xl relative overflow-hidden group">
+               <article className="bg-[#b31412] p-4 rounded-2xl text-white shadow-2xl relative overflow-hidden group border border-red-500/20">
                   <div className="relative z-10 space-y-3">
-                     <div className="flex items-center gap-2">
-                        <div className="bg-white/20 p-1.5 rounded-lg">
-                           <AlertCircle size={16} />
+                     <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                           <div className="bg-white/25 p-1.5 rounded-lg">
+                              <AlertCircle size={16} className="text-white" />
+                           </div>
+                           <h2 className="text-base font-black uppercase tracking-tighter leading-none text-white">Alerta de Cierre</h2>
                         </div>
-                        <h2 className="text-base font-black uppercase tracking-tighter leading-none">Alerta de Cierre</h2>
+                        <span className="flex h-2.5 w-2.5 relative">
+                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                           <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-white"></span>
+                        </span>
                      </div>
                      <div className="space-y-2">
                         <div className="bg-white/10 p-3 rounded-xl border border-white/20">
-                           <strong className="text-xs uppercase block font-black">{metrics.pendientes} Asientos pendientes</strong>
-                           <p className="text-[9px] font-bold text-white/60 uppercase mt-1">Completar antes del vencimiento para cumplimiento SENIAT.</p>
+                           <strong className="text-xs uppercase block font-black text-white">{metrics.pendientes} Tareas pendientes</strong>
+                           <p className="text-[9px] font-bold text-white uppercase mt-1 leading-relaxed">Completar antes del vencimiento para cumplimiento SENIAT.</p>
                         </div>
                      </div>
                   </div>
@@ -303,15 +318,19 @@ const PeriodClosing = () => {
               <div className="p-8 space-y-6">
                  <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Periodo a Reabrir</label>
-                    <select 
-                      value={reopenPeriod}
-                      onChange={(e) => setReopenPeriod(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-xs font-bold text-[#0b5156] outline-none focus:border-red-500 appearance-none"
-                    >
-                       {history.filter((h: any) => h.estado === 'CERRADO').map((h: any, i: number) => (
-                         <option key={i} value={h.periodo}>{h.periodo}</option>
-                       ))}
-                    </select>
+                     <select 
+                       value={reopenPeriod}
+                       onChange={(e) => setReopenPeriod(e.target.value)}
+                       className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-xs font-bold text-[#0b5156] outline-none focus:border-red-500 appearance-none"
+                     >
+                        {history.filter((h: any) => h.estado === 'CERRADO').length > 0 ? (
+                          history.filter((h: any) => h.estado === 'CERRADO').map((h: any, i: number) => (
+                            <option key={i} value={h.periodo}>{h.periodo}</option>
+                          ))
+                        ) : (
+                          <option value="" disabled>No hay periodos cerrados para reabrir</option>
+                        )}
+                     </select>
                  </div>
 
                  <div className="space-y-2">
@@ -333,13 +352,23 @@ const PeriodClosing = () => {
 
                  <div className="grid grid-cols-2 gap-4 items-start">
                     <button onClick={() => setShowReopenModal(false)} className="py-4 text-[10px] font-black uppercase text-slate-500 hover:text-slate-700">Cancelar</button>
-                    <button onClick={handleReabrir} disabled={reopenJustification.length < 10} className="py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase shadow-lg shadow-red-900/20 hover:bg-red-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-                       <Unlock size={14} /> Confirmar
-                    </button>
+                     <button onClick={handleReabrir} disabled={reopenJustification.length < 10 || history.filter((h: any) => h.estado === 'CERRADO').length === 0} className="py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase shadow-lg shadow-red-900/20 hover:bg-red-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                        <Unlock size={14} /> Confirmar
+                     </button>
                  </div>
               </div>
            </div>
         </div>
+      )}
+      {/* Toast Notification */}
+      {toast && typeof document !== 'undefined' && createPortal(
+        <div className="fixed bottom-5 right-5 z-[9999] animate-in fade-in slide-in-from-bottom duration-300">
+          <div className={`px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 border ${toast.type === 'success' ? 'bg-[#0b5156] border-[#0b5156]/20 text-white' : 'bg-red-600 border-red-500 text-white'}`}>
+            {toast.type === 'success' ? <Zap size={20} /> : <ShieldAlert size={20} />}
+            <span className="font-bold text-xs tracking-wide uppercase font-mono">{toast.message}</span>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );

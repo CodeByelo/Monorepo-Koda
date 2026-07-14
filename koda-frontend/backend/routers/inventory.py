@@ -25,7 +25,10 @@ def proponer_ajuste(
     Paso 1 (Maker): Un operador reporta una merma o sobrante físico.
     No afecta el inventario real ni la contabilidad todavía.
     """
-    producto = db.query(Producto).filter(Producto.id == ajuste_in.producto_id).first()
+    producto = db.query(Producto).filter(
+        Producto.id == ajuste_in.producto_id,
+        Producto.tenant_id == current_user.tenant_id
+    ).first()
     if not producto:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
 
@@ -33,7 +36,8 @@ def proponer_ajuste(
         producto_id=ajuste_in.producto_id,
         cantidad=ajuste_in.cantidad,
         motivo=ajuste_in.motivo,
-        estado="PENDIENTE"
+        estado="PENDIENTE",
+        tenant_id=current_user.tenant_id
     )
     db.add(nuevo_ajuste)
     db.commit()
@@ -48,7 +52,10 @@ def listar_ajustes_pendientes(
     """
     Retorna la lista de ajustes reportados por los operadores que aún no han sido aprobados.
     """
-    return db.query(AjusteInventario).filter(AjusteInventario.estado == "PENDIENTE").order_by(AjusteInventario.fecha_solicitud.desc()).all()
+    return db.query(AjusteInventario).filter(
+        AjusteInventario.estado == "PENDIENTE",
+        AjusteInventario.tenant_id == current_user.tenant_id
+    ).order_by(AjusteInventario.fecha_solicitud.desc()).all()
 
 @router.post("/ajustes/{ajuste_id}/aprobar", response_model=AjusteInventarioResponse)
 @require_idempotency
@@ -63,11 +70,19 @@ def aprobar_ajuste(
     Esto ejecuta una transacción atómica que modifica el stock real, deja el rastro en el Kardex,
     y genera automáticamente el Asiento Contable (Libro Diario).
     """
-    ajuste = db.query(AjusteInventario).filter(AjusteInventario.id == ajuste_id).with_for_update().first()
+    ajuste = db.query(AjusteInventario).filter(
+        AjusteInventario.id == ajuste_id,
+        AjusteInventario.tenant_id == current_user.tenant_id
+    ).with_for_update().first()
     if not ajuste or ajuste.estado != "PENDIENTE":
         raise HTTPException(status_code=400, detail="Ajuste no encontrado o ya procesado.")
 
-    producto = db.query(Producto).filter(Producto.id == ajuste.producto_id).with_for_update().first()
+    producto = db.query(Producto).filter(
+        Producto.id == ajuste.producto_id,
+        Producto.tenant_id == current_user.tenant_id
+    ).with_for_update().first()
+    if not producto:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
 
     if producto.stock + ajuste.cantidad < 0:
         raise HTTPException(status_code=400, detail="El ajuste dejaría el stock en negativo.")
@@ -95,7 +110,8 @@ def aprobar_ajuste(
         producto_id=producto.id,
         tipo_movimiento=tipo_mov,
         cantidad=ajuste.cantidad,
-        documento_referencia=f"AJU-{str(ajuste.id).zfill(6)}"
+        documento_referencia=f"AJU-{str(ajuste.id).zfill(6)}",
+        tenant_id=current_user.tenant_id
     )
     
     db.add(movimiento)
@@ -124,7 +140,8 @@ def aprobar_ajuste(
                 cuenta_codigo=cuenta_haber["codigo"], cuenta_nombre=cuenta_haber["nombre"],
                 debe=Decimal("0.00"), haber=monto_total_bs
             )
-        ]
+        ],
+        tenant_id=current_user.tenant_id
     )
     db.add(asiento)
 
@@ -142,12 +159,18 @@ def obtener_kardex_producto(
     Obtiene el historial de movimientos inmutables (Kardex) de un producto específico.
     """
     # Verificar si el producto existe
-    producto = db.query(Producto).filter(Producto.id == producto_id).first()
+    producto = db.query(Producto).filter(
+        Producto.id == producto_id,
+        Producto.tenant_id == current_user.tenant_id
+    ).first()
     if not producto:
         raise HTTPException(status_code=404, detail="Producto no encontrado en el sistema.")
 
     # Retornar movimientos ordenados del más reciente al más antiguo
-    return db.query(KardexMovimiento).filter(KardexMovimiento.producto_id == producto_id).order_by(KardexMovimiento.fecha.desc()).all()
+    return db.query(KardexMovimiento).filter(
+        KardexMovimiento.producto_id == producto_id,
+        KardexMovimiento.tenant_id == current_user.tenant_id
+    ).order_by(KardexMovimiento.fecha.desc()).all()
 
 @router.post("/ajustes/{ajuste_id}/rechazar", response_model=AjusteInventarioResponse)
 def rechazar_ajuste(
@@ -158,7 +181,10 @@ def rechazar_ajuste(
     """
     Rechaza una propuesta de ajuste de inventario.
     """
-    ajuste = db.query(AjusteInventario).filter(AjusteInventario.id == ajuste_id).with_for_update().first()
+    ajuste = db.query(AjusteInventario).filter(
+        AjusteInventario.id == ajuste_id,
+        AjusteInventario.tenant_id == current_user.tenant_id
+    ).with_for_update().first()
     if not ajuste or ajuste.estado != "PENDIENTE":
         raise HTTPException(status_code=400, detail="Ajuste no encontrado o ya procesado.")
     ajuste.estado = "RECHAZADO"
@@ -174,21 +200,30 @@ def listar_todos_ajustes(
     """
     Obtiene todos los ajustes propuestos en el sistema.
     """
-    return db.query(AjusteInventario).order_by(AjusteInventario.fecha_solicitud.desc()).all()
+    return db.query(AjusteInventario).filter(
+        AjusteInventario.tenant_id == current_user.tenant_id
+    ).order_by(AjusteInventario.fecha_solicitud.desc()).all()
 
 @router.get("/kardex/{producto_id}/pdf")
 def generar_kardex_pdf(
     producto_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
     """
     Genera un reporte PDF con el historial del Kardex de un producto específico.
     """
-    producto = db.query(Producto).filter(Producto.id == producto_id).first()
+    producto = db.query(Producto).filter(
+        Producto.id == producto_id,
+        Producto.tenant_id == current_user.tenant_id
+    ).first()
     if not producto:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
         
-    movimientos = db.query(KardexMovimiento).filter(KardexMovimiento.producto_id == producto_id).order_by(KardexMovimiento.fecha.desc()).all()
+    movimientos = db.query(KardexMovimiento).filter(
+        KardexMovimiento.producto_id == producto_id,
+        KardexMovimiento.tenant_id == current_user.tenant_id
+    ).order_by(KardexMovimiento.fecha.desc()).all()
     
     try:
         from reportlab.pdfgen import canvas

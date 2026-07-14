@@ -40,6 +40,12 @@ const InventoryAdjustments = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [toast, setToast] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 4000);
+  };
 
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -76,16 +82,16 @@ const InventoryAdjustments = () => {
   const handleProposeAdjustment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProductoId) {
-      alert("Seleccione un producto");
+      showToast("Seleccione un producto");
       return;
     }
     const cantidad = parseInt(cantidadInput, 10);
     if (isNaN(cantidad) || cantidad === 0) {
-      alert("La cantidad debe ser un número entero diferente de cero");
+      showToast("La cantidad debe ser un número entero diferente de cero");
       return;
     }
     if (!motivoInput.trim()) {
-      alert("Ingrese una justificación");
+      showToast("Ingrese una justificación");
       return;
     }
 
@@ -100,9 +106,9 @@ const InventoryAdjustments = () => {
       setCantidadInput('0');
       setMotivoInput('');
       fetchData();
-      alert("Propuesta de ajuste enviada para aprobación");
+      showToast("Propuesta de ajuste enviada para aprobación");
     } catch (err: any) {
-      alert(err.message || "Error al proponer ajuste");
+      showToast(err.message || "Error al proponer ajuste");
     }
   };
 
@@ -111,9 +117,9 @@ const InventoryAdjustments = () => {
     try {
       await api.post(`/inventario/ajustes/${id}/aprobar`);
       fetchData();
-      alert("Ajuste de inventario autorizado con éxito");
+      showToast("Ajuste de inventario autorizado con éxito");
     } catch (err: any) {
-      alert(err.message || "Error al autorizar ajuste");
+      showToast(err.message || "Error al autorizar ajuste");
     }
   };
 
@@ -122,9 +128,9 @@ const InventoryAdjustments = () => {
     try {
       await api.post(`/inventario/ajustes/${id}/rechazar`);
       fetchData();
-      alert("Ajuste de inventario rechazado");
+      showToast("Ajuste de inventario rechazado");
     } catch (err: any) {
-      alert(err.message || "Error al rechazar ajuste");
+      showToast(err.message || "Error al rechazar ajuste");
     }
   };
 
@@ -431,6 +437,11 @@ const InventoryAdjustments = () => {
               </button>
             </div>
           </div>
+        </div>
+      )}
+      {toast && (
+        <div className="fixed bottom-5 right-5 bg-slate-900/90 backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-xl z-50 border border-slate-700/50 flex items-center gap-3 animate-in slide-in-from-bottom-5 duration-300">
+          <span className="text-xs font-black uppercase tracking-wider">🔔 {toast}</span>
         </div>
       )}
     </div>

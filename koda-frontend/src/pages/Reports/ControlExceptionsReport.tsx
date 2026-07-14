@@ -19,6 +19,10 @@ import { api } from '@/api/client';
 const ControlExceptionsReport = () => {
   const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [modalMessage, setModalMessage] = useState<string | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showHighRiskOnly, setShowHighRiskOnly] = useState(false);
 
   useEffect(() => {
     const fetchExceptions = async () => {
@@ -34,9 +38,47 @@ const ControlExceptionsReport = () => {
     fetchExceptions();
   }, []);
 
+  const handleLockPeriod = () => {
+    setShowConfirm(true);
+  };
+
+  const executeLockPeriod = async () => {
+    setShowConfirm(false);
+    try {
+      setIsLoading(true);
+      await api.post('/reportes/bloquear');
+      setModalMessage("Período crítico bloqueado exitosamente.");
+      const res = await api.get<any>('/reportes/excepciones');
+      setData(res);
+    } catch (error) {
+      console.error("Error locking period:", error);
+      setModalMessage("Error al bloquear el período.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleExport = async () => {
+    try {
+      await api.download('/reportes/exportar?reporte=excepciones', 'reporte_excepciones.csv');
+    } catch (error) {
+      console.error("Error exporting exceptions:", error);
+      setModalMessage("Error al exportar reporte de excepciones.");
+    }
+  };
+
   const metrics = data?.metrics || [];
 
   const exceptions = data?.exceptions || [];
+  const filteredExceptions = exceptions.filter((ex: any) => {
+    const userMatch = (ex.user || ex.usuario || "").toLowerCase().includes(searchQuery.toLowerCase());
+    const refMatch = (ex.ref || ex.referencia || "").toLowerCase().includes(searchQuery.toLowerCase());
+    const typeMatch = (ex.type || ex.tipo || "").toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = userMatch || refMatch || typeMatch;
+    const matchesRisk = showHighRiskOnly ? ['ALTO', 'CRÍTICO'].includes((ex.risk || ex.riesgo || '').toUpperCase()) : true;
+    return matchesSearch && matchesRisk;
+  });
+
   const insight = data?.insight || "Este informe consolida acciones que, si bien son necesarias en la operatividad diaria, representan los puntos de fuga más comunes de patrimonio. Se recomienda la auditoría física de los soportes que justifican estas excepciones.";
 
   return (
@@ -57,10 +99,16 @@ const ControlExceptionsReport = () => {
             <p className="text-slate-500 text-xs font-bold uppercase tracking-tight">Consolidado de acciones críticas que afectan el patrimonio y se desvían de los flujos estándar.</p>
           </div>
           <div className="flex gap-2">
-             <button className="bg-red-600 text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-red-900/20 hover:bg-red-700 transition-all">
+             <button 
+               onClick={handleLockPeriod}
+               className="bg-red-600 text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-red-900/20 hover:bg-red-700 transition-all"
+             >
                 <Lock size={14} /> Bloquear Período Crítico
              </button>
-             <button className="bg-[#0b5156] text-white px-8 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all">
+             <button 
+               onClick={handleExport}
+               className="bg-[#0b5156] text-white px-8 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all"
+             >
                 <Download size={14} /> Exportar Reporte de Riesgo
              </button>
           </div>
@@ -102,9 +150,23 @@ const ControlExceptionsReport = () => {
           <div className="flex gap-2 w-full md:w-auto">
              <div className="relative flex-1 md:flex-none">
                 <Search className="absolute left-3 top-2 text-slate-400" size={12} />
-                <input type="text" placeholder="Buscar usuario o referencia..." className="w-full md:w-64 bg-white border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs font-bold text-[#0b5156] outline-none focus:border-[#0b5156] shadow-sm" />
+                <input 
+                  type="text" 
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Buscar usuario o referencia..." 
+                  className="w-full md:w-64 bg-white border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs font-bold text-[#0b5156] outline-none focus:border-[#0b5156] shadow-sm" 
+                />
              </div>
-             <button className="p-1.5 bg-white text-slate-600 rounded-lg border border-slate-200 hover:bg-slate-50 shadow-sm transition-all">
+             <button 
+               onClick={() => setShowHighRiskOnly(!showHighRiskOnly)}
+               title="Mostrar solo riesgo ALTO"
+               className={`p-1.5 rounded-lg border shadow-sm transition-all ${
+                 showHighRiskOnly 
+                   ? 'bg-[#0b5156] text-white border-[#0b5156]' 
+                   : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+               }`}
+             >
                 <Filter size={14} />
              </button>
           </div>
@@ -124,7 +186,7 @@ const ControlExceptionsReport = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50 text-xs">
-              {exceptions.length > 0 ? exceptions.map((ex: any, i: number) => (
+              {filteredExceptions.length > 0 ? filteredExceptions.map((ex: any, i: number) => (
                 <tr key={i} className="hover:bg-slate-50 transition-colors group">
                   <td className="py-2 px-4">
                     <div className="flex items-center gap-2 text-slate-400 font-bold">
@@ -175,6 +237,70 @@ const ControlExceptionsReport = () => {
             </p>
          </div>
       </div>
+
+      {showConfirm && (
+         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+           <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-200">
+             <div className="bg-red-600 p-4 text-white flex items-center justify-between">
+               <h3 className="text-xs font-black uppercase tracking-widest">Confirmar Acción</h3>
+               <button 
+                 onClick={() => setShowConfirm(false)}
+                 className="text-white/70 hover:text-white text-xs font-bold uppercase transition-colors"
+               >
+                 ✕
+               </button>
+             </div>
+             <div className="p-6 space-y-4">
+               <p className="text-slate-600 text-xs font-bold uppercase tracking-tight leading-relaxed">
+                 ¿Está seguro de que desea bloquear este período crítico para auditoría? Esta acción registrará un evento inmutable en el log.
+               </p>
+               <div className="flex justify-end gap-2">
+                 <button 
+                   onClick={() => setShowConfirm(false)}
+                   className="bg-white text-slate-500 border border-slate-200 px-4 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-slate-50 transition-all"
+                 >
+                   Cancelar
+                 </button>
+                 <button 
+                   onClick={executeLockPeriod}
+                   className="bg-red-600 text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase shadow-lg shadow-red-900/20 hover:bg-red-700 transition-all"
+                 >
+                   Confirmar y Bloquear
+                 </button>
+               </div>
+             </div>
+           </div>
+         </div>
+       )}
+
+       {modalMessage && (
+         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+           <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-200">
+             <div className="bg-[#0b5156] p-4 text-white flex items-center justify-between">
+               <h3 className="text-xs font-black uppercase tracking-widest">Aviso del Sistema</h3>
+               <button 
+                 onClick={() => setModalMessage(null)}
+                 className="text-white/70 hover:text-white text-xs font-bold uppercase transition-colors"
+               >
+                 ✕
+               </button>
+             </div>
+             <div className="p-6 space-y-4">
+               <p className="text-slate-600 text-xs font-bold uppercase tracking-tight leading-relaxed">
+                 {modalMessage}
+               </p>
+               <div className="flex justify-end gap-2">
+                 <button 
+                   onClick={() => setModalMessage(null)}
+                   className="bg-[#0b5156] text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all"
+                 >
+                   Aceptar
+                 </button>
+               </div>
+             </div>
+           </div>
+         </div>
+       )}
     </div>
   );
 };

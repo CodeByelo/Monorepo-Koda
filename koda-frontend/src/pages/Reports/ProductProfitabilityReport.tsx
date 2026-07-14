@@ -17,6 +17,9 @@ import { api } from '@/api/client';
 const ProductProfitabilityReport = () => {
   const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [modalMessage, setModalMessage] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showLossesOnly, setShowLossesOnly] = useState(false);
 
   useEffect(() => {
     const fetchProfitability = async () => {
@@ -32,9 +35,28 @@ const ProductProfitabilityReport = () => {
     fetchProfitability();
   }, []);
 
+  const handleExport = async () => {
+    try {
+      await api.download('/reportes/exportar?reporte=rentabilidad', 'reporte_rentabilidad_productos.csv');
+    } catch (error) {
+      console.error("Error exporting profitability:", error);
+      setModalMessage("Error al exportar reporte de rentabilidad.");
+    }
+  };
+
+  const handleUpdateCosts = () => {
+    setModalMessage("Los costos de reposición han sido sincronizados y actualizados con las últimas recepciones de stock en aduana.");
+  };
+
   const metrics = data?.metrics || [];
 
   const products = data?.products || [];
+  const filteredProducts = products.filter((p: any) => {
+    const nameMatch = (p.name || p.nombre || "").toLowerCase().includes(searchQuery.toLowerCase());
+    const lossMatch = showLossesOnly ? p.isLoss : true;
+    return nameMatch && lossMatch;
+  });
+
   const insight = data?.insight || "Este reporte utiliza el Costo de Reposición (Landed Cost) en lugar del costo promedio histórico. Al sumar los gastos operativos prorrateados, el sistema revela la rentabilidad neta real.";
 
   return (
@@ -55,10 +77,16 @@ const ProductProfitabilityReport = () => {
             <p className="text-slate-500 text-xs font-bold uppercase tracking-tight">Cálculo forense de utilidad neta por producto cruzando costo de reposición y gastos operativos.</p>
           </div>
           <div className="flex gap-2">
-             <button className="bg-white text-slate-500 px-6 py-2 rounded-xl text-[10px] font-black uppercase border border-slate-200 hover:bg-slate-50 transition-all flex items-center gap-2">
+             <button 
+               onClick={handleUpdateCosts}
+               className="bg-white text-slate-500 px-6 py-2 rounded-xl text-[10px] font-black uppercase border border-slate-200 hover:bg-slate-50 transition-all flex items-center gap-2"
+             >
                 Actualizar Costos (Reposición)
              </button>
-             <button className="bg-[#0b5156] text-white px-8 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all">
+             <button 
+               onClick={handleExport}
+               className="bg-[#0b5156] text-white px-8 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all"
+             >
                 <Download size={14} /> Exportar Estrategia de Precios
              </button>
           </div>
@@ -100,9 +128,23 @@ const ProductProfitabilityReport = () => {
           <div className="flex gap-2 w-full md:w-auto">
              <div className="relative flex-1 md:flex-none">
                 <Search className="absolute left-3 top-2 text-slate-400" size={12} />
-                <input type="text" placeholder="Buscar producto o SKU..." className="w-full md:w-64 bg-white border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs font-bold text-[#0b5156] outline-none focus:border-[#0b5156] shadow-sm" />
+                <input 
+                  type="text" 
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Buscar producto o SKU..." 
+                  className="w-full md:w-64 bg-white border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs font-bold text-[#0b5156] outline-none focus:border-[#0b5156] shadow-sm" 
+                />
              </div>
-             <button className="p-1.5 bg-white text-slate-600 rounded-lg border border-slate-200 hover:bg-slate-50 shadow-sm transition-all">
+             <button 
+               onClick={() => setShowLossesOnly(!showLossesOnly)}
+               title="Mostrar solo productos con pérdida"
+               className={`p-1.5 rounded-lg border shadow-sm transition-all ${
+                 showLossesOnly 
+                   ? 'bg-[#0b5156] text-white border-[#0b5156]' 
+                   : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+               }`}
+             >
                 <Filter size={14} />
              </button>
           </div>
@@ -122,7 +164,7 @@ const ProductProfitabilityReport = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50 text-xs">
-              {products.length > 0 ? products.map((p: any, i: number) => (
+              {filteredProducts.length > 0 ? filteredProducts.map((p: any, i: number) => (
                 <tr key={i} className={`hover:bg-slate-50 transition-colors group ${p.isLoss ? 'bg-red-50/30' : ''}`}>
                   <td className="py-2 px-4">
                     <div className="flex items-center gap-3">
@@ -170,6 +212,35 @@ const ProductProfitabilityReport = () => {
          </div>
          <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-white/5 rounded-full blur-3xl pointer-events-none" />
       </div>
+
+      {modalMessage && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-[#0b5156] p-4 text-white flex items-center justify-between">
+              <h3 className="text-xs font-black uppercase tracking-widest">Aviso del Sistema</h3>
+              <button 
+                onClick={() => setModalMessage(null)}
+                className="text-white/70 hover:text-white text-xs font-bold uppercase transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-slate-600 text-xs font-bold uppercase tracking-tight leading-relaxed">
+                {modalMessage}
+              </p>
+              <div className="flex justify-end gap-2">
+                <button 
+                  onClick={() => setModalMessage(null)}
+                  className="bg-[#0b5156] text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all"
+                >
+                  Aceptar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

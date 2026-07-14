@@ -34,11 +34,18 @@ compras_router = APIRouter(prefix="/compras", tags=["Compras"], dependencies=[De
 
 
 @compras_router.get("/dashboard")
-def compras_dashboard(db: Session = Depends(get_db)):
-    total = db.query(func.sum(Compra.total_usd)).filter(Compra.estado == "ACTIVA").scalar() or 0
-    pendientes = db.query(func.count(Compra.id)).filter(Compra.estado == "PENDIENTE").scalar() or 0
+def compras_dashboard(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    total = db.query(func.sum(Compra.total_usd)).filter(
+        Compra.estado == "ACTIVA",
+        Compra.tenant_id == current_user.tenant_id
+    ).scalar() or 0
+    pendientes = db.query(func.count(Compra.id)).filter(
+        Compra.estado == "PENDIENTE",
+        Compra.tenant_id == current_user.tenant_id
+    ).scalar() or 0
     cxp_total = db.query(func.sum(CuentaPorPagar.monto_total_usd - CuentaPorPagar.monto_pagado_usd)).filter(
-        CuentaPorPagar.estado != "PAGADA"
+        CuentaPorPagar.estado != "PAGADA",
+        CuentaPorPagar.tenant_id == current_user.tenant_id
     ).scalar() or 0
 
     # Distribución real por categoría
@@ -59,7 +66,10 @@ def compras_dashboard(db: Session = Depends(get_db)):
     if total_float > 0:
         rows = db.query(
             Compra.categoria, func.sum(Compra.total_usd).label("suma")
-        ).filter(Compra.estado == "ACTIVA").group_by(Compra.categoria).all()
+        ).filter(
+            Compra.estado == "ACTIVA",
+            Compra.tenant_id == current_user.tenant_id
+        ).group_by(Compra.categoria).all()
         for cat, suma in rows:
             pct = round((to_float(suma) / total_float) * 100)
             distrib.append({
@@ -89,16 +99,25 @@ def compras_dashboard(db: Session = Depends(get_db)):
 
 
 @compras_router.get("/historial")
-def compras_historial(db: Session = Depends(get_db)):
-    compras = db.query(Compra).order_by(Compra.fecha.desc()).limit(100).all()
+def compras_historial(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    compras = db.query(Compra).filter(Compra.tenant_id == current_user.tenant_id).order_by(Compra.fecha.desc()).limit(100).all()
     
-    total_compras = db.query(func.count(Compra.id)).scalar() or 0
-    monto_total = db.query(func.sum(Compra.total_usd)).scalar() or 0
-    facturas_validadas = db.query(func.count(Compra.id)).filter(Compra.estado == "ACTIVA").scalar() or 0
-    casos_alerta = db.query(func.count(Compra.id)).filter(Compra.estado == "PENDIENTE").scalar() or 0
+    total_compras = db.query(func.count(Compra.id)).filter(Compra.tenant_id == current_user.tenant_id).scalar() or 0
+    monto_total = db.query(func.sum(Compra.total_usd)).filter(Compra.tenant_id == current_user.tenant_id).scalar() or 0
+    facturas_validadas = db.query(func.count(Compra.id)).filter(
+        Compra.estado == "ACTIVA",
+        Compra.tenant_id == current_user.tenant_id
+    ).scalar() or 0
+    casos_alerta = db.query(func.count(Compra.id)).filter(
+        Compra.estado == "PENDIENTE",
+        Compra.tenant_id == current_user.tenant_id
+    ).scalar() or 0
     
     # Approximation for open orders
-    ordenes_abiertas = db.query(func.count(OrdenVenta.id)).filter(OrdenVenta.estado == "BORRADOR").scalar() or 0
+    ordenes_abiertas = db.query(func.count(OrdenVenta.id)).filter(
+        OrdenVenta.estado == "BORRADOR",
+        OrdenVenta.tenant_id == current_user.tenant_id
+    ).scalar() or 0
     
     purchases_list = [
         {
@@ -129,19 +148,22 @@ def compras_historial(db: Session = Depends(get_db)):
 
 @compras_router.get("")
 @compras_router.get("/")
-def listar_compras(db: Session = Depends(get_db)):
-    return db.query(Compra).order_by(Compra.fecha.desc()).all()
+def listar_compras(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    return db.query(Compra).filter(Compra.tenant_id == current_user.tenant_id).order_by(Compra.fecha.desc()).all()
 
 
 @compras_router.get("/ordenes")
-def ordenes_compra(db: Session = Depends(get_db)):
-    compras = db.query(Compra).filter(Compra.estado.in_(["PENDIENTE", "ACTIVA"])).all()
+def ordenes_compra(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    compras = db.query(Compra).filter(
+        Compra.estado.in_(["PENDIENTE", "ACTIVA"]),
+        Compra.tenant_id == current_user.tenant_id
+    ).all()
     return [{"id": c.numero_factura, "proveedor": c.proveedor.nombre if c.proveedor else "", "total": to_float(c.total), "estado": c.estado} for c in compras]
 
 
 @compras_router.get("/facturas")
-def facturas_proveedor(db: Session = Depends(get_db)):
-    compras = db.query(Compra).order_by(Compra.fecha.desc()).all()
+def facturas_proveedor(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    compras = db.query(Compra).filter(Compra.tenant_id == current_user.tenant_id).order_by(Compra.fecha.desc()).all()
     return [
         {
             "id": c.id,
@@ -160,14 +182,17 @@ def facturas_proveedor(db: Session = Depends(get_db)):
 
 
 @compras_router.get("/aprobaciones")
-def aprobaciones(db: Session = Depends(get_db)):
-    rows = db.query(RequisicionCompra).filter(RequisicionCompra.estado == "PENDIENTE").all()
+def aprobaciones(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    rows = db.query(RequisicionCompra).filter(
+        RequisicionCompra.estado == "PENDIENTE",
+        RequisicionCompra.tenant_id == current_user.tenant_id
+    ).all()
     return [{"id": r.numero, "solicitante": r.solicitante, "monto": to_float(r.monto_estimado), "estado": r.estado, "prioridad": r.prioridad} for r in rows]
 
 
 @compras_router.get("/requisiciones")
-def requisiciones(db: Session = Depends(get_db)):
-    rows = db.query(RequisicionCompra).order_by(RequisicionCompra.fecha.desc()).all()
+def requisiciones(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    rows = db.query(RequisicionCompra).filter(RequisicionCompra.tenant_id == current_user.tenant_id).order_by(RequisicionCompra.fecha.desc()).all()
     res = []
     for r in rows:
         res.append({
@@ -189,10 +214,10 @@ class RequisicionCreate(BaseModel):
     prioridad: str = "NORMAL"
 
 @compras_router.post("/requisiciones", status_code=status.HTTP_201_CREATED)
-def create_requisicion(req: RequisicionCreate, db: Session = Depends(get_db)):
+def create_requisicion(req: RequisicionCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     try:
         # Generar número secuencial (REQ-00000000)
-        max_id = db.query(func.max(RequisicionCompra.id)).scalar() or 0
+        max_id = db.query(func.max(RequisicionCompra.id)).filter(RequisicionCompra.tenant_id == current_user.tenant_id).scalar() or 0
         new_numero = f"REQ-{(max_id + 1):08d}"
         
         # Get tasa actual
@@ -209,7 +234,8 @@ def create_requisicion(req: RequisicionCreate, db: Session = Depends(get_db)):
             tasa_cambio_bs=tasa,
             prioridad=req.prioridad,
             estado="PENDIENTE",
-            fecha=datetime.now(timezone.utc)
+            fecha=datetime.now(timezone.utc),
+            tenant_id=current_user.tenant_id
         )
         db.add(db_req)
         db.commit()
@@ -221,8 +247,8 @@ def create_requisicion(req: RequisicionCreate, db: Session = Depends(get_db)):
 
 
 @compras_router.get("/recepciones")
-def recepciones(db: Session = Depends(get_db)):
-    recs = db.query(RecepcionStock).order_by(RecepcionStock.fecha.desc()).all()
+def recepciones(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    recs = db.query(RecepcionStock).filter(RecepcionStock.tenant_id == current_user.tenant_id).order_by(RecepcionStock.fecha.desc()).all()
     res = []
     for r in recs:
         res.append({
@@ -240,10 +266,14 @@ def recepciones(db: Session = Depends(get_db)):
 @compras_router.post("/recepciones", status_code=201)
 def procesar_recepcion(
     req: RecepcionStockCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
     try:
-        producto = db.query(Producto).filter(Producto.id == req.producto_id).first()
+        producto = db.query(Producto).filter(
+            Producto.id == req.producto_id,
+            Producto.tenant_id == current_user.tenant_id
+        ).first()
         if not producto:
             raise HTTPException(status_code=404, detail="Producto no encontrado")
         
@@ -265,7 +295,7 @@ def procesar_recepcion(
         producto.costo_usd = cpp
         
         # Crear Hoja de Recepción
-        count = db.query(RecepcionStock).count() + 1
+        count = db.query(RecepcionStock).filter(RecepcionStock.tenant_id == current_user.tenant_id).count() + 1
         hoja_id = f"REC-{count:04d}"
         
         nueva_recepcion = RecepcionStock(
@@ -275,7 +305,8 @@ def procesar_recepcion(
             cantidad=req.cantidad,
             costo_usd=req.costo_factura,
             estado="Registrado",
-            fecha=datetime.now(timezone.utc)
+            fecha=datetime.now(timezone.utc),
+            tenant_id=current_user.tenant_id
         )
         
         db.add(nueva_recepcion)
@@ -290,11 +321,14 @@ def procesar_recepcion(
 
 
 @compras_router.get("/devoluciones")
-def devoluciones(db: Session = Depends(get_db)):
-    devs = db.query(DevolucionProveedor).order_by(DevolucionProveedor.fecha.desc()).all()
+def devoluciones(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    devs = db.query(DevolucionProveedor).filter(DevolucionProveedor.tenant_id == current_user.tenant_id).order_by(DevolucionProveedor.fecha.desc()).all()
     res = []
     for d in devs:
-        prov = db.query(Proveedor).filter(Proveedor.id == d.proveedor_id).first()
+        prov = db.query(Proveedor).filter(
+            Proveedor.id == d.proveedor_id,
+            Proveedor.tenant_id == current_user.tenant_id
+        ).first()
         res.append({
             "id": d.id,
             "numero_devolucion": d.numero_devolucion,
@@ -308,14 +342,18 @@ def devoluciones(db: Session = Depends(get_db)):
 @compras_router.post("/devoluciones", status_code=201)
 def crear_devolucion(
     dev_in: DevolucionProveedorCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
     try:
-        prov = db.query(Proveedor).filter(Proveedor.id == dev_in.proveedor_id).first()
+        prov = db.query(Proveedor).filter(
+            Proveedor.id == dev_in.proveedor_id,
+            Proveedor.tenant_id == current_user.tenant_id
+        ).first()
         if not prov:
             raise HTTPException(status_code=404, detail="Proveedor no encontrado")
             
-        count = db.query(DevolucionProveedor).count() + 1
+        count = db.query(DevolucionProveedor).filter(DevolucionProveedor.tenant_id == current_user.tenant_id).count() + 1
         numero = f"DEV-{count:04d}"
         
         db_dev = DevolucionProveedor(
@@ -325,7 +363,8 @@ def crear_devolucion(
             motivo=dev_in.motivo,
             monto_usd=dev_in.monto_usd,
             estado="EN PROCESO",
-            fecha=datetime.now(timezone.utc)
+            fecha=datetime.now(timezone.utc),
+            tenant_id=current_user.tenant_id
         )
         db.add(db_dev)
         db.commit()
@@ -341,10 +380,14 @@ class DevolucionEstadoUpdate(BaseModel):
 def actualizar_estado_devolucion(
     id: int,
     payload: DevolucionEstadoUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
     try:
-        dev = db.query(DevolucionProveedor).filter(DevolucionProveedor.id == id).first()
+        dev = db.query(DevolucionProveedor).filter(
+            DevolucionProveedor.id == id,
+            DevolucionProveedor.tenant_id == current_user.tenant_id
+        ).first()
         if not dev:
             raise HTTPException(status_code=404, detail="Devolución no encontrada")
         
@@ -366,7 +409,10 @@ def crear_compra(
 ):
     try:
         # Validar proveedor
-        proveedor = db.query(Proveedor).filter(Proveedor.id == compra_in.proveedor_id).first()
+        proveedor = db.query(Proveedor).filter(
+            Proveedor.id == compra_in.proveedor_id,
+            Proveedor.tenant_id == current_user.tenant_id
+        ).first()
         if not proveedor:
             raise HTTPException(
                 status_code=404,
@@ -374,7 +420,10 @@ def crear_compra(
             )
 
         # Validar factura duplicada
-        existing = db.query(Compra).filter(Compra.numero_factura == compra_in.numero_factura).first()
+        existing = db.query(Compra).filter(
+            Compra.numero_factura == compra_in.numero_factura,
+            Compra.tenant_id == current_user.tenant_id
+        ).first()
         if existing:
             raise HTTPException(
                 status_code=400,
@@ -393,7 +442,8 @@ def crear_compra(
             total_usd=compra_in.total_usd,
             tasa_cambio_bs=compra_in.tasa_cambio_bs,
             estado=compra_in.estado or "ACTIVA",
-            categoria=compra_in.categoria or "BIENES_INVENTARIO"
+            categoria=compra_in.categoria or "BIENES_INVENTARIO",
+            tenant_id=current_user.tenant_id
         )
         db.add(nueva_compra)
         db.flush()
@@ -415,13 +465,17 @@ def crear_compra(
             tasa_cambio_bs=compra_in.tasa_cambio_bs,
             fecha_emision=fecha_emision_dt,
             fecha_vencimiento=fecha_vencimiento,
-            estado="PENDIENTE"
+            estado="PENDIENTE",
+            tenant_id=current_user.tenant_id
         )
         db.add(nueva_cxp)
         
         # Conciliar Recepcion
         if compra_in.recepcion_id:
-            recepcion = db.query(RecepcionStock).filter(RecepcionStock.id == compra_in.recepcion_id).first()
+            recepcion = db.query(RecepcionStock).filter(
+                RecepcionStock.id == compra_in.recepcion_id,
+                RecepcionStock.tenant_id == current_user.tenant_id
+            ).first()
             if recepcion:
                 recepcion.estado = "Conciliado"
                 recepcion.orden_compra = compra_in.numero_factura # Guardamos la referencia cruzada
@@ -446,11 +500,11 @@ def crear_compra(
 
 
 @compras_router.get("/analisis-costos")
-def analisis_costos(db: Session = Depends(get_db)):
-    compras = db.query(Compra).order_by(Compra.fecha).all()
-    proveedores = db.query(Proveedor).all()
-    productos = db.query(Producto).all()
-    evaluaciones = db.query(EvaluacionProveedor).all()
+def analisis_costos(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    compras = db.query(Compra).filter(Compra.tenant_id == current_user.tenant_id).order_by(Compra.fecha).all()
+    proveedores = db.query(Proveedor).filter(Proveedor.tenant_id == current_user.tenant_id).all()
+    productos = db.query(Producto).filter(Producto.tenant_id == current_user.tenant_id).all()
+    evaluaciones = db.query(EvaluacionProveedor).filter(EvaluacionProveedor.tenant_id == current_user.tenant_id).all()
 
     eval_by_prov = {e.proveedor_id: e for e in evaluaciones}
 
@@ -568,18 +622,22 @@ def analisis_costos(db: Session = Depends(get_db)):
 cobranzas_router = APIRouter(prefix="/cobranzas", tags=["Cobranzas"], dependencies=[Depends(get_current_user)])
 
 
-def _sync_cxc_desde_ventas(db: Session):
+def _sync_cxc_desde_ventas(db: Session, tenant_id):
     """Genera CxC para ventas a crédito sin documento asociado."""
     ventas_credito = db.query(Venta).filter(
         Venta.estado == "ACTIVA",
         Venta.metodo_pago.in_(["Transferencia", "PagoMovil"]),
+        Venta.tenant_id == tenant_id
     ).all()
-    clientes = db.query(Cliente).all()
+    clientes = db.query(Cliente).filter(Cliente.tenant_id == tenant_id).all()
     if not clientes:
         return
     cli = clientes[0]
     for v in ventas_credito:
-        existe = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.numero_documento == v.numero_factura).first()
+        existe = db.query(CuentaPorCobrar).filter(
+            CuentaPorCobrar.numero_documento == v.numero_factura,
+            CuentaPorCobrar.tenant_id == tenant_id
+        ).first()
         if not existe:
             tasa = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
             tasa_bs = tasa.valor_ves if tasa else Decimal("36.52")
@@ -594,6 +652,7 @@ def _sync_cxc_desde_ventas(db: Session):
                     fecha_emision=v.fecha,
                     fecha_vencimiento=v.fecha + timedelta(days=30),
                     estado="PENDIENTE",
+                    tenant_id=tenant_id
                 ))
                 db.commit()
             except Exception:
@@ -601,19 +660,22 @@ def _sync_cxc_desde_ventas(db: Session):
 
 
 @cobranzas_router.get("/kpis")
-def cobranzas_kpis(db: Session = Depends(get_db)):
-    _sync_cxc_desde_ventas(db)
+def cobranzas_kpis(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    _sync_cxc_desde_ventas(db, current_user.tenant_id)
     pendiente = db.query(func.sum(CuentaPorCobrar.monto_total_usd - CuentaPorCobrar.monto_pagado_usd)).filter(
-        CuentaPorCobrar.estado != "PAGADA"
+        CuentaPorCobrar.estado != "PAGADA",
+        CuentaPorCobrar.tenant_id == current_user.tenant_id
     ).scalar() or 0
     vencido = db.query(func.sum(CuentaPorCobrar.monto_total_usd - CuentaPorCobrar.monto_pagado_usd)).filter(
         CuentaPorCobrar.estado != "PAGADA",
         CuentaPorCobrar.fecha_vencimiento < datetime.now(timezone.utc),
+        CuentaPorCobrar.tenant_id == current_user.tenant_id
     ).scalar() or 0
     
     clientes_mora = db.query(CuentaPorCobrar.cliente_id).filter(
         CuentaPorCobrar.estado != "PAGADA",
         CuentaPorCobrar.fecha_vencimiento < datetime.now(timezone.utc),
+        CuentaPorCobrar.tenant_id == current_user.tenant_id
     ).distinct().count()
 
     return [
@@ -625,11 +687,12 @@ def cobranzas_kpis(db: Session = Depends(get_db)):
 
 
 @cobranzas_router.get("/criticas")
-def facturas_criticas(db: Session = Depends(get_db)):
-    _sync_cxc_desde_ventas(db)
+def facturas_criticas(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    _sync_cxc_desde_ventas(db, current_user.tenant_id)
     rows = db.query(CuentaPorCobrar).filter(
         CuentaPorCobrar.estado != "PAGADA",
         CuentaPorCobrar.fecha_vencimiento < datetime.now(timezone.utc),
+        CuentaPorCobrar.tenant_id == current_user.tenant_id
     ).limit(10).all()
     return [{
         "doc": r.numero_documento, 
@@ -642,15 +705,16 @@ def facturas_criticas(db: Session = Depends(get_db)):
 
 
 @cobranzas_router.get("/cartera")
-def cartera_clientes(db: Session = Depends(get_db)):
-    _sync_cxc_desde_ventas(db)
-    clientes = db.query(Cliente).all()
+def cartera_clientes(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    _sync_cxc_desde_ventas(db, current_user.tenant_id)
+    clientes = db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).all()
     result = []
     for c in clientes:
         # Documentos pendientes y saldo total
         cxc_pendientes = db.query(CuentaPorCobrar).filter(
             CuentaPorCobrar.cliente_id == c.id, 
-            CuentaPorCobrar.estado != "PAGADA"
+            CuentaPorCobrar.estado != "PAGADA",
+            CuentaPorCobrar.tenant_id == current_user.tenant_id
         ).all()
         
         docs_count = len(cxc_pendientes)
@@ -664,7 +728,8 @@ def cartera_clientes(db: Session = Depends(get_db)):
         # Último pago (aproximado usando la fecha de la última factura PAGADA)
         ultima_cxc_pagada = db.query(CuentaPorCobrar).filter(
             CuentaPorCobrar.cliente_id == c.id,
-            CuentaPorCobrar.estado == "PAGADA"
+            CuentaPorCobrar.estado == "PAGADA",
+            CuentaPorCobrar.tenant_id == current_user.tenant_id
         ).order_by(CuentaPorCobrar.fecha_emision.desc()).first()
         
         ultimo_pago = ultima_cxc_pagada.fecha_emision.strftime("%d/%m/%Y") if ultima_cxc_pagada else "Sin pagos"
@@ -684,11 +749,14 @@ def cartera_clientes(db: Session = Depends(get_db)):
 
 
 @cobranzas_router.get("/antiguedad")
-def antiguedad_saldos(db: Session = Depends(get_db)):
-    _sync_cxc_desde_ventas(db)
+def antiguedad_saldos(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    _sync_cxc_desde_ventas(db, current_user.tenant_id)
     ahora = datetime.now(timezone.utc)
     rangos = {"0-30 días": 0, "31-60 días": 0, "61-90 días": 0, "+90 días": 0}
-    for r in db.query(CuentaPorCobrar).filter(CuentaPorCobrar.estado != "PAGADA").all():
+    for r in db.query(CuentaPorCobrar).filter(
+        CuentaPorCobrar.estado != "PAGADA",
+        CuentaPorCobrar.tenant_id == current_user.tenant_id
+    ).all():
         dias = (ahora - _as_aware(r.fecha_vencimiento)).days
         saldo = to_float(r.monto_total - r.monto_pagado)
         if dias <= 30:
@@ -704,8 +772,8 @@ def antiguedad_saldos(db: Session = Depends(get_db)):
 
 
 @cobranzas_router.get("/antiguedad-detalle")
-def antiguedad_saldos_detalle(db: Session = Depends(get_db)):
-    _sync_cxc_desde_ventas(db)
+def antiguedad_saldos_detalle(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    _sync_cxc_desde_ventas(db, current_user.tenant_id)
     ahora = datetime.now(timezone.utc)
     
     # Get current BCV rate
@@ -724,7 +792,10 @@ def antiguedad_saldos_detalle(db: Session = Depends(get_db)):
     total_perdida_usd = 0.0
     total_expuesto_usd = 0.0
     
-    cxc_list = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.estado != "PAGADA").all()
+    cxc_list = db.query(CuentaPorCobrar).filter(
+        CuentaPorCobrar.estado != "PAGADA",
+        CuentaPorCobrar.tenant_id == current_user.tenant_id
+    ).all()
     
     for r in cxc_list:
         dias_mora = (ahora - _as_aware(r.fecha_vencimiento)).days
@@ -793,11 +864,14 @@ def antiguedad_saldos_detalle(db: Session = Depends(get_db)):
 
 
 @cobranzas_router.get("/erosion")
-def cartera_erosion(db: Session = Depends(get_db)):
-    _sync_cxc_desde_ventas(db)
+def cartera_erosion(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    _sync_cxc_desde_ventas(db, current_user.tenant_id)
     
     # Calculate exposure based on payment method
-    cxc_list = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.estado != "PAGADA").all()
+    cxc_list = db.query(CuentaPorCobrar).filter(
+        CuentaPorCobrar.estado != "PAGADA",
+        CuentaPorCobrar.tenant_id == current_user.tenant_id
+    ).all()
     
     total_cartera = 0.0
     protegido = 0.0
@@ -829,13 +903,12 @@ def cartera_erosion(db: Session = Depends(get_db)):
         "expuesta": round((expuesto / total_cartera) * 100, 1),
         "protegido_usd": protegido,
         "expuesto_usd": expuesto,
-        "riesgo_detectado": riesgo
     }
 
 
 @cobranzas_router.get("/flujo-proyectado")
-def flujo_proyectado(db: Session = Depends(get_db)):
-    _sync_cxc_desde_ventas(db)
+def flujo_proyectado(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    _sync_cxc_desde_ventas(db, current_user.tenant_id)
     ahora = datetime.now(timezone.utc)
     
     # Get current BCV rate
@@ -849,7 +922,10 @@ def flujo_proyectado(db: Session = Depends(get_db)):
         {"label": "16 - 30 días", "min": 16, "max": 30, "exp": 0.0, "color": "text-red-600"}
     ]
     
-    cxc_list = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.estado != "PAGADA").all()
+    cxc_list = db.query(CuentaPorCobrar).filter(
+        CuentaPorCobrar.estado != "PAGADA",
+        CuentaPorCobrar.tenant_id == current_user.tenant_id
+    ).all()
     
     facturas_impacto = []
     
@@ -898,14 +974,18 @@ def flujo_proyectado(db: Session = Depends(get_db)):
         "invoices": sorted(facturas_impacto, key=lambda x: (x["due"] != "Vencida", x["usd"]), reverse=True)
     }
 
+
 @cobranzas_router.post("/contingencia")
-def ejecutar_plan_contingencia(payload: dict, db: Session = Depends(get_db)):
+def ejecutar_plan_contingencia(payload: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """Ejecuta un plan de contingencia real sobre las cuentas por cobrar."""
     devaluacion = payload.get("devaluacion", 10)
-    _sync_cxc_desde_ventas(db)
+    _sync_cxc_desde_ventas(db, current_user.tenant_id)
     ahora = datetime.now(timezone.utc)
     
-    cxc_list = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.estado != "PAGADA").all()
+    cxc_list = db.query(CuentaPorCobrar).filter(
+        CuentaPorCobrar.estado != "PAGADA",
+        CuentaPorCobrar.tenant_id == current_user.tenant_id
+    ).all()
     
     facturas_afectadas = 0
     monto_expuesto_usd = 0.0
@@ -927,9 +1007,12 @@ def ejecutar_plan_contingencia(payload: dict, db: Session = Depends(get_db)):
 
 
 @cobranzas_router.get("/cuentas")
-def cuentas_cobrar(db: Session = Depends(get_db)):
-    _sync_cxc_desde_ventas(db)
-    rows = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.estado != "PAGADA").all()
+def cuentas_cobrar(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    _sync_cxc_desde_ventas(db, current_user.tenant_id)
+    rows = db.query(CuentaPorCobrar).filter(
+        CuentaPorCobrar.estado != "PAGADA",
+        CuentaPorCobrar.tenant_id == current_user.tenant_id
+    ).all()
     return [
         {
             "id": r.id,
@@ -948,8 +1031,11 @@ def cuentas_cobrar(db: Session = Depends(get_db)):
 
 
 @cobranzas_router.get("/erosion")
-def erosion_cartera(db: Session = Depends(get_db)):
-    cxc = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.estado != "PAGADA").all()
+def erosion_cartera(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    cxc = db.query(CuentaPorCobrar).filter(
+        CuentaPorCobrar.estado != "PAGADA",
+        CuentaPorCobrar.tenant_id == current_user.tenant_id
+    ).all()
     if not cxc:
         return {
             "protegida": 100.0,
@@ -990,15 +1076,30 @@ def erosion_cartera(db: Session = Depends(get_db)):
 
 
 @cobranzas_router.get("/recaudacion")
-def recaudacion_composicion(db: Session = Depends(get_db)):
-    cxc_pagado = db.query(func.sum(CuentaPorCobrar.monto_pagado_usd)).scalar() or 0
-    cajas_ventas = db.query(func.sum(Venta.total_usd)).filter(Venta.estado == "ACTIVA").filter(
-        ~Venta.id.in_(db.query(CuentaPorCobrar.venta_id).filter(CuentaPorCobrar.venta_id != None))
+def recaudacion_composicion(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    cxc_pagado = db.query(func.sum(CuentaPorCobrar.monto_pagado_usd)).filter(
+        CuentaPorCobrar.tenant_id == current_user.tenant_id
+    ).scalar() or 0
+    
+    cxc_venta_ids = db.query(CuentaPorCobrar.venta_id).filter(
+        CuentaPorCobrar.venta_id != None,
+        CuentaPorCobrar.tenant_id == current_user.tenant_id
+    )
+    
+    cajas_ventas = db.query(func.sum(Venta.total_usd)).filter(
+        Venta.estado == "ACTIVA",
+        Venta.tenant_id == current_user.tenant_id,
+        ~Venta.id.in_(cxc_venta_ids)
     ).scalar() or 0
     
     liquid = float(cxc_pagado) + float(cajas_ventas)
-    retenciones = db.query(func.sum(Venta.retencion_iva_usd)).filter(Venta.estado == "ACTIVA").scalar() or 0
-    ajustes = db.query(func.sum(NotaCredito.monto_usd)).scalar() or 0
+    retenciones = db.query(func.sum(Venta.retencion_iva_usd)).filter(
+        Venta.estado == "ACTIVA",
+        Venta.tenant_id == current_user.tenant_id
+    ).scalar() or 0
+    ajustes = db.query(func.sum(NotaCredito.monto_usd)).filter(
+        NotaCredito.tenant_id == current_user.tenant_id
+    ).scalar() or 0
     
     total = liquid + float(retenciones) + float(ajustes)
     total_val = float(total) if total > 0 else 1.0
@@ -1015,13 +1116,12 @@ def recaudacion_composicion(db: Session = Depends(get_db)):
 
 
 @cobranzas_router.get("/aplicacion")
-def datos_aplicacion(factura_id: str = Query(None), db: Session = Depends(get_db)):
+def datos_aplicacion(factura_id: str = Query(None), db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     # Calculate real KPIs from CuentaPorCobrar
     hoy = datetime.now(timezone.utc).date()
     
     # Cobrado Hoy (Proxy: sum of monto_pagado for recent activity, here we just sum all pagado for simplicity or mock it based on real data)
-    # Ideally we'd have a 'pagos' table. We use a global sum for demonstration
-    cxc_list = db.query(CuentaPorCobrar).all()
+    cxc_list = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.tenant_id == current_user.tenant_id).all()
     
     por_aplicar = sum(float(c.monto_total_usd - c.monto_pagado_usd) for c in cxc_list if c.estado != "PAGADA")
     aplicado = sum(float(c.monto_pagado_usd) for c in cxc_list)
@@ -1034,7 +1134,10 @@ def datos_aplicacion(factura_id: str = Query(None), db: Session = Depends(get_db
         {"label": "DIFERENCIAS", "value": "0", "desc": "Requieren revisión", "color": "text-red-600"}
     ]
     
-    pendientes = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.estado != "PAGADA").order_by(CuentaPorCobrar.fecha_emision.desc()).limit(10).all()
+    pendientes = db.query(CuentaPorCobrar).filter(
+        CuentaPorCobrar.estado != "PAGADA",
+        CuentaPorCobrar.tenant_id == current_user.tenant_id
+    ).order_by(CuentaPorCobrar.fecha_emision.desc()).limit(10).all()
     
     pagos_pendientes = []
     for p in pendientes:
@@ -1058,12 +1161,15 @@ def datos_aplicacion(factura_id: str = Query(None), db: Session = Depends(get_db
 
 
 @cobranzas_router.post("/aplicacion/procesar")
-def procesar_aplicacion(body: dict, db: Session = Depends(get_db)):
+def procesar_aplicacion(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     doc = body.get("factura_id") or body.get("numero_documento")
     if not doc:
         raise HTTPException(status_code=400, detail="Debe proporcionar el número de factura o documento.")
         
-    cxc = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.numero_documento == doc).first()
+    cxc = db.query(CuentaPorCobrar).filter(
+        CuentaPorCobrar.numero_documento == doc,
+        CuentaPorCobrar.tenant_id == current_user.tenant_id
+    ).first()
     if not cxc:
         raise HTTPException(status_code=404, detail="Cuenta por cobrar no encontrada.")
         
@@ -1081,13 +1187,16 @@ def procesar_aplicacion(body: dict, db: Session = Depends(get_db)):
 
 
 @cobranzas_router.get("/anticipos-data")
-def anticipos_data(db: Session = Depends(get_db)):
+def anticipos_data(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     bcv_rate = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
     tasa_actual = float(bcv_rate.valor_ves) if bcv_rate else 38.50
     
-    clientes = [{"id": c.id, "nombre": c.nombre} for c in db.query(Cliente).all()]
+    clientes = [{"id": c.id, "nombre": c.nombre} for c in db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).all()]
     
-    anticipos_db = db.query(AnticipoCliente).filter(AnticipoCliente.estado == "ACTIVO").all()
+    anticipos_db = db.query(AnticipoCliente).filter(
+        AnticipoCliente.estado == "ACTIVO",
+        AnticipoCliente.tenant_id == current_user.tenant_id
+    ).all()
     protected_balances = []
     
     for ant in anticipos_db:
@@ -1109,7 +1218,7 @@ def anticipos_data(db: Session = Depends(get_db)):
 
 
 @cobranzas_router.post("/anticipos")
-def crear_anticipo(body: dict, db: Session = Depends(get_db)):
+def crear_anticipo(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     cliente_id = body.get("cliente_id")
     monto_bs = float(body.get("monto_bs", 0))
     tasa_bcv = float(body.get("tasa_bcv", 38.50))
@@ -1117,6 +1226,10 @@ def crear_anticipo(body: dict, db: Session = Depends(get_db)):
     if not cliente_id or monto_bs <= 0 or tasa_bcv <= 0:
         raise HTTPException(status_code=400, detail="Datos de anticipo inválidos.")
         
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id, Cliente.tenant_id == current_user.tenant_id).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado.")
+
     monto_usd = monto_bs / tasa_bcv
     
     nuevo_anticipo = AnticipoCliente(
@@ -1124,7 +1237,8 @@ def crear_anticipo(body: dict, db: Session = Depends(get_db)):
         monto_usd=monto_usd,
         moneda="USD",
         tasa_cambio_bs=tasa_bcv,
-        estado="ACTIVO"
+        estado="ACTIVO",
+        tenant_id=current_user.tenant_id
     )
     
     db.add(nuevo_anticipo)
@@ -1133,13 +1247,21 @@ def crear_anticipo(body: dict, db: Session = Depends(get_db)):
 
 
 @cobranzas_router.post("/estado-cuenta/enviar")
-def enviar_estado_cuenta(body: dict, db: Session = Depends(get_db)):
+def enviar_estado_cuenta(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     email = body.get("email")
     if not email:
         raise HTTPException(status_code=400, detail="El correo electrónico es requerido")
     
-    # Simula el envío de correo de manera local
-    return {"ok": True, "message": f"Estado de cuenta enviado a {email}"}
+    # Escribir el correo de forma real a un registro local para auditoría en el workspace
+    log_path = "/home/byelo/koda-backend/emails_enviados.log"
+    from datetime import datetime
+    try:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] A: {email} | Asunto: Estado de Cuenta KODA ERP | Mensaje: Se adjunta PDF del Estado de Cuenta consolidado.\n")
+    except Exception as e:
+        print(f"Error escribiendo log de email: {e}")
+        
+    return {"ok": True, "message": f"Estado de cuenta enviado a {email} (Registrado en log local)"}
 
 
 # --- PAGOS ---
@@ -1147,11 +1269,14 @@ pagos_router = APIRouter(prefix="/pagos", tags=["Pagos"], dependencies=[Depends(
 
 
 @pagos_router.get("/dashboard")
-def pagos_dashboard(db: Session = Depends(get_db)):
+def pagos_dashboard(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     tasa = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
     tasa_val = float(tasa.valor_ves) if tasa else 36.52
 
-    cxps = db.query(CuentaPorPagar).filter(CuentaPorPagar.estado != "PAGADA").all()
+    cxps = db.query(CuentaPorPagar).filter(
+        CuentaPorPagar.estado != "PAGADA",
+        CuentaPorPagar.tenant_id == current_user.tenant_id
+    ).all()
 
     deuda_indexada_usd = 0.0
     deuda_fija_bs = 0.0
@@ -1182,7 +1307,10 @@ def pagos_dashboard(db: Session = Depends(get_db)):
 
     gasto_devaluacion_bs = deuda_indexada_usd * tasa_val * 0.0005
 
-    cuentas = db.query(CuentaBancaria).filter(CuentaBancaria.activa == True).all()
+    cuentas = db.query(CuentaBancaria).filter(
+        CuentaBancaria.activa == True,
+        CuentaBancaria.tenant_id == current_user.tenant_id
+    ).all()
     saldo_bruto_usd = sum(float(cb.saldo_actual_usd) for cb in cuentas)
     
     reserva_fiscal_usd = saldo_bruto_usd * 0.16
@@ -1194,6 +1322,7 @@ def pagos_dashboard(db: Session = Depends(get_db)):
         caja_comprometida_pct = min(100.0, (total_deuda_usd / saldo_bruto_usd) * 100.0)
 
     criticos_stock = db.query(Proveedor).join(EvaluacionProveedor).filter(
+        Proveedor.tenant_id == current_user.tenant_id,
         EvaluacionProveedor.score_precio < 50
     ).distinct().count()
 
@@ -1303,11 +1432,14 @@ def pagos_dashboard(db: Session = Depends(get_db)):
 
 
 @pagos_router.get("/cuentas")
-def cuentas_pagar(db: Session = Depends(get_db)):
+def cuentas_pagar(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     tasa = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
     tasa_val = float(tasa.valor_ves) if tasa else 36.52
 
-    rows = db.query(CuentaPorPagar).filter(CuentaPorPagar.estado != "PAGADA").all()
+    rows = db.query(CuentaPorPagar).filter(
+        CuentaPorPagar.estado != "PAGADA",
+        CuentaPorPagar.tenant_id == current_user.tenant_id
+    ).all()
 
     total_deuda_usd = 0.0
     total_facturas = len(rows)
@@ -1380,21 +1512,26 @@ def cuentas_pagar(db: Session = Depends(get_db)):
 
 
 @pagos_router.get("/ordenes")
-def ordenes_pago(db: Session = Depends(get_db)):
+def ordenes_pago(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     tasa = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
     tasa_val = float(tasa.valor_ves) if tasa else 36.52
 
-    pendientes = db.query(CuentaPorPagar).filter(CuentaPorPagar.estado != "PAGADA").all()
+    pendientes = db.query(CuentaPorPagar).filter(
+        CuentaPorPagar.estado != "PAGADA",
+        CuentaPorPagar.tenant_id == current_user.tenant_id
+    ).all()
     
     now = datetime.now(timezone.utc)
     start_of_month = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
     historico = db.query(CuentaPorPagar).filter(
-        CuentaPorPagar.estado == "PAGADA"
+        CuentaPorPagar.estado == "PAGADA",
+        CuentaPorPagar.tenant_id == current_user.tenant_id
     ).order_by(CuentaPorPagar.fecha_vencimiento.desc()).limit(10).all()
 
     pagadas_mes = db.query(CuentaPorPagar).filter(
         CuentaPorPagar.estado == "PAGADA",
-        CuentaPorPagar.fecha_vencimiento >= start_of_month
+        CuentaPorPagar.fecha_vencimiento >= start_of_month,
+        CuentaPorPagar.tenant_id == current_user.tenant_id
     ).all()
 
     total_pagadas_usd = sum(float(r.monto_total_usd) for r in pagadas_mes)
@@ -1485,7 +1622,7 @@ class AprobarOrdenRequest(BaseModel):
 
 
 @pagos_router.post("/ordenes/aprobar")
-def aprobar_orden(body: AprobarOrdenRequest, db: Session = Depends(get_db)):
+def aprobar_orden(body: AprobarOrdenRequest, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     orden_id_str = body.orden_id
     if not orden_id_str:
          raise HTTPException(status_code=400, detail="Falta el orden_id")
@@ -1494,14 +1631,20 @@ def aprobar_orden(body: AprobarOrdenRequest, db: Session = Depends(get_db)):
     except ValueError:
          raise HTTPException(status_code=400, detail="Formato de orden_id inválido")
 
-    cxp = db.query(CuentaPorPagar).filter(CuentaPorPagar.id == c_id).first()
+    cxp = db.query(CuentaPorPagar).filter(
+        CuentaPorPagar.id == c_id,
+        CuentaPorPagar.tenant_id == current_user.tenant_id
+    ).first()
     if not cxp:
          raise HTTPException(status_code=404, detail="Cuenta por pagar no encontrada")
 
     if cxp.estado == "PAGADA":
          raise HTTPException(status_code=400, detail="Esta cuenta ya fue pagada")
 
-    banco = db.query(CuentaBancaria).filter(CuentaBancaria.id == body.banco_id).first()
+    banco = db.query(CuentaBancaria).filter(
+        CuentaBancaria.id == body.banco_id,
+        CuentaBancaria.tenant_id == current_user.tenant_id
+    ).first()
     if not banco:
          raise HTTPException(status_code=400, detail="La cuenta bancaria seleccionada no existe")
 
@@ -1518,7 +1661,8 @@ def aprobar_orden(body: AprobarOrdenRequest, db: Session = Depends(get_db)):
         tasa_cambio_bs=cxp.tasa_cambio_bs,
         tipo="EGRESO",
         referencia=body.referencia,
-        estado="ACTIVO"
+        estado="ACTIVO",
+        tenant_id=current_user.tenant_id
     )
     db.add(mov)
     db.commit()
@@ -1534,7 +1678,15 @@ class CuentaPorPagarManualRequest(BaseModel):
 
 
 @pagos_router.post("/cuentas/manual")
-def crear_cuenta_por_pagar_manual(body: CuentaPorPagarManualRequest, db: Session = Depends(get_db)):
+def crear_cuenta_por_pagar_manual(body: CuentaPorPagarManualRequest, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    # Validate supplier belongs to tenant
+    proveedor = db.query(Proveedor).filter(
+        Proveedor.id == body.proveedor_id,
+        Proveedor.tenant_id == current_user.tenant_id
+    ).first()
+    if not proveedor:
+         raise HTTPException(status_code=404, detail="Proveedor no encontrado")
+
     now = datetime.now(timezone.utc)
     nueva_c = CuentaPorPagar(
         proveedor_id=body.proveedor_id,
@@ -1544,7 +1696,8 @@ def crear_cuenta_por_pagar_manual(body: CuentaPorPagarManualRequest, db: Session
         tasa_cambio_bs=body.tasa_cambio_bs,
         fecha_emision=now,
         fecha_vencimiento=now + timedelta(days=body.dias_credito),
-        estado="PENDIENTE"
+        estado="PENDIENTE",
+        tenant_id=current_user.tenant_id
     )
     db.add(nueva_c)
     db.commit()
@@ -1553,9 +1706,12 @@ def crear_cuenta_por_pagar_manual(body: CuentaPorPagarManualRequest, db: Session
 
 
 @pagos_router.get("/programacion")
-def programacion_pagos(db: Session = Depends(get_db)):
+def programacion_pagos(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     hoy = datetime.now(timezone.utc).date()
-    rows = db.query(CuentaPorPagar).filter(CuentaPorPagar.estado != "PAGADA").order_by(CuentaPorPagar.fecha_vencimiento).all()
+    rows = db.query(CuentaPorPagar).filter(
+        CuentaPorPagar.estado != "PAGADA",
+        CuentaPorPagar.tenant_id == current_user.tenant_id
+    ).order_by(CuentaPorPagar.fecha_vencimiento).all()
     buckets = {"vencido_hoy": [], "esta_semana": [], "proxima_semana": [], "fin_mes": []}
 
     for r in rows:
@@ -1579,9 +1735,10 @@ def programacion_pagos(db: Session = Depends(get_db)):
         else:
             buckets["fin_mes"].append(item)
 
-    liquidez = db.query(func.sum(CuentaBancaria.saldo_actual_usd)).scalar() or 0
+    liquidez = db.query(func.sum(CuentaBancaria.saldo_actual_usd)).filter(CuentaBancaria.tenant_id == current_user.tenant_id).scalar() or 0
     deuda_indexada = db.query(func.sum(CuentaPorPagar.monto_total_usd - CuentaPorPagar.monto_pagado_usd)).filter(
-        CuentaPorPagar.estado != "PAGADA"
+        CuentaPorPagar.estado != "PAGADA",
+        CuentaPorPagar.tenant_id == current_user.tenant_id
     ).scalar() or 0
     return {
         "liquidez_base": to_float(liquidez),
@@ -1591,11 +1748,14 @@ def programacion_pagos(db: Session = Depends(get_db)):
 
 
 @pagos_router.get("/lotes/validar")
-def validar_lotes(db: Session = Depends(get_db)):
+def validar_lotes(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     tasa = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
     tasa_val = float(tasa.valor_ves) if tasa else 36.52
 
-    cxps = db.query(CuentaPorPagar).filter(CuentaPorPagar.estado != "PAGADA").all()
+    cxps = db.query(CuentaPorPagar).filter(
+        CuentaPorPagar.estado != "PAGADA",
+        CuentaPorPagar.tenant_id == current_user.tenant_id
+    ).all()
     
     validaciones = []
     total_debitar_usd = 0.0
@@ -1638,14 +1798,20 @@ def validar_lotes(db: Session = Depends(get_db)):
 
 
 @pagos_router.post("/lotes/procesar")
-def procesar_lotes(body: dict, db: Session = Depends(get_db)):
+def procesar_lotes(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     ref = body.get("referencia", "LOTE-GEN")
     
-    cxps = db.query(CuentaPorPagar).filter(CuentaPorPagar.estado != "PAGADA").all()
+    cxps = db.query(CuentaPorPagar).filter(
+        CuentaPorPagar.estado != "PAGADA",
+        CuentaPorPagar.tenant_id == current_user.tenant_id
+    ).all()
     if not cxps:
         return {"ok": True, "message": "No hay deudas pendientes"}
 
-    banco = db.query(CuentaBancaria).filter(CuentaBancaria.activa == True).first()
+    banco = db.query(CuentaBancaria).filter(
+        CuentaBancaria.activa == True,
+        CuentaBancaria.tenant_id == current_user.tenant_id
+    ).first()
     if not banco:
         raise HTTPException(status_code=400, detail="No hay una cuenta bancaria activa")
 
@@ -1665,7 +1831,8 @@ def procesar_lotes(body: dict, db: Session = Depends(get_db)):
         tasa_cambio_bs=Decimal("36.52"),
         tipo="EGRESO",
         referencia=ref,
-        estado="ACTIVO"
+        estado="ACTIVO",
+        tenant_id=current_user.tenant_id
     )
     db.add(mov)
     db.commit()
@@ -1678,11 +1845,14 @@ tesoreria_router = APIRouter(prefix="/tesoreria", tags=["Tesorería"], dependenc
 
 
 @tesoreria_router.get("/dashboard")
-def tesoreria_dashboard(db: Session = Depends(get_db)):
+def tesoreria_dashboard(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     def format_currency(val):
         return f"${val:,.2f}"
 
-    todas_cuentas = db.query(CuentaBancaria).filter(CuentaBancaria.activa == True).all()
+    todas_cuentas = db.query(CuentaBancaria).filter(
+        CuentaBancaria.activa == True,
+        CuentaBancaria.tenant_id == current_user.tenant_id
+    ).all()
     
     bancos_bs = 0.0
     efectivo_zelle = 0.0
@@ -1712,14 +1882,26 @@ def tesoreria_dashboard(db: Session = Depends(get_db)):
             "icono": c.banco[0].upper() if c.banco else "B"
         })
     
-    ret_iva = db.query(func.sum(RetencionIVA.monto_usd)).filter(RetencionIVA.estado == "PENDIENTE").scalar()
-    ret_islr = db.query(func.sum(RetencionISLR.monto_usd)).filter(RetencionISLR.estado == "PENDIENTE").scalar()
+    ret_iva = db.query(func.sum(RetencionIVA.monto_usd)).filter(
+        RetencionIVA.estado == "PENDIENTE",
+        RetencionIVA.tenant_id == current_user.tenant_id
+    ).scalar()
+    ret_islr = db.query(func.sum(RetencionISLR.monto_usd)).filter(
+        RetencionISLR.estado == "PENDIENTE",
+        RetencionISLR.tenant_id == current_user.tenant_id
+    ).scalar()
     reserva_fiscal = to_float(ret_iva) + to_float(ret_islr)
 
-    efectivo_transito = db.query(func.sum(MovimientoBancario.monto_usd)).filter(MovimientoBancario.estado == "PENDIENTE").scalar()
+    efectivo_transito = db.query(func.sum(MovimientoBancario.monto_usd)).filter(
+        MovimientoBancario.estado == "PENDIENTE",
+        MovimientoBancario.tenant_id == current_user.tenant_id
+    ).scalar()
     efectivo_transito = to_float(efectivo_transito)
 
-    cheques_pd = db.query(func.sum(Cheque.monto_usd)).filter(Cheque.estado == "POST_DATADO").scalar()
+    cheques_pd = db.query(func.sum(Cheque.monto_usd)).filter(
+        Cheque.estado == "POST_DATADO",
+        Cheque.tenant_id == current_user.tenant_id
+    ).scalar()
     cheques_por_cobrar = to_float(cheques_pd)
     cheques_restar = 0.0 # Cheques emitidos (cxp) si hubiera una tabla, por ahora 0.
     
@@ -1732,7 +1914,8 @@ def tesoreria_dashboard(db: Session = Depends(get_db)):
     ahora = datetime.now(timezone.utc)
     cxp_vencidas = db.query(CuentaPorPagar).filter(
         CuentaPorPagar.estado != "PAGADA",
-        CuentaPorPagar.fecha_vencimiento < ahora
+        CuentaPorPagar.fecha_vencimiento < ahora,
+        CuentaPorPagar.tenant_id == current_user.tenant_id
     ).all()
     
     # Proyeccion 7 dias
@@ -1741,14 +1924,16 @@ def tesoreria_dashboard(db: Session = Depends(get_db)):
     cxc_7d = db.query(CuentaPorCobrar).filter(
         CuentaPorCobrar.estado != "PAGADA",
         CuentaPorCobrar.fecha_vencimiento >= ahora,
-        CuentaPorCobrar.fecha_vencimiento <= limite_7d
+        CuentaPorCobrar.fecha_vencimiento <= limite_7d,
+        CuentaPorCobrar.tenant_id == current_user.tenant_id
     ).all()
     ingresos_7d = sum(to_float(c.monto_total_usd - c.monto_pagado_usd) for c in cxc_7d)
 
     cxp_7d = db.query(CuentaPorPagar).filter(
         CuentaPorPagar.estado != "PAGADA",
         CuentaPorPagar.fecha_vencimiento >= ahora,
-        CuentaPorPagar.fecha_vencimiento <= limite_7d
+        CuentaPorPagar.fecha_vencimiento <= limite_7d,
+        CuentaPorPagar.tenant_id == current_user.tenant_id
     ).all()
     egresos_7d = sum(to_float(c.monto_total_usd - c.monto_pagado_usd) for c in cxp_7d)
     
@@ -1809,8 +1994,8 @@ def tesoreria_dashboard(db: Session = Depends(get_db)):
 
 
 @tesoreria_router.get("/bancos")
-def listar_bancos(db: Session = Depends(get_db)):
-    cuentas = db.query(CuentaBancaria).all()
+def listar_bancos(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    cuentas = db.query(CuentaBancaria).filter(CuentaBancaria.tenant_id == current_user.tenant_id).all()
     tasa = tasa_actual(db)
     res = []
     for c in cuentas:
@@ -1847,13 +2032,14 @@ def listar_bancos(db: Session = Depends(get_db)):
 
 
 @tesoreria_router.post("/bancos")
-def crear_banco(body: dict, db: Session = Depends(get_db)):
+def crear_banco(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     c = CuentaBancaria(
         banco=body.get("nombre", ""),
         numero_cuenta=body.get("numero", ""),
         moneda=body.get("moneda", "VES"),
         saldo_actual_usd=body.get("saldo_actual", 0),
-        activa=(body.get("estado") == "Activa")
+        activa=(body.get("estado") == "Activa"),
+        tenant_id=current_user.tenant_id
     )
     db.add(c)
     db.commit()
@@ -1862,9 +2048,13 @@ def crear_banco(body: dict, db: Session = Depends(get_db)):
 
 
 @tesoreria_router.get("/movimientos")
-def movimientos_banco(periodo: str, db: Session = Depends(get_db)):
+def movimientos_banco(periodo: str, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     inicio, fin = periodo_rango(periodo)
-    movs = db.query(MovimientoBancario).filter(MovimientoBancario.fecha >= inicio, MovimientoBancario.fecha < fin).all()
+    movs = db.query(MovimientoBancario).filter(
+        MovimientoBancario.fecha >= inicio,
+        MovimientoBancario.fecha < fin,
+        MovimientoBancario.tenant_id == current_user.tenant_id
+    ).all()
     return [{
         "id": f"MOV-{str(m.id).zfill(4)}", 
         "fecha": m.fecha.strftime("%d/%m/%Y"), 
@@ -1884,9 +2074,13 @@ def importar_movimientos():
 
 
 @tesoreria_router.get("/conciliacion")
-def conciliacion(periodo: str, db: Session = Depends(get_db)):
+def conciliacion(periodo: str, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     inicio, fin = periodo_rango(periodo)
-    movs = db.query(MovimientoBancario).filter(MovimientoBancario.fecha >= inicio, MovimientoBancario.fecha < fin).all()
+    movs = db.query(MovimientoBancario).filter(
+        MovimientoBancario.fecha >= inicio,
+        MovimientoBancario.fecha < fin,
+        MovimientoBancario.tenant_id == current_user.tenant_id
+    ).all()
     
     movimientos = []
     cuentas_dict = {}
@@ -1948,11 +2142,15 @@ class RelacionarRequest(BaseModel):
     movimiento_id: str
     documento_id: str
 
+
 @tesoreria_router.get("/conciliacion/pendientes")
-def obtener_documentos_pendientes(db: Session = Depends(get_db)):
+def obtener_documentos_pendientes(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     # Devuelve ventas pendientes a modo de ejemplo
     from backend.models.erp_extended import Venta
-    ventas = db.query(Venta).filter(Venta.estado != 'ANULADA').limit(10).all()
+    ventas = db.query(Venta).filter(
+        Venta.estado != 'ANULADA',
+        Venta.tenant_id == current_user.tenant_id
+    ).limit(10).all()
     docs = []
     for v in ventas:
         docs.append({
@@ -1963,11 +2161,14 @@ def obtener_documentos_pendientes(db: Session = Depends(get_db)):
     return docs
 
 @tesoreria_router.post("/conciliacion/relacionar")
-def relacionar_documento(payload: RelacionarRequest, db: Session = Depends(get_db)):
+def relacionar_documento(payload: RelacionarRequest, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     # movimiento_id viene como MOV-123
     try:
         mov_id = int(payload.movimiento_id.replace("MOV-", ""))
-        mov = db.query(MovimientoBancario).filter(MovimientoBancario.id == mov_id).first()
+        mov = db.query(MovimientoBancario).filter(
+            MovimientoBancario.id == mov_id,
+            MovimientoBancario.tenant_id == current_user.tenant_id
+        ).first()
         if mov:
             mov.estado = "CONCILIADO"
             mov.documento_referencia = payload.documento_id
@@ -1978,9 +2179,15 @@ def relacionar_documento(payload: RelacionarRequest, db: Session = Depends(get_d
 
 
 @tesoreria_router.get("/flujo-caja")
-def flujo_caja_tesoreria(db: Session = Depends(get_db)):
-    cxc_rows = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.estado != "PAGADA").all()
-    cxp_rows = db.query(CuentaPorPagar).filter(CuentaPorPagar.estado != "PAGADA").all()
+def flujo_caja_tesoreria(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    cxc_rows = db.query(CuentaPorCobrar).filter(
+        CuentaPorCobrar.estado != "PAGADA",
+        CuentaPorCobrar.tenant_id == current_user.tenant_id
+    ).all()
+    cxp_rows = db.query(CuentaPorPagar).filter(
+        CuentaPorPagar.estado != "PAGADA",
+        CuentaPorPagar.tenant_id == current_user.tenant_id
+    ).all()
     proyecciones = []
     for r in cxc_rows:
         saldo = to_float(r.monto_total - r.monto_pagado)
@@ -2024,11 +2231,23 @@ def flujo_caja_tesoreria(db: Session = Depends(get_db)):
 
 
 @tesoreria_router.post("/conciliacion/marcar")
-def marcar_movimiento(body: dict):
-    return {"ok": True}
+def marcar_movimiento(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    mov_id = body.get("id") or body.get("movimiento_id")
+    estado = body.get("estado", "CONCILIADO")
+    
+    mov = db.query(MovimientoBancario).filter(
+        MovimientoBancario.id == mov_id,
+        MovimientoBancario.tenant_id == current_user.tenant_id
+    ).first()
+    if not mov:
+        raise HTTPException(status_code=404, detail="Movimiento no encontrado")
+    
+    mov.estado = estado
+    db.commit()
+    return {"ok": True, "id": mov_id, "estado": estado}
 
 @tesoreria_router.post("/conciliacion/cerrar")
-def cerrar_conciliacion_periodo(body: dict, db: Session = Depends(get_db)):
+def cerrar_conciliacion_periodo(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     periodo = body.get("periodo")
     if not periodo:
         raise HTTPException(status_code=400, detail="Periodo es requerido")
@@ -2037,7 +2256,8 @@ def cerrar_conciliacion_periodo(body: dict, db: Session = Depends(get_db)):
     movs = db.query(MovimientoBancario).filter(
         MovimientoBancario.fecha >= inicio, 
         MovimientoBancario.fecha < fin,
-        MovimientoBancario.estado != "CERRADO"
+        MovimientoBancario.estado != "CERRADO",
+        MovimientoBancario.tenant_id == current_user.tenant_id
     ).all()
     
     count = 0
@@ -2050,24 +2270,30 @@ def cerrar_conciliacion_periodo(body: dict, db: Session = Depends(get_db)):
 
 
 @tesoreria_router.get("/caja-chica")
-def caja_chica(db: Session = Depends(get_db)):
-    # Seed default fund if none exists
-    if db.query(FondoCajaChica).count() == 0:
+def caja_chica(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    # Seed default fund if none exists for the tenant
+    if db.query(FondoCajaChica).filter(FondoCajaChica.tenant_id == current_user.tenant_id).count() == 0:
         default_fondo = FondoCajaChica(
             nombre="Caja Chica Operativa",
             responsable="Administración",
             asignado_usd=500.00,
-            disponible_usd=500.00
+            disponible_usd=500.00,
+            tenant_id=current_user.tenant_id
         )
         db.add(default_fondo)
         db.commit()
 
-    fondos = db.query(FondoCajaChica).all()
-    gastos = db.query(GastoCajaChica).order_by(GastoCajaChica.fecha.desc(), GastoCajaChica.id.desc()).limit(50).all()
+    fondos = db.query(FondoCajaChica).filter(FondoCajaChica.tenant_id == current_user.tenant_id).all()
+    gastos = db.query(GastoCajaChica).join(FondoCajaChica).filter(
+        FondoCajaChica.tenant_id == current_user.tenant_id
+    ).order_by(GastoCajaChica.fecha.desc(), GastoCajaChica.id.desc()).limit(50).all()
 
     total_asignado = sum(to_float(f.asignado_usd) for f in fondos)
     total_disponible = sum(to_float(f.disponible_usd) for f in fondos)
-    soportes_pendientes = db.query(GastoCajaChica).filter(GastoCajaChica.soporte == "Sin Soporte").count()
+    soportes_pendientes = db.query(GastoCajaChica).join(FondoCajaChica).filter(
+        FondoCajaChica.tenant_id == current_user.tenant_id,
+        GastoCajaChica.soporte == "Sin Soporte"
+    ).count()
     reintegro_sugerido = total_asignado - total_disponible
 
     return {
@@ -2105,25 +2331,30 @@ def caja_chica(db: Session = Depends(get_db)):
 
 
 @tesoreria_router.post("/caja-chica/movimiento")
-def movimiento_caja_chica(body: dict, db: Session = Depends(get_db)):
+def movimiento_caja_chica(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     fondo_id_str = body.get("fondo_id", "")
     try:
         fid = int(fondo_id_str.replace("FD-", ""))
     except:
         fid = 1
 
-    fondo = db.query(FondoCajaChica).filter(FondoCajaChica.id == fid).first()
-    monto = float(body.get("monto", 0))
+    fondo = db.query(FondoCajaChica).filter(
+        FondoCajaChica.id == fid,
+        FondoCajaChica.tenant_id == current_user.tenant_id
+    ).first()
+    if not fondo:
+        raise HTTPException(status_code=404, detail="Fondo de caja chica no encontrado")
 
-    if fondo:
-        fondo.disponible_usd = max(0, float(fondo.disponible_usd) - monto)
+    monto = float(body.get("monto", 0))
+    fondo.disponible_usd = max(0, float(fondo.disponible_usd) - monto)
 
     gasto = GastoCajaChica(
         fondo_id=fid,
         concepto=body.get("concepto", "Gasto sin concepto"),
         monto_usd=monto,
         soporte=body.get("soporte", "Sin Soporte"),
-        no_deducible=body.get("no_deducible", False)
+        no_deducible=body.get("no_deducible", False),
+        tenant_id=current_user.tenant_id
     )
     db.add(gasto)
     db.commit()
@@ -2131,8 +2362,8 @@ def movimiento_caja_chica(body: dict, db: Session = Depends(get_db)):
 
 
 @tesoreria_router.post("/caja-chica/reponer")
-def reponer_caja_chica(db: Session = Depends(get_db)):
-    fondos = db.query(FondoCajaChica).all()
+def reponer_caja_chica(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    fondos = db.query(FondoCajaChica).filter(FondoCajaChica.tenant_id == current_user.tenant_id).all()
     for f in fondos:
         f.disponible_usd = f.asignado_usd
     db.commit()
@@ -2140,7 +2371,7 @@ def reponer_caja_chica(db: Session = Depends(get_db)):
 
 
 @tesoreria_router.post("/caja-chica/fondos")
-def registrar_fondo_caja_chica(body: dict, db: Session = Depends(get_db)):
+def registrar_fondo_caja_chica(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     nombre = body.get("nombre", "")
     responsable = body.get("responsable", "")
     asignado_usd = float(body.get("asignado_usd", 0.0))
@@ -2152,7 +2383,8 @@ def registrar_fondo_caja_chica(body: dict, db: Session = Depends(get_db)):
         nombre=nombre,
         responsable=responsable,
         asignado_usd=asignado_usd,
-        disponible_usd=asignado_usd
+        disponible_usd=asignado_usd,
+        tenant_id=current_user.tenant_id
     )
     db.add(nuevo_fondo)
     db.commit()
@@ -2160,42 +2392,57 @@ def registrar_fondo_caja_chica(body: dict, db: Session = Depends(get_db)):
 
 
 @tesoreria_router.get("/arqueo")
-def arqueo_caja(fecha: str, caja: str = "Caja Principal USD", db: Session = Depends(get_db)):
-    # Seed default cash accounts if they do not exist
-    caja_usd = db.query(CuentaBancaria).filter(CuentaBancaria.banco == "Caja Principal USD").first()
+def arqueo_caja(fecha: str, caja: str = "Caja Principal USD", db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    # Seed default cash accounts if they do not exist for the tenant
+    caja_usd = db.query(CuentaBancaria).filter(
+        CuentaBancaria.banco == "Caja Principal USD",
+        CuentaBancaria.tenant_id == current_user.tenant_id
+    ).first()
     if not caja_usd:
         caja_usd = CuentaBancaria(
             banco="Caja Principal USD",
             numero_cuenta="1234-CAJA-USD-01",
             moneda="USD",
-            saldo_actual_usd=1500.00
+            saldo_actual_usd=1500.00,
+            tenant_id=current_user.tenant_id
         )
         db.add(caja_usd)
         
-    caja_ventas = db.query(CuentaBancaria).filter(CuentaBancaria.banco == "Caja Chica Ventas").first()
+    caja_ventas = db.query(CuentaBancaria).filter(
+        CuentaBancaria.banco == "Caja Chica Ventas",
+        CuentaBancaria.tenant_id == current_user.tenant_id
+    ).first()
     if not caja_ventas:
         caja_ventas = CuentaBancaria(
             banco="Caja Chica Ventas",
             numero_cuenta="1234-CAJA-USD-02",
             moneda="USD",
-            saldo_actual_usd=350.00
+            saldo_actual_usd=350.00,
+            tenant_id=current_user.tenant_id
         )
         db.add(caja_ventas)
 
-    caja_ves = db.query(CuentaBancaria).filter(CuentaBancaria.banco == "Caja Principal VES").first()
+    caja_ves = db.query(CuentaBancaria).filter(
+        CuentaBancaria.banco == "Caja Principal VES",
+        CuentaBancaria.tenant_id == current_user.tenant_id
+    ).first()
     if not caja_ves:
         caja_ves = CuentaBancaria(
             banco="Caja Principal VES",
             numero_cuenta="1234-CAJA-VES-01",
             moneda="VES",
-            saldo_actual_usd=25000.00
+            saldo_actual_usd=25000.00,
+            tenant_id=current_user.tenant_id
         )
         db.add(caja_ves)
         
     db.commit()
 
     # Get balance of selected cash account
-    selected = db.query(CuentaBancaria).filter(CuentaBancaria.banco == caja).first()
+    selected = db.query(CuentaBancaria).filter(
+        CuentaBancaria.banco == caja,
+        CuentaBancaria.tenant_id == current_user.tenant_id
+    ).first()
     saldo_usd = to_float(selected.saldo_actual_usd) if selected else 0.0
 
     # Get balance of VES cash account
@@ -2210,7 +2457,7 @@ def arqueo_caja(fecha: str, caja: str = "Caja Principal USD", db: Session = Depe
 
 
 @tesoreria_router.post("/arqueo/cerrar")
-def cerrar_arqueo(body: dict, db: Session = Depends(get_db)):
+def cerrar_arqueo(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     import json
     from backend.models.erp_extended import AuditoriaLog
     
@@ -2222,12 +2469,18 @@ def cerrar_arqueo(body: dict, db: Session = Depends(get_db)):
     justificacion = body.get("justificacion", "")
 
     # Update balance of the selected cash account to reflect the physical count
-    selected = db.query(CuentaBancaria).filter(CuentaBancaria.banco == caja_name).first()
+    selected = db.query(CuentaBancaria).filter(
+        CuentaBancaria.banco == caja_name,
+        CuentaBancaria.tenant_id == current_user.tenant_id
+    ).first()
     if selected:
         selected.saldo_actual_usd = fisico_usd
 
     # Update balance of the VES cash account
-    caja_ves = db.query(CuentaBancaria).filter(CuentaBancaria.banco == "Caja Principal VES").first()
+    caja_ves = db.query(CuentaBancaria).filter(
+        CuentaBancaria.banco == "Caja Principal VES",
+        CuentaBancaria.tenant_id == current_user.tenant_id
+    ).first()
     if caja_ves:
         caja_ves.saldo_actual_usd = fisico_ves
 
@@ -2247,7 +2500,8 @@ def cerrar_arqueo(body: dict, db: Session = Depends(get_db)):
         accion="CIERRE_ARQUEO",
         modulo="TESORERIA",
         detalle=json.dumps(detalle_data),
-        fecha=datetime.now(timezone.utc)
+        fecha=datetime.now(timezone.utc),
+        tenant_id=current_user.tenant_id
     )
     db.add(log_entry)
     db.commit()
@@ -2266,7 +2520,8 @@ def exportar_arqueo_pdf(
     denom_10: int = 0,
     denom_5: int = 0,
     denom_1: int = 0,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
     from fastapi.responses import StreamingResponse
     from reportlab.lib import colors
@@ -2276,10 +2531,16 @@ def exportar_arqueo_pdf(
     import io
 
     # Retrieve system totals
-    selected = db.query(CuentaBancaria).filter(CuentaBancaria.banco == caja).first()
+    selected = db.query(CuentaBancaria).filter(
+        CuentaBancaria.banco == caja,
+        CuentaBancaria.tenant_id == current_user.tenant_id
+    ).first()
     system_usd = to_float(selected.saldo_actual_usd) if selected else 0.0
 
-    caja_ves = db.query(CuentaBancaria).filter(CuentaBancaria.banco == "Caja Principal VES").first()
+    caja_ves = db.query(CuentaBancaria).filter(
+        CuentaBancaria.banco == "Caja Principal VES",
+        CuentaBancaria.tenant_id == current_user.tenant_id
+    ).first()
     system_ves = to_float(caja_ves.saldo_actual_usd) if caja_ves else 0.0
 
     denoms = {
@@ -2407,54 +2668,999 @@ reportes_router = APIRouter(prefix="/reportes", tags=["Reportes"], dependencies=
 
 
 @reportes_router.get("/dashboard")
-def reportes_dashboard(db: Session = Depends(get_db)):
-    return {"modulos": ["ventas", "compras", "fiscal", "cartera"], "ultima_actualizacion": datetime.now(timezone.utc).isoformat()}
+def reportes_dashboard(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    from backend.models.erp_extended import CuentaBancaria, CuentaPorCobrar, LoteProducto
+    from backend.models.operations import Producto, Venta
+    from datetime import datetime, timezone, timedelta
+    
+    # 1. Total en bancos (USD)
+    total_bancos = db.query(func.sum(CuentaBancaria.saldo_actual_usd)).filter(
+        CuentaBancaria.tenant_id == current_user.tenant_id,
+        CuentaBancaria.activa == True
+    ).scalar() or 0.0
+    
+    # 2. Cuentas por cobrar activas (USD)
+    total_cxc = db.query(func.sum(CuentaPorCobrar.monto_total_usd - CuentaPorCobrar.monto_pagado_usd)).filter(
+        CuentaPorCobrar.tenant_id == current_user.tenant_id,
+        CuentaPorCobrar.estado != "PAGADA"
+    ).scalar() or 0.0
+    
+    # 3. Cantidad de SKUs
+    total_productos = db.query(func.count(Producto.id)).filter(
+        Producto.tenant_id == current_user.tenant_id
+    ).scalar() or 0
+    
+    # 4. Ventas del mes corriente
+    ahora = datetime.now(timezone.utc)
+    inicio_mes = datetime(ahora.year, ahora.month, 1, tzinfo=timezone.utc)
+    total_ventas_mes = db.query(func.sum(Venta.total_usd)).filter(
+        Venta.tenant_id == current_user.tenant_id,
+        Venta.estado == "ACTIVA",
+        Venta.fecha >= inicio_mes
+    ).scalar() or 0.0
+
+    metrics = [
+        {
+            "label": "Disponibilidad Bancaria",
+            "value": f"${float(total_bancos):,.2f}",
+            "trend": "Saldos netos en USD/Bs",
+            "trendColor": "text-[#0b5156]",
+            "type": "wallet"
+        },
+        {
+            "label": "Cuentas por Cobrar",
+            "value": f"${float(total_cxc):,.2f}",
+            "trend": "Pendiente de cobro",
+            "trendColor": "text-amber-500",
+            "type": "shield"
+        },
+        {
+            "label": "Productos Activos",
+            "value": str(total_productos),
+            "trend": "Items en inventario",
+            "trendColor": "text-blue-500",
+            "type": "package"
+        },
+        {
+            "label": "Ventas del Mes",
+            "value": f"${float(total_ventas_mes):,.2f}",
+            "trend": "Mes corriente",
+            "trendColor": "text-green-600",
+            "type": "trend"
+        }
+    ]
+
+    # Alertas ejecutivas
+    alerts = []
+    # Alerta 1: Stock agotado
+    agotados_count = db.query(func.count(Producto.id)).filter(
+        Producto.tenant_id == current_user.tenant_id,
+        Producto.stock <= 0
+    ).scalar() or 0
+    if agotados_count > 0:
+        alerts.append({
+            "type": "CRÍTICO",
+            "color": "bg-red-50 text-red-700 border-red-200",
+            "title": "ALERTA DE INVENTARIO CERO",
+            "desc": f"Se han detectado {agotados_count} SKUs con existencia en cero. Afecta despachos.",
+            "link": "/reportes/rentabilidad"
+        })
+
+    # Alerta 2: Cuentas por cobrar vencidas
+    cxc_vencidas = db.query(func.count(CuentaPorCobrar.id)).filter(
+        CuentaPorCobrar.tenant_id == current_user.tenant_id,
+        CuentaPorCobrar.estado != "PAGADA",
+        CuentaPorCobrar.fecha_vencimiento < ahora
+    ).scalar() or 0
+    if cxc_vencidas > 0:
+        alerts.append({
+            "type": "ADVERTENCIA",
+            "color": "bg-amber-50 text-amber-700 border-amber-200",
+            "title": "MORAS ACTIVAS EN CARTERA",
+            "desc": f"Hay {cxc_vencidas} facturas vencidas sin recaudar. Riesgo de devaluación.",
+            "link": "/reportes/antiguedad-cartera"
+        })
+
+    # Alerta 3: Lotes venciendo pronto
+    dentro_60 = ahora + timedelta(days=60)
+    lotes_venciendo = db.query(func.count(LoteProducto.id)).filter(
+        LoteProducto.tenant_id == current_user.tenant_id,
+        LoteProducto.fecha_vencimiento <= dentro_60,
+        LoteProducto.fecha_vencimiento >= ahora,
+        LoteProducto.cantidad > 0
+    ).scalar() or 0
+    if lotes_venciendo > 0:
+        alerts.append({
+            "type": "ATENCIÓN",
+            "color": "bg-blue-50 text-blue-700 border-blue-200",
+            "title": "LOTES PRÓXIMOS A VENCER",
+            "desc": f"Hay {lotes_venciendo} lotes de productos que vencen en los próximos 60 días.",
+            "link": "/reportes/rentabilidad"
+        })
+
+    if not alerts:
+        alerts.append({
+            "type": "INFO",
+            "color": "bg-green-50 text-green-700 border-green-200",
+            "title": "CONTROL DE RIESGO OPTIMIZADO",
+            "desc": "No se registran alertas operativas críticas para el tenant actual.",
+            "link": None
+        })
+
+    available_reports = [
+        {
+            "name": "Resumen Fiscal (Libro IVA)",
+            "desc": "Impuestos, base imponible y cuota tributaria mensual para la DP-31.",
+            "area": "Impuestos",
+            "freq": "Mensual",
+            "status": "Listo",
+            "statusColor": "bg-green-50 text-green-700 border-green-200",
+            "usage": "Declaración Fiscal",
+            "link": "/reportes/libro-fiscal"
+        },
+        {
+            "name": "Análisis de Ventas",
+            "desc": "Evolución de facturación, ticket promedio e histórico mensual.",
+            "area": "Ventas",
+            "freq": "Tiempo Real",
+            "status": "Listo",
+            "statusColor": "bg-green-50 text-green-700 border-green-200",
+            "usage": "Planificación Comercial",
+            "link": "/reportes/ventas"
+        },
+        {
+            "name": "Análisis de Compras y Egresos",
+            "desc": "Gastos acumulados, distribución por categoría y proveedores críticos.",
+            "area": "Compras",
+            "freq": "Tiempo Real",
+            "status": "Listo",
+            "statusColor": "bg-green-50 text-green-700 border-green-200",
+            "usage": "Auditoría de Costos",
+            "link": "/reportes/compras"
+        },
+        {
+            "name": "Antigüedad de Cartera (CxC)",
+            "desc": "Segmentación de moras por tramos de vencimiento y pérdida por devaluación.",
+            "area": "Cobranzas",
+            "freq": "Diario",
+            "status": "Listo",
+            "statusColor": "bg-green-50 text-green-700 border-green-200",
+            "usage": "Riesgo Crediticio",
+            "link": "/reportes/antiguedad-cartera"
+        },
+        {
+            "name": "Realización Diferencial Cambiario",
+            "desc": "Ganancia o pérdida en bolívares por cobro/pago indexado a tasa BCV.",
+            "area": "Finanzas",
+            "freq": "Tiempo Real",
+            "status": "Listo",
+            "statusColor": "bg-green-50 text-green-700 border-green-200",
+            "usage": "Control Cambiario",
+            "link": "/reportes/diferencial-cambiario"
+        },
+        {
+            "name": "Eficiencia Operativa",
+            "desc": "Cálculo de punto de equilibrio y ventas requeridas por sucursal.",
+            "area": "Finanzas",
+            "freq": "Mensual",
+            "status": "Listo",
+            "statusColor": "bg-green-50 text-green-700 border-green-200",
+            "usage": "Rentabilidad de Sedes",
+            "link": "/reportes/eficiencia"
+        },
+        {
+            "name": "Rentabilidad de Productos",
+            "desc": "Margen neto real por SKU cruzando costo de reposición y gastos prorrateados.",
+            "area": "Inventarios",
+            "freq": "Tiempo Real",
+            "status": "Listo",
+            "statusColor": "bg-green-50 text-green-700 border-green-200",
+            "usage": "Estrategia de Precios",
+            "link": "/reportes/rentabilidad"
+        },
+        {
+            "name": "Fuerza de Ventas y Comisiones",
+            "desc": "Rendimiento comercial de vendedores y comisiones liquidadas por cobro efectivo.",
+            "area": "Comercial",
+            "freq": "Mensual",
+            "status": "Listo",
+            "statusColor": "bg-green-50 text-green-700 border-green-200",
+            "usage": "Cálculo de Incentivos",
+            "link": "/reportes/vendedores"
+        },
+        {
+            "name": "Matriz ABC de Inventario",
+            "desc": "Clasificación de existencias según Rotación vs Margen (Estrellas, Vacas, Perros).",
+            "area": "Inventarios",
+            "freq": "Mensual",
+            "status": "Listo",
+            "statusColor": "bg-green-50 text-green-700 border-green-200",
+            "usage": "Rotación de Stock",
+            "link": "/reportes/matriz-abc"
+        },
+        {
+            "name": "Excepciones de Control Interno",
+            "desc": "Bitácora de operaciones anuladas, fuera de stock o manuales de alto riesgo.",
+            "area": "Auditoría",
+            "freq": "Diario",
+            "status": "Riesgo Detectado",
+            "statusColor": "bg-red-50 text-red-700 border-red-200",
+            "usage": "Prevención de Pérdidas",
+            "link": "/reportes/excepciones"
+        },
+        {
+            "name": "Constructor de Consultas",
+            "desc": "Extractor dinámico de dimensiones y métricas operativas para PowerBI/Excel.",
+            "area": "BI / Extracción",
+            "freq": "Ad-hoc",
+            "status": "Listo",
+            "statusColor": "bg-green-50 text-green-700 border-green-200",
+            "usage": "Auditoría Externa",
+            "link": "/reportes/query-builder"
+        }
+    ]
+
+    return {
+        "metrics": metrics,
+        "executiveAlerts": alerts,
+        "availableReports": available_reports,
+        "ultima_actualizacion": ahora.isoformat()
+    }
 
 
 @reportes_router.get("/ventas")
-def reporte_ventas(db: Session = Depends(get_db)):
-    ventas = db.query(Venta).filter(Venta.estado == "ACTIVA").all()
-    return {"total": sum(to_float(v.total) for v in ventas), "cantidad": len(ventas), "detalle": []}
+def reporte_ventas(periodo: str = None, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    from backend.models.operations import Venta, VentaDetalle, Cliente, Producto
+    from datetime import datetime, timezone, timedelta
+    from collections import defaultdict
+    
+    # Resolver periodo
+    if not periodo:
+        ahora = datetime.now(timezone.utc)
+        periodo = ahora.strftime("%Y-%m")
+        
+    try:
+        y, m = map(int, periodo.split("-"))
+    except:
+        y, m = datetime.now(timezone.utc).year, datetime.now(timezone.utc).month
+
+    # Rango del mes
+    inicio_mes = datetime(y, m, 1, tzinfo=timezone.utc)
+    if m == 12:
+        fin_mes = datetime(y + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        fin_mes = datetime(y, m + 1, 1, tzinfo=timezone.utc)
+
+    # Ventas totales del periodo
+    ventas = db.query(Venta).filter(
+        Venta.tenant_id == current_user.tenant_id,
+        Venta.estado == "ACTIVA",
+        Venta.fecha >= inicio_mes,
+        Venta.fecha < fin_mes
+    ).all()
+
+    total_facturado = sum(float(v.total_usd) for v in ventas)
+    cantidad_ventas = len(ventas)
+    ticket_promedio = total_facturado / cantidad_ventas if cantidad_ventas > 0 else 0.0
+
+    # Margen bruto promedio
+    # Cruzamos detalles con costo de producto
+    venta_detalles = db.query(VentaDetalle).join(Venta).filter(
+        Venta.tenant_id == current_user.tenant_id,
+        Venta.estado == "ACTIVA",
+        Venta.fecha >= inicio_mes,
+        Venta.fecha < fin_mes
+    ).all()
+    
+    total_venta_usd = 0.0
+    total_costo_usd = 0.0
+    for d in venta_detalles:
+        cant = float(d.cantidad)
+        precio = float(d.precio_usd_capturado)
+        costo = float(d.producto.costo_usd) if d.producto else 0.0
+        total_venta_usd += cant * precio
+        total_costo_usd += cant * costo
+        
+    margen_bruto = ((total_venta_usd - total_costo_usd) / total_venta_usd * 100.0) if total_venta_usd > 0 else 0.0
+
+    metrics = [
+        {
+            "label": "Total Facturado",
+            "value": f"${total_facturado:,.2f}",
+            "trend": "Ventas del mes",
+            "trendColor": "text-green-600",
+            "type": "trend"
+        },
+        {
+            "label": "Ventas Registradas",
+            "value": str(cantidad_ventas),
+            "trend": "Transacciones",
+            "trendColor": "text-blue-500",
+            "type": "target"
+        },
+        {
+            "label": "Ticket Promedio",
+            "value": f"${ticket_promedio:,.2f}",
+            "trend": "Valor medio",
+            "trendColor": "text-[#0b5156]",
+            "type": "ticket"
+        },
+        {
+            "label": "Margen Bruto Medio",
+            "value": f"{margen_bruto:.1f}%",
+            "trend": "Rentabilidad comercial",
+            "trendColor": "text-green-600",
+            "type": "activity"
+        }
+    ]
+
+    # Top 10 Clientes
+    clientes_agregados = defaultdict(float)
+    for v in ventas:
+        c_name = v.cliente.nombre if v.cliente else "CLIENTE GENERAL"
+        clientes_agregados[c_name] += float(v.total_usd)
+        
+    top_clients_list = []
+    sorted_clients = sorted(clientes_agregados.items(), key=lambda x: x[1], reverse=True)[:10]
+    for name, val in sorted_clients:
+        share = (val / total_facturado * 100.0) if total_facturado > 0 else 0.0
+        top_clients_list.append({
+            "name": name,
+            "share": f"{share:.1f}%",
+            "amount": f"${val:,.2f}",
+            "trend": "stable"
+        })
+
+    # Top Productos por Monto
+    productos_agregados = defaultdict(lambda: {"qty": 0.0, "amount": 0.0})
+    for d in venta_detalles:
+        p_name = d.producto.nombre if d.producto else "Producto Desconocido"
+        cant = float(d.cantidad)
+        monto = cant * float(d.precio_usd_capturado)
+        productos_agregados[p_name]["qty"] += cant
+        productos_agregados[p_name]["amount"] += monto
+        
+    top_products_list = []
+    sorted_prods = sorted(productos_agregados.items(), key=lambda x: x[1]["amount"], reverse=True)[:10]
+    for name, data_p in sorted_prods:
+        top_products_list.append({
+            "name": name,
+            "qty": int(data_p["qty"]),
+            "amount": f"${data_p['amount']:,.2f}"
+        })
+
+    # Datos históricos últimos 6 meses
+    chart_data = []
+    meses_es = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+    for i in range(5, -1, -1):
+        m_temp = m - i
+        y_temp = y
+        while m_temp <= 0:
+            m_temp += 12
+            y_temp -= 1
+        ini_temp = datetime(y_temp, m_temp, 1, tzinfo=timezone.utc)
+        if m_temp == 12:
+            fin_temp = datetime(y_temp + 1, 1, 1, tzinfo=timezone.utc)
+        else:
+            fin_temp = datetime(y_temp, m_temp + 1, 1, tzinfo=timezone.utc)
+            
+        m_total = db.query(func.sum(Venta.total_usd)).filter(
+            Venta.tenant_id == current_user.tenant_id,
+            Venta.estado == "ACTIVA",
+            Venta.fecha >= ini_temp,
+            Venta.fecha < fin_temp
+        ).scalar() or 0.0
+        
+        m_total_k = float(m_total) / 1000.0
+        is_current = (y_temp == y and m_temp == m)
+        
+        # Obtener tasa BCV histórica para el gráfico
+        tasa_mes = db.query(TasaCambio.valor_ves).filter(
+            TasaCambio.fecha < fin_temp
+        ).order_by(TasaCambio.fecha.desc()).first()
+        tasa_val = float(tasa_mes[0]) if tasa_mes else 36.52
+        
+        chart_data.append({
+            "month": meses_es[m_temp - 1],
+            "value": round(m_total_k, 1),
+            "height": f"{min(100, int(m_total_k * 5))}%" if m_total_k > 0 else "5%",
+            "active": is_current,
+            "rate": round(tasa_val, 2)
+        })
+
+    insight = (
+        f"Durante el período {periodo}, se facturó un total de ${total_facturado:,.2f} USD. "
+        f"El margen comercial neto se situó en {margen_bruto:.1f}% cruzando el costo de reposición real."
+    )
+
+    return {
+        "metrics": metrics,
+        "topClients": top_clients_list,
+        "topProducts": top_products_list,
+        "chartData": chart_data,
+        "insight": insight,
+        "alertContraction": None
+    }
 
 
 @reportes_router.get("/compras")
-def reporte_compras(db: Session = Depends(get_db)):
-    compras = db.query(Compra).all()
-    return {"total": sum(to_float(c.total) for c in compras), "cantidad": len(compras)}
+def reporte_compras(periodo: str = None, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    from backend.models.erp_extended import Compra, CuentaPorPagar
+    from backend.models.operations import Proveedor, EvaluacionProveedor
+    from datetime import datetime, timezone, timedelta
+    from collections import defaultdict
+    
+    # Resolver periodo
+    if not periodo:
+        ahora = datetime.now(timezone.utc)
+        periodo = ahora.strftime("%Y-%m")
+        
+    try:
+        y, m = map(int, periodo.split("-"))
+    except:
+        y, m = datetime.now(timezone.utc).year, datetime.now(timezone.utc).month
 
+    # Rango del mes
+    inicio_mes = datetime(y, m, 1, tzinfo=timezone.utc)
+    if m == 12:
+        fin_mes = datetime(y + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        fin_mes = datetime(y, m + 1, 1, tzinfo=timezone.utc)
+
+    # Compras totales
+    compras = db.query(Compra).filter(
+        Compra.tenant_id == current_user.tenant_id,
+        Compra.estado == "ACTIVA",
+        Compra.fecha >= inicio_mes,
+        Compra.fecha < fin_mes
+    ).all()
+
+    total_compras = sum(float(c.total_usd) for c in compras)
+    cantidad_compras = len(compras)
+    promedio_compra = total_compras / cantidad_compras if cantidad_compras > 0 else 0.0
+
+    # Cuentas por pagar pendientes
+    cxp_total = db.query(func.sum(CuentaPorPagar.monto_total_usd - CuentaPorPagar.monto_pagado_usd)).filter(
+        CuentaPorPagar.tenant_id == current_user.tenant_id,
+        CuentaPorPagar.estado != "PAGADA"
+    ).scalar() or 0.0
+
+    metrics = [
+        {
+            "label": "Gasto del Período",
+            "value": f"${total_compras:,.2f}",
+            "trend": "Compras del mes",
+            "trendColor": "text-[#0b5156]",
+            "type": "receipt"
+        },
+        {
+            "label": "Facturas Recibidas",
+            "value": str(cantidad_compras),
+            "trend": "Transacciones",
+            "trendColor": "text-blue-500",
+            "type": "clipboard"
+        },
+        {
+            "label": "Cuentas por Pagar",
+            "value": f"${float(cxp_total):,.2f}",
+            "trend": "Pendiente de pago",
+            "trendColor": "text-red-600",
+            "type": "clock"
+        },
+        {
+            "label": "Promedio por Factura",
+            "value": f"${promedio_compra:,.2f}",
+            "trend": "Valor medio",
+            "trendColor": "text-[#0b5156]",
+            "type": "truck"
+        }
+    ]
+
+    # Distribución por Categorías
+    cat_labels = {
+        "BIENES_INVENTARIO": "Bienes de Inventario",
+        "LOGISTICA": "Logística y Transporte",
+        "SERVICIOS": "Servicios y Suministros",
+        "OTROS": "Otros Gastos",
+    }
+    cat_colors = {
+        "BIENES_INVENTARIO": "bg-[#0b5156]",
+        "LOGISTICA": "bg-amber-500",
+        "SERVICIOS": "bg-indigo-500",
+        "OTROS": "bg-slate-400",
+    }
+    
+    categories_agregados = defaultdict(float)
+    for c in compras:
+        cat_key = c.categoria or "OTROS"
+        categories_agregados[cat_key] += float(c.total_usd)
+        
+    categories_list = []
+    for cat_key, value in categories_agregados.items():
+        pct = (value / total_compras * 100.0) if total_compras > 0 else 0.0
+        categories_list.append({
+            "name": cat_labels.get(cat_key, cat_key),
+            "amount": f"${value:,.2f}",
+            "percentage": round(pct, 1),
+            "color": cat_colors.get(cat_key, "bg-slate-400")
+        })
+    categories_list.sort(key=lambda x: x["percentage"], reverse=True)
+
+    # Proveedores Críticos
+    proveedores_agregados = defaultdict(float)
+    for c in compras:
+        prov_name = c.proveedor.nombre if c.proveedor else "Proveedor General"
+        proveedores_agregados[prov_name] += float(c.total_usd)
+        
+    suppliers_list = []
+    evaluaciones = db.query(EvaluacionProveedor).filter(EvaluacionProveedor.tenant_id == current_user.tenant_id).all()
+    eval_scores = {e.proveedor_id: float((e.score_precio * 0.4) + (e.score_calidad * 0.3) + (e.score_entrega * 0.3)) / 10.0 for e in evaluaciones}
+    
+    sorted_provs = sorted(proveedores_agregados.items(), key=lambda x: x[1], reverse=True)[:10]
+    for name, val in sorted_provs:
+        prov_obj = db.query(Proveedor).filter(Proveedor.nombre == name, Proveedor.tenant_id == current_user.tenant_id).first()
+        score = eval_scores.get(prov_obj.id, 8.5) if prov_obj else 8.5
+        suppliers_list.append({
+            "name": name,
+            "amount": f"${val:,.2f}",
+            "quality": round(score, 1),
+            "condition": "Crédito 30d"
+        })
+
+    # Histórico de compras 6 meses
+    chart_data = []
+    meses_es = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+    for i in range(5, -1, -1):
+        m_temp = m - i
+        y_temp = y
+        while m_temp <= 0:
+            m_temp += 12
+            y_temp -= 1
+        ini_temp = datetime(y_temp, m_temp, 1, tzinfo=timezone.utc)
+        if m_temp == 12:
+            fin_temp = datetime(y_temp + 1, 1, 1, tzinfo=timezone.utc)
+        else:
+            fin_temp = datetime(y_temp, m_temp + 1, 1, tzinfo=timezone.utc)
+            
+        m_total = db.query(func.sum(Compra.total_usd)).filter(
+            Compra.tenant_id == current_user.tenant_id,
+            Compra.estado == "ACTIVA",
+            Compra.fecha >= ini_temp,
+            Compra.fecha < fin_temp
+        ).scalar() or 0.0
+        
+        m_total_k = float(m_total) / 1000.0
+        is_current = (y_temp == y and m_temp == m)
+        chart_data.append({
+            "month": meses_es[m_temp - 1],
+            "value": round(m_total_k, 1),
+            "height": f"{min(100, int(m_total_k * 5))}%" if m_total_k > 0 else "5%",
+            "active": is_current
+        })
+
+    insight = (
+        f"Durante el período {periodo}, se registraron compras por un monto total de ${total_compras:,.2f} USD. "
+        f"El saldo acumulado de cuentas por pagar (CxP) activas del tenant es de ${float(cxp_total):,.2f} USD."
+    )
+
+    return {
+        "metrics": metrics,
+        "suppliers": suppliers_list,
+        "categories": categories_list,
+        "chartData": chart_data,
+        "insight": insight
+    }
 
 
 @reportes_router.get("/antiguedad-cartera")
-def reporte_antiguedad(db: Session = Depends(get_db)):
-    return {"rangos": []}
+def reporte_antiguedad(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    from backend.models.erp_extended import CuentaPorCobrar
+    from backend.models.operations import Cliente
+    from datetime import datetime, timezone, timedelta
+    from collections import defaultdict
+    
+    ahora = datetime.now(timezone.utc)
+    bcv_rate = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
+    tasa_actual = float(bcv_rate.valor_ves) if bcv_rate else 36.52
+    
+    cxc_list = db.query(CuentaPorCobrar).filter(
+        CuentaPorCobrar.tenant_id == current_user.tenant_id,
+        CuentaPorCobrar.estado != "PAGADA"
+    ).all()
+
+    total_cxc = sum(float(c.monto_total_usd - c.monto_pagado_usd) for c in cxc_list)
+    total_vencido = 0.0
+    total_perdida = 0.0
+    
+    tramos = {
+        "Al día": 0.0,
+        "Mora (1-30 d)": 0.0,
+        "Mora (31-60 d)": 0.0,
+        "Mora (+60 d)": 0.0
+    }
+    
+    clients_agregados = defaultdict(lambda: {
+        "total": 0.0,
+        "overdue": 0.0,
+        "days0_30": 0.0,
+        "days31_60": 0.0,
+        "daysPlus60": 0.0,
+        "loss": 0.0
+    })
+
+    for c in cxc_list:
+        saldo = float(c.monto_total_usd - c.monto_pagado_usd)
+        dias_vencimiento = (ahora - _as_aware(c.fecha_vencimiento)).days
+        
+        metodo = c.venta.metodo_pago if c.venta else "Transferencia"
+        perdida_c = 0.0
+        if metodo not in ["Divisa", "Efectivo"]:
+            tasa_orig = float(c.tasa_cambio_bs) if c.tasa_cambio_bs else tasa_actual
+            monto_bs = saldo * tasa_orig
+            usd_hoy = monto_bs / tasa_actual if tasa_actual > 0 else saldo
+            perdida_c = max(0.0, saldo - usd_hoy)
+            total_perdida += perdida_c
+            
+        cli_name = c.cliente.nombre if c.cliente else "Cliente General"
+        clients_agregados[cli_name]["total"] += saldo
+        clients_agregados[cli_name]["loss"] += perdida_c
+        
+        if dias_vencimiento <= 0:
+            tramos["Al día"] += saldo
+        else:
+            total_vencido += saldo
+            clients_agregados[cli_name]["overdue"] += saldo
+            
+            if dias_vencimiento <= 30:
+                tramos["Mora (1-30 d)"] += saldo
+                clients_agregados[cli_name]["days0_30"] += saldo
+            elif dias_vencimiento <= 60:
+                tramos["Mora (31-60 d)"] += saldo
+                clients_agregados[cli_name]["days31_60"] += saldo
+            else:
+                tramos["Mora (+60 d)"] += saldo
+                clients_agregados[cli_name]["daysPlus60"] += saldo
+
+    dso = 0.0
+    if len(cxc_list) > 0:
+        total_dias = sum(max(0, (ahora - _as_aware(c.fecha_emision)).days) for c in cxc_list)
+        dso = total_dias / len(cxc_list)
+
+    metrics = [
+        {
+            "label": "Total por Cobrar",
+            "value": f"${total_cxc:,.2f}",
+            "trend": "Cartera de clientes",
+            "trendColor": "text-[#0b5156]",
+            "type": "wallet"
+        },
+        {
+            "label": "Cartera Vencida",
+            "value": f"${total_vencido:,.2f}",
+            "trend": "Mora activa",
+            "trendColor": "text-red-600",
+            "type": "alert"
+        },
+        {
+            "label": "Erosión de Capital",
+            "value": f"-${total_perdida:,.2f}",
+            "trend": "Pérdida por devaluación",
+            "trendColor": "text-red-500",
+            "type": "trend"
+        },
+        {
+            "label": "Plazo Medio Cobro (DSO)",
+            "value": f"{int(dso)} días",
+            "trend": "Antigüedad promedio",
+            "trendColor": "text-blue-600",
+            "type": "clock"
+        }
+    ]
+
+    risk_segments = []
+    colors_map = {
+        "Al día": ("bg-emerald-500", "bg-emerald-500"),
+        "Mora (1-30 d)": ("bg-teal-600", "bg-teal-600"),
+        "Mora (31-60 d)": ("bg-[#0b5156]", "bg-[#0b5156]"),
+        "Mora (+60 d)": ("bg-red-600", "bg-red-600")
+    }
+    
+    for label, val in tramos.items():
+        pct = (val / total_cxc * 100.0) if total_cxc > 0 else 0.0
+        c1, c2 = colors_map.get(label, ("bg-slate-400", "bg-slate-400"))
+        risk_segments.append({
+            "label": label,
+            "value": f"${val:,.2f}",
+            "percentage": round(pct, 1),
+            "color": c1,
+            "legendColor": c2
+        })
+
+    clients_data_list = []
+    for name, data_c in clients_agregados.items():
+        risk = "Bajo"
+        risk_color = "bg-green-50 text-green-700"
+        
+        if data_c["overdue"] > 0:
+            pct_venc = data_c["overdue"] / data_c["total"]
+            if pct_venc > 0.5:
+                risk = "Crítico"
+                risk_color = "bg-red-100 text-red-700"
+            elif pct_venc > 0.2:
+                risk = "Alto"
+                risk_color = "bg-red-50 text-red-600"
+            else:
+                risk = "Medio"
+                risk_color = "bg-amber-50 text-amber-700"
+                
+        clients_data_list.append({
+            "name": name,
+            "total": f"${data_c['total']:,.2f}",
+            "overdue": f"${data_c['overdue']:,.2f}",
+            "days0_30": f"${data_c['days0_30']:,.2f}",
+            "days31_60": f"${data_c['days31_60']:,.2f}",
+            "daysPlus60": f"${data_c['daysPlus60']:,.2f}",
+            "loss": f"Bs. {(data_c['loss'] * tasa_actual):,.2f}",
+            "risk": risk,
+            "riskColor": risk_color
+        })
+        
+    insight = (
+        f"La cartera por cobrar activa suma un total de ${total_cxc:,.2f} USD. "
+        f"La tasa de erosión proyectada es de {((total_perdida / total_cxc * 100.0) if total_cxc > 0 else 0.0):.1f}%, "
+        f"equivalente a una pérdida real de capital de ${total_perdida:,.2f} USD por devaluación."
+    )
+
+    return {
+        "metrics": metrics,
+        "riskSegments": risk_segments,
+        "clientsData": clients_data_list,
+        "insight": insight
+    }
 
 
 @reportes_router.get("/diferencial-cambiario")
-def reporte_diferencial(db: Session = Depends(get_db)):
-    return {"ganancia": 0, "perdida": 0}
+def reporte_diferencial(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    from backend.models.erp_extended import CuentaPorCobrar, CuentaPorPagar
+    from datetime import datetime, timezone
+    
+    bcv_rate = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
+    tasa_actual = float(bcv_rate.valor_ves) if bcv_rate else 36.52
+    
+    cxc = db.query(CuentaPorCobrar).filter(
+        CuentaPorCobrar.tenant_id == current_user.tenant_id,
+        CuentaPorCobrar.estado == "PAGADA"
+    ).all()
+    
+    cxp = db.query(CuentaPorPagar).filter(
+        CuentaPorPagar.tenant_id == current_user.tenant_id,
+        CuentaPorPagar.estado == "PAGADA"
+    ).all()
+
+    ganancia_ves = 0.0
+    perdida_ves = 0.0
+    operations = []
+
+    for c in cxc:
+        saldo_usd = float(c.monto_pagado_usd)
+        tasa_issue = float(c.tasa_cambio_bs)
+        diff_tasa = tasa_actual - tasa_issue
+        diff_bs = saldo_usd * diff_tasa
+        
+        cli_name = c.cliente.nombre if c.cliente else "Cliente General"
+        
+        if diff_bs > 0:
+            ganancia_ves += diff_bs
+            diff_type = "success"
+            diff_str = f"+Bs. {diff_bs:,.2f}"
+        else:
+            perdida_ves += abs(diff_bs)
+            diff_type = "danger"
+            diff_str = f"-Bs. {abs(diff_bs):,.2f}"
+            
+        operations.append({
+            "id": c.numero_documento,
+            "client": cli_name,
+            "rateIssue": f"{tasa_issue:.2f}",
+            "rateCollection": f"{tasa_actual:.2f}",
+            "amountUsd": f"${saldo_usd:,.2f}",
+            "amountBsIssue": f"Bs. {(saldo_usd * tasa_issue):,.2f}",
+            "amountBsCollection": f"Bs. {(saldo_usd * tasa_actual):,.2f}",
+            "diff": diff_str,
+            "diffType": diff_type
+        })
+
+    for p in cxp:
+        saldo_usd = float(p.monto_pagado_usd)
+        tasa_issue = float(p.tasa_cambio_bs)
+        diff_tasa = tasa_actual - tasa_issue
+        diff_bs = saldo_usd * diff_tasa
+        
+        prov_name = p.proveedor.nombre if p.proveedor else "Proveedor General"
+        
+        if diff_bs > 0:
+            perdida_ves += diff_bs
+            diff_type = "danger"
+            diff_str = f"-Bs. {diff_bs:,.2f}"
+        else:
+            ganancia_ves += abs(diff_bs)
+            diff_type = "success"
+            diff_str = f"+Bs. {abs(diff_bs):,.2f}"
+            
+        operations.append({
+            "id": p.numero_documento,
+            "client": prov_name,
+            "rateIssue": f"{tasa_issue:.2f}",
+            "rateCollection": f"{tasa_actual:.2f}",
+            "amountUsd": f"${saldo_usd:,.2f}",
+            "amountBsIssue": f"Bs. {(saldo_usd * tasa_issue):,.2f}",
+            "amountBsCollection": f"Bs. {(saldo_usd * tasa_actual):,.2f}",
+            "diff": diff_str,
+            "diffType": diff_type
+        })
+
+    neto_ves = ganancia_ves - perdida_ves
+    neto_usd = neto_ves / tasa_actual if tasa_actual > 0 else 0.0
+
+    metrics = [
+        {
+            "label": "Ganancia Cambiaria",
+            "value": f"Bs. {ganancia_ves:,.2f}",
+            "desc": "Ajuste positivo acumulado",
+            "color": "text-green-600",
+            "type": "up"
+        },
+        {
+            "label": "Pérdida Cambiaria",
+            "value": f"Bs. {perdida_ves:,.2f}",
+            "desc": "Ajuste negativo acumulado",
+            "color": "text-red-500",
+            "type": "down"
+        },
+        {
+            "label": "Diferencial Cambiario Neto",
+            "value": f"Bs. {neto_ves:,.2f}",
+            "desc": f"Equivalente a ${neto_usd:,.2f} USD",
+            "color": "text-[#0b5156]" if neto_ves >= 0 else "text-red-600",
+            "type": "activity"
+        }
+    ]
+
+    insight = (
+        f"La devaluación acumulada del período genera una ganancia cambiaria nominal en Bolívares de Bs. {ganancia_ves:,.2f} "
+        f"y una pérdida cambiaria de Bs. {perdida_ves:,.2f}, resultando en un diferencial neto de Bs. {neto_ves:,.2f}."
+    )
+
+    return {
+        "metrics": metrics,
+        "operations": operations,
+        "insight": insight
+    }
 
 
 @reportes_router.get("/eficiencia")
-def reporte_eficiencia(db: Session = Depends(get_db)):
-    return {"indicadores": []}
+def reporte_eficiencia(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    from backend.models.erp_extended import Sucursal, Compra, CuentaPorPagar
+    from backend.models.operations import Venta
+    from datetime import datetime, timezone
+    
+    sucursales = db.query(Sucursal).filter(
+        Sucursal.tenant_id == current_user.tenant_id,
+        Sucursal.estado == "Activo"
+    ).all()
+
+    ventas_totales = db.query(func.sum(Venta.total_usd)).filter(
+        Venta.tenant_id == current_user.tenant_id,
+        Venta.estado == "ACTIVA"
+    ).scalar() or 0.0
+    ventas_totales = float(ventas_totales)
+
+    gastos_totales = db.query(func.sum(CuentaPorPagar.monto_total_usd)).filter(
+        CuentaPorPagar.tenant_id == current_user.tenant_id
+    ).scalar() or 0.0
+    gastos_totales = float(gastos_totales)
+
+    if not sucursales:
+        distribucion = [
+            {"id": 0, "nombre": "Sede Principal", "pct_sales": 1.0, "pct_expenses": 1.0, "meta": max(10000.0, float(gastos_totales) * 1.2)}
+        ]
+    else:
+        distribucion = []
+        for idx, s in enumerate(sucursales):
+            pct_s = 1.0 / len(sucursales)
+            distribucion.append({
+                "id": s.id,
+                "nombre": s.nombre,
+                "pct_sales": pct_s,
+                "pct_expenses": pct_s,
+                "meta": max(5000.0, (float(gastos_totales) / len(sucursales)) * 1.2)
+            })
+
+    branches_data = []
+    for d in distribucion:
+        s_sales = ventas_totales * d["pct_sales"]
+        s_fixed = gastos_totales * d["pct_expenses"]
+        
+        profitable = s_sales >= s_fixed
+        status = "SUPERÁVIT" if profitable else "DÉFICIT"
+        status_color = "bg-green-50 text-green-700 border-green-200" if profitable else "bg-red-50 text-red-700 border-red-200"
+        
+        meta_s = d["meta"]
+        marker_pct = (s_fixed / meta_s * 100.0) if meta_s > 0 else 0.0
+        progress_pct = (s_sales / meta_s * 100.0) if meta_s > 0 else 0.0
+        
+        missing_val = max(0.0, s_fixed - s_sales)
+        missing_str = f"${missing_val:,.2f}" if missing_val > 0 else None
+
+        branches_data.append({
+            "name": d["nombre"],
+            "sales": f"${s_sales:,.2f}",
+            "fixedExpenses": f"${s_fixed:,.2f}",
+            "status": status,
+            "statusColor": status_color,
+            "marker": min(100, int(marker_pct)),
+            "progress": min(100, int(progress_pct)),
+            "profitable": profitable,
+            "required": f"${s_fixed:,.2f}",
+            "missing": missing_str,
+            "meta": f"${meta_s:,.2f}"
+        })
+
+    margen_neto = ((ventas_totales - gastos_totales) / ventas_totales * 100.0) if ventas_totales > 0 else 0.0
+    metrics = [
+        {
+            "label": "Margen Operativo General",
+            "value": f"{margen_neto:.1f}%",
+            "desc": "Utilidad neta consolidada",
+            "color": "text-[#0b5156]" if margen_neto >= 0 else "text-red-600",
+            "type": "trend"
+        },
+        {
+            "label": "Punto Equilibrio Global",
+            "value": f"${gastos_totales:,.2f}",
+            "desc": "Ventas mínimas requeridas",
+            "color": "text-green-600",
+            "type": "target"
+        },
+        {
+            "label": "Eficiencia Consolidada",
+            "value": f"{round((ventas_totales / gastos_totales * 100.0) if gastos_totales > 0 else 0.0, 1)}%",
+            "desc": "Relación Ingresos/Egresos",
+            "color": "text-[#0b5156]" if ventas_totales >= gastos_totales else "text-red-500",
+            "type": "building"
+        }
+    ]
+
+    insight = (
+        f"El punto de equilibrio consolidado se ubica en ${gastos_totales:,.2f} USD. "
+        f"Las sucursales que presenten ventas por debajo de su costo fijo incurren en déficit operativo."
+    )
+
+    return {
+        "metrics": metrics,
+        "branches": branches_data,
+        "insight": insight
+    }
 
 
 @reportes_router.get("/matriz-abc")
-def matriz_abc(db: Session = Depends(get_db)):
-    # 1. Obtener ventas por producto en los últimos 30 días para medir rotación
+def matriz_abc(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    from backend.models.operations import Venta, VentaDetalle, Producto
+    from datetime import datetime, timezone, timedelta
+    
     hace_30_dias = datetime.now(timezone.utc) - timedelta(days=30)
     ventas_query = db.query(
         VentaDetalle.producto_id,
         func.sum(VentaDetalle.cantidad).label('total_vendido')
     ).select_from(VentaDetalle).join(Venta, VentaDetalle.venta_id == Venta.id).filter(
+        Venta.tenant_id == current_user.tenant_id,
         Venta.fecha >= hace_30_dias,
         Venta.estado != 'ANULADA'
     ).group_by(VentaDetalle.producto_id).all()
     
     sales_map = {prod_id: float(qty) for prod_id, qty in ventas_query}
     
-    # 2. Calcular rotación y rentabilidad para todos los productos
-    productos = db.query(Producto).all()
+    productos = db.query(Producto).filter(Producto.tenant_id == current_user.tenant_id).all()
     products_data = []
     for p in productos:
         rotacion = sales_map.get(p.id, 0.0)
@@ -2468,18 +3674,15 @@ def matriz_abc(db: Session = Depends(get_db)):
             "rentabilidad": rentabilidad
         })
         
-    # 3. Determinar umbrales promedio para los cuadrantes
     margins = [p_data['rentabilidad'] for p_data in products_data]
     rotations = [p_data['rotacion'] for p_data in products_data]
     
     avg_margin = sum(margins) / len(margins) if margins else 30.0
     avg_rot = sum(rotations) / len(rotations) if rotations else 1.0
     
-    # Asegurar límites mínimos de umbrales para evitar dividir por promedios muy bajos (por ejemplo, si todo es 0)
     margin_threshold = max(10.0, avg_margin)
     rot_threshold = max(1.0, avg_rot)
     
-    # 4. Clasificar productos en cuadrantes
     stars_items = []
     questions_items = []
     cows_items = []
@@ -2506,13 +3709,11 @@ def matriz_abc(db: Session = Depends(get_db)):
         else:
             dogs_items.append(item_formatted)
             
-    # Limitar items por cuadrante a los top 10 por volumen/margen para no sobrecargar el frontend
     stars_items = stars_items[:10]
     questions_items = questions_items[:10]
     cows_items = cows_items[:10]
     dogs_items = dogs_items[:10]
     
-    # 5. Estructurar respuesta en cuadrantes con el formato esperado por el frontend
     quadrants = [
         {
             "id": "stars",
@@ -2527,7 +3728,7 @@ def matriz_abc(db: Session = Depends(get_db)):
             "id": "questions",
             "title": "Incógnitas",
             "subtitle": "Baja Rotación • Alto Margen",
-            "desc": "Productos con buena ganancia pero poca salida. Considerar campaigns de promoción.",
+            "desc": "Productos con buena ganancia pero poca salida. Considerar campañas de promoción.",
             "color": "border-blue-300 bg-blue-50/10",
             "textColor": "text-blue-600",
             "items": questions_items
@@ -2556,7 +3757,7 @@ def matriz_abc(db: Session = Depends(get_db)):
         f"El algoritmo procesó {len(products_data)} productos del catálogo. "
         f"Se identificaron {len(stars_items)} productos Estrella, {len(questions_items)} Incógnitas, "
         f"{len(cows_items)} Vacas de Efectivo y {len(dogs_items)} Perros. "
-        f"Se recomienda enfocar los recursos de marketing en las Incógnitas y asegurar el stock de las Estrellas."
+        f"Se recomienda asegurar el stock de las Estrellas."
     )
     
     return {
@@ -2566,21 +3767,590 @@ def matriz_abc(db: Session = Depends(get_db)):
 
 
 @reportes_router.get("/rentabilidad")
-def rentabilidad_productos(db: Session = Depends(get_db)):
-    productos = db.query(Producto).all()
-    return {"items": [{"nombre": p.nombre, "margen": round((to_float(p.precio_usd) - to_float(p.costo_usd)) / max(to_float(p.precio_usd), 0.01) * 100, 1)} for p in productos]}
+def rentabilidad_productos(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    from backend.models.operations import Producto
+    from backend.models.erp_extended import CuentaPorPagar
+    from sqlalchemy import func
+    from datetime import datetime, timezone
+    
+    productos = db.query(Producto).filter(Producto.tenant_id == current_user.tenant_id).all()
+    
+    gastos_totales = db.query(func.sum(CuentaPorPagar.monto_total_usd)).filter(
+        CuentaPorPagar.tenant_id == current_user.tenant_id
+    ).scalar() or 0.0
+    gastos_totales = float(gastos_totales)
+    
+    total_stock_value = sum(float(p.costo_usd or 0.0) * float(p.stock or 0.0) for p in productos)
+    
+    total_rentabilidad = 0.0
+    items_count = 0
+    prod_rentables = 0
+    prod_perdida = 0
+    total_valor_riesgo = 0.0
+    
+    products_list = []
+    
+    for p in productos:
+        p_precio = float(p.precio_usd or 0.0)
+        p_costo = float(p.costo_usd or 0.0)
+        
+        p_stock = float(p.stock or 0.0)
+        
+        if total_stock_value > 0 and p_stock > 0:
+            porcentaje_gasto = (p_costo * p_stock) / total_stock_value
+            gasto_operativo_total = gastos_totales * porcentaje_gasto
+            gasto_operativo = gasto_operativo_total / p_stock
+        else:
+            gasto_operativo = 0.0
+            
+        margen_neto = p_precio - p_costo - gasto_operativo
+        margen_neto_pct = (margen_neto / p_precio * 100.0) if p_precio > 0 else 0.0
+        
+        is_loss = margen_neto < 0
+        if is_loss:
+            prod_perdida += 1
+            total_valor_riesgo += float(p.stock) * abs(margen_neto)
+        else:
+            prod_rentables += 1
+            
+        total_rentabilidad += margen_neto_pct
+        items_count += 1
+        
+        status = "Rentable" if margen_neto > 0 else "Crítico"
+        status_color = "bg-green-50 text-green-700 border-green-200" if margen_neto > 0 else "bg-red-50 text-red-700 border-red-200"
+        
+        products_list.append({
+            "name": p.nombre,
+            "price": f"${p_precio:,.2f}",
+            "cost": f"${p_costo:,.2f}",
+            "opExp": f"${gasto_operativo:,.2f}",
+            "netMargin": f"${margen_neto:,.2f}",
+            "netPercent": f"{margen_neto_pct:.1f}%",
+            "status": status,
+            "statusColor": status_color,
+            "isLoss": is_loss
+        })
+        
+    avg_margen = (total_rentabilidad / items_count) if items_count > 0 else 0.0
+    
+    metrics = [
+        {
+            "label": "Margen Neto Promedio",
+            "value": f"{avg_margen:.1f}%",
+            "desc": "Margen neta ponderada",
+            "color": "text-green-600" if avg_margen >= 0 else "text-red-500",
+            "type": "scale"
+        },
+        {
+            "label": "Productos con Pérdida",
+            "value": str(prod_perdida),
+            "desc": "Margen neto crítico",
+            "color": "text-red-600" if prod_perdida > 0 else "text-slate-800",
+            "type": "down"
+        },
+        {
+            "label": "Valor en Riesgo",
+            "value": f"${total_valor_riesgo:,.2f}",
+            "desc": "Pérdida latente en stock",
+            "color": "text-red-500",
+            "type": "alert"
+        },
+        {
+            "label": "SKUs Analizados",
+            "value": str(items_count),
+            "desc": "Items de catálogo",
+            "color": "text-[#0b5156]",
+            "type": "trend"
+        }
+    ]
+    
+    insight = (
+        f"El catálogo de productos del tenant cuenta con {items_count} SKUs analizados. "
+        f"Se registra un margen neto promedio ponderado del {avg_margen:.1f}%. "
+        f"Se detectaron {prod_perdida} productos con margen de utilidad neto negativo."
+    )
+    
+    return {
+        "metrics": metrics,
+        "products": products_list,
+        "insight": insight
+    }
 
 
 @reportes_router.get("/vendedores")
-def reporte_vendedores(db: Session = Depends(get_db)):
-    vendedores = db.query(Vendedor).filter(Vendedor.activo == True).all()
-    return {"vendedores": [{"nombre": v.nombre, "codigo": v.codigo, "meta": to_float(v.meta_mensual)} for v in vendedores]}
+def reporte_vendedores(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    from backend.models.erp_extended import Vendedor, CuentaPorCobrar
+    from backend.models.operations import Venta
+    from datetime import datetime, timezone
+    
+    vendedores = db.query(Vendedor).filter(
+        Vendedor.tenant_id == current_user.tenant_id,
+        Vendedor.activo == True
+    ).all()
+
+    if not vendedores:
+        v_billed = total_facturado
+        v_collected = total_cobrado
+        v_efficiency = (v_collected / v_billed * 100.0) if v_billed > 0 else 100.0
+        v_commission = v_collected * 0.05
+        total_comision = v_commission
+        v_overdue_pct = max(0.0, 100.0 - v_efficiency)
+        status = "ACTIVO" if v_efficiency >= 75 else "REVISIÓN"
+        status_color = "bg-green-50 text-green-700 border-green-200" if v_efficiency >= 75 else "bg-red-50 text-red-700 border-red-200"
+        
+        sales_force.append({
+            "name": "Vendedor Interno",
+            "billed": f"${v_billed:,.2f}",
+            "collected": f"${v_collected:,.2f}",
+            "efficiency": f"{v_efficiency:.1f}%",
+            "dso": "0 días",
+            "overdue": f"{v_overdue_pct:.1f}%",
+            "commission": f"${v_commission:,.2f}",
+            "status": status,
+            "statusColor": status_color,
+            "isCritical": v_efficiency < 75
+        })
+    else:
+        total_comision = 0.0
+        for v in vendedores:
+            ventas_v = [venta for venta in ventas if getattr(venta, 'vendedor_id', None) == v.id]
+            v_billed = sum(float(venta.total_usd) for venta in ventas_v)
+            
+            cxc_v = [c for c in cxc if c.venta and getattr(c.venta, 'vendedor_id', None) == v.id]
+            v_collected = sum(float(c.monto_pagado_usd) for c in cxc_v)
+            
+            v_efficiency = (v_collected / v_billed * 100.0) if v_billed > 0 else (100.0 if v_collected == 0 and v_billed == 0 else 0.0)
+            v_commission = v_collected * 0.05
+            total_comision += v_commission
+            v_overdue_pct = max(0.0, 100.0 - v_efficiency)
+            
+            status = "ACTIVO" if v_efficiency >= 75 else "REVISIÓN"
+            status_color = "bg-green-50 text-green-700 border-green-200" if v_efficiency >= 75 else "bg-red-50 text-red-700 border-red-200"
+    
+            sales_force.append({
+                "name": v.nombre,
+                "billed": f"${v_billed:,.2f}",
+                "collected": f"${v_collected:,.2f}",
+                "efficiency": f"{v_efficiency:.1f}%",
+                "dso": "30 días",
+                "overdue": f"{v_overdue_pct:.1f}%",
+                "commission": f"${v_commission:,.2f}",
+                "status": status,
+                "statusColor": status_color,
+                "isCritical": v_efficiency < 75
+            })
+
+    cobrabilidad_global = (total_cobrado / total_facturado * 100.0) if total_facturado > 0 else 0.0
+    metrics = [
+        {
+            "label": "Cobrado Consolidado",
+            "value": f"${total_cobrado:,.2f}",
+            "desc": "Efectivo real en caja",
+            "color": "text-[#0b5156]",
+            "type": "dollar"
+        },
+        {
+            "label": "Cobrabilidad Media",
+            "value": f"{cobrabilidad_global:.1f}%",
+            "desc": "Efectividad de recaudo",
+            "color": "text-green-600" if cobrabilidad_global >= 75 else "text-amber-500",
+            "type": "percent"
+        },
+        {
+            "label": "Comisiones Liquidadas",
+            "value": f"${total_comision:,.2f}",
+            "desc": "5% sobre cobro efectivo",
+            "color": "text-[#0b5156]",
+            "type": "clock"
+        },
+        {
+            "label": "Vendedores Críticos",
+            "value": str(sum(1 for v in sales_force if v["isCritical"])),
+            "desc": "Rendimiento < 75%",
+            "color": "text-red-600",
+            "type": "alert"
+        }
+    ]
+
+    insight = (
+        f"El porcentaje de cobrabilidad promedio de la fuerza comercial del tenant es del {cobrabilidad_global:.1f}%. "
+        f"Las comisiones de los vendedores son calculadas estrictamente sobre el cobro liquidado, no sobre la facturación."
+    )
+
+    return {
+        "metrics": metrics,
+        "salesForce": sales_force,
+        "insight": insight
+    }
 
 
 @reportes_router.get("/excepciones")
-def reporte_excepciones(db: Session = Depends(get_db)):
-    agotados = db.query(Producto).filter(Producto.stock <= 0).count()
-    return {"excepciones": [{"tipo": "Stock agotado", "cantidad": agotados}] if agotados else []}
+def reporte_excepciones(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    from backend.models.erp_extended import AuditoriaLog, Compra
+    from backend.models.operations import Producto, Venta
+    from datetime import datetime, timezone
+    
+    agotados = db.query(Producto).filter(
+        Producto.tenant_id == current_user.tenant_id,
+        Producto.stock <= 0
+    ).all()
+    
+    ventas_anuladas = db.query(Venta).filter(
+        Venta.tenant_id == current_user.tenant_id,
+        Venta.estado == "ANULADA"
+    ).all()
+    
+    compras_anuladas = db.query(Compra).filter(
+        Compra.tenant_id == current_user.tenant_id,
+        Compra.estado == "ANULADA"
+    ).all()
+
+    logs = db.query(AuditoriaLog).filter(
+        AuditoriaLog.tenant_id == current_user.tenant_id
+    ).order_by(AuditoriaLog.fecha.desc()).all()
+
+    exceptions_list = []
+    
+    for a in agotados:
+        exceptions_list.append({
+            "time": "Reciente",
+            "type": "Stock Agotado",
+            "typeColor": "bg-red-50 text-red-700 border-red-100",
+            "user": "Sistema",
+            "ref": a.sku,
+            "value": "N/A",
+            "justification": f"Producto '{a.nombre}' se quedó sin existencia física.",
+            "risk": "Alto",
+            "riskColor": "bg-red-50 text-red-600"
+        })
+        
+    for v in ventas_anuladas:
+        exceptions_list.append({
+            "time": v.fecha.strftime("%Y-%m-%d %H:%M") if v.fecha else "N/A",
+            "type": "Venta Anulada",
+            "typeColor": "bg-red-50 text-red-700 border-red-100",
+            "user": "Ventas",
+            "ref": v.numero_factura,
+            "value": f"${float(v.total_usd):,.2f}",
+            "justification": "Factura anulada por el departamento de facturación.",
+            "risk": "Crítico",
+            "riskColor": "bg-red-100 text-red-700"
+        })
+        
+    for c in compras_anuladas:
+        exceptions_list.append({
+            "time": c.fecha.strftime("%Y-%m-%d %H:%M") if c.fecha else "N/A",
+            "type": "Compra Anulada",
+            "typeColor": "bg-red-50 text-red-700 border-red-100",
+            "user": "Compras",
+            "ref": c.numero_factura,
+            "value": f"${float(c.total_usd):,.2f}",
+            "justification": "Orden de compra anulada por proveedor.",
+            "risk": "Alto",
+            "riskColor": "bg-red-50 text-red-600"
+        })
+
+    for log in logs:
+        exceptions_list.append({
+            "time": log.fecha.strftime("%Y-%m-%d %H:%M") if log.fecha else "N/A",
+            "type": log.accion,
+            "typeColor": "bg-slate-50 text-slate-700 border-slate-100",
+            "user": log.usuario,
+            "ref": log.modulo,
+            "value": "Auditoría",
+            "justification": log.detalle[:100] if log.detalle else "Registro de logs",
+            "risk": "Medio",
+            "riskColor": "bg-amber-50 text-amber-700"
+        })
+
+    exceptions_list = exceptions_list[:50]
+    total_exceptions = len(exceptions_list)
+    total_valor_anulado = sum(float(v.total_usd) for v in ventas_anuladas)
+    usuarios_inv = len(set(log.usuario for log in logs))
+    
+    metrics = [
+        {
+            "label": "Excepciones Totales",
+            "value": str(total_exceptions),
+            "desc": "Eventos bajo revisión",
+            "color": "text-slate-800",
+            "borderColor": "border-slate-300",
+            "type": "file"
+        },
+        {
+            "label": "Monto Anulado",
+            "value": f"${total_valor_anulado:,.2f}",
+            "desc": "Facturas canceladas",
+            "color": "text-red-600",
+            "borderColor": "border-red-500",
+            "type": "credit"
+        },
+        {
+            "label": "Usuarios Involucrados",
+            "value": str(max(1, usuarios_inv)),
+            "desc": "Acceso a excepciones",
+            "color": "text-blue-500",
+            "borderColor": "border-blue-500",
+            "type": "package"
+        },
+        {
+            "label": "SKUs Agotados",
+            "value": str(len(agotados)),
+            "desc": "Afecta operatividad",
+            "color": "text-red-500",
+            "borderColor": "border-red-400",
+            "type": "percent"
+        }
+    ]
+
+    insight = (
+        f"Se registran {total_exceptions} excepciones de control. El volumen de facturas anuladas sumó "
+        f"${total_valor_anulado:,.2f} USD. Se recomienda auditar las anulaciones del período."
+    )
+
+    return {
+        "metrics": metrics,
+        "exceptions": exceptions_list,
+        "insight": insight
+    }
+
+
+@reportes_router.get("/exportar")
+def exportar_reporte(reporte: str, periodo: str = None, formato: str = "csv", db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    from fastapi.responses import StreamingResponse
+    import io
+    import csv
+    from datetime import datetime, timezone
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+
+    if reporte == "ventas":
+        data_sales = reporte_ventas(periodo, db, current_user)
+        writer.writerow(["REPORTE DE VENTAS - PERIODO " + (periodo or "")])
+        writer.writerow([])
+        writer.writerow(["Metricas"])
+        for m in data_sales["metrics"]:
+            writer.writerow([m["label"], m["value"], m.get("desc", m.get("trend", ""))])
+        writer.writerow([])
+        writer.writerow(["Top Clientes"])
+        writer.writerow(["Cliente", "Participacion", "Monto"])
+        for c in data_sales["topClients"]:
+            writer.writerow([c["name"], c["share"], c["amount"]])
+        writer.writerow([])
+        writer.writerow(["Top Productos"])
+        writer.writerow(["Producto", "Cantidad", "Monto"])
+        for p in data_sales["topProducts"]:
+            writer.writerow([p["name"], p["qty"], p["amount"]])
+            
+    elif reporte == "compras":
+        data_purch = reporte_compras(periodo, db, current_user)
+        writer.writerow(["REPORTE DE COMPRAS - PERIODO " + (periodo or "")])
+        writer.writerow([])
+        writer.writerow(["Metricas"])
+        for m in data_purch["metrics"]:
+            writer.writerow([m["label"], m["value"], m.get("desc", m.get("trend", ""))])
+        writer.writerow([])
+        writer.writerow(["Gasto por Categoria"])
+        writer.writerow(["Categoria", "Monto", "Porcentaje"])
+        for cat in data_purch["categories"]:
+            writer.writerow([cat["name"], cat["amount"], f"{cat['percentage']}%"])
+        writer.writerow([])
+        writer.writerow(["Proveedores Criticos"])
+        writer.writerow(["Proveedor", "Monto", "Evaluacion"])
+        for s in data_purch["suppliers"]:
+            writer.writerow([s["name"], s["amount"], s["quality"]])
+            
+    elif reporte == "antiguedad":
+        data_aging = reporte_antiguedad(db, current_user)
+        writer.writerow(["REPORTE DE ANTIGUEDAD DE CARTERA - KODA ERP"])
+        writer.writerow([])
+        writer.writerow(["Metricas"])
+        for m in data_aging["metrics"]:
+            writer.writerow([m["label"], m["value"], m.get("desc", m.get("trend", ""))])
+        writer.writerow([])
+        writer.writerow(["Antiguedad por Cliente"])
+        writer.writerow(["Cliente", "Total Saldo", "Vencido", "0-30 d", "31-60 d", "+60 d", "Perdida Val. (Bs)", "Riesgo"])
+        for cli in data_aging["clientsData"]:
+            writer.writerow([cli["name"], cli["total"], cli["overdue"], cli["days0_30"], cli["days31_60"], cli["daysPlus60"], cli["loss"], cli["risk"]])
+
+    elif reporte == "diferencial":
+        data_diff = reporte_diferencial(db, current_user)
+        writer.writerow(["REPORTE DE DIFERENCIAL CAMBIARIO REALIZADO - KODA ERP"])
+        writer.writerow([])
+        writer.writerow(["Metricas"])
+        for m in data_diff["metrics"]:
+            writer.writerow([m["label"], m["value"], m.get("desc", m.get("trend", ""))])
+        writer.writerow([])
+        writer.writerow(["Detalle de Operaciones"])
+        writer.writerow(["Documento", "Cliente / Proveedor", "Tasa Emision", "Tasa Cobro", "Monto USD", "Bs (Emision)", "Bs (Cobro)", "Diferencial"])
+        for op in data_diff["operations"]:
+            writer.writerow([op["id"], op["client"], op["rateIssue"], op["rateCollection"], op["amountUsd"], op["amountBsIssue"], op["amountBsCollection"], op["diff"]])
+
+    elif reporte == "eficiencia":
+        data_eff = reporte_eficiencia(db, current_user)
+        writer.writerow(["REPORTE DE EFICIENCIA OPERATIVA POR SUCURSAL"])
+        writer.writerow([])
+        writer.writerow(["Metricas"])
+        for m in data_eff["metrics"]:
+            writer.writerow([m["label"], m["value"], m.get("desc", m.get("trend", ""))])
+        writer.writerow([])
+        writer.writerow(["Desglose por Sucursal"])
+        writer.writerow(["Sucursal", "Ventas Actuales", "Gastos Fijos", "Ventas Requeridas", "Diferencia / Faltante", "Meta", "Estado"])
+        for b in data_eff["branches"]:
+            writer.writerow([b["name"], b["sales"], b["fixedExpenses"], b["required"], b["missing"] or "0.00", b["meta"], b["status"]])
+
+    elif reporte == "rentabilidad":
+        data_prof = rentabilidad_productos(db, current_user)
+        writer.writerow(["REPORTE DE RENTABILIDAD NETAS POR SKU"])
+        writer.writerow([])
+        writer.writerow(["Metricas"])
+        for m in data_prof["metrics"]:
+            writer.writerow([m["label"], m["value"], m.get("desc", m.get("trend", ""))])
+        writer.writerow([])
+        writer.writerow(["Desglose de Margen Real"])
+        writer.writerow(["Producto / SKU", "Precio Venta (USD)", "Costo Reposic. (USD)", "Gasto Oper. (Prorr)", "Margen Neto ($)", "Margen Neto (%)", "Estado"])
+        for p in data_prof["products"]:
+            writer.writerow([p["name"], p["price"], p["cost"], p["opExp"], p["netMargin"], p["netPercent"], p["status"]])
+
+    elif reporte == "vendedores":
+        data_vend = reporte_vendedores(db, current_user)
+        writer.writerow(["REPORTE DE RENDIMIENTO FUERZA DE VENTAS Y COMISIONES"])
+        writer.writerow([])
+        writer.writerow(["Metricas"])
+        for m in data_vend["metrics"]:
+            writer.writerow([m["label"], m["value"], m.get("desc", m.get("trend", ""))])
+        writer.writerow([])
+        writer.writerow(["Ranking de Efectividad"])
+        writer.writerow(["Vendedor", "Facturado ($)", "Cobrado ($)", "% Cobrabilidad", "DSO (Dias)", "% Vencido", "Comision (5%)", "Estado"])
+        for s in data_vend["salesForce"]:
+            writer.writerow([s["name"], s["billed"], s["collected"], s["efficiency"], s["dso"], s["overdue"], s["commission"], s["status"]])
+
+    elif reporte == "excepciones":
+        data_exc = reporte_excepciones(db, current_user)
+        writer.writerow(["REPORTE DE EXCEPCIONES Y LOGS DE AUDITORIA"])
+        writer.writerow([])
+        writer.writerow(["Metricas"])
+        for m in data_exc["metrics"]:
+            writer.writerow([m["label"], m["value"], m.get("desc", m.get("trend", ""))])
+        writer.writerow([])
+        writer.writerow(["Bitacora de Acciones de Alto Riesgo"])
+        writer.writerow(["Fecha/Hora", "Tipo", "Usuario", "Referencia", "Valor Afectado", "Justificacion", "Riesgo"])
+        for ex in data_exc["exceptions"]:
+            writer.writerow([ex["time"], ex["type"], ex["user"], ex["ref"], ex["value"], ex["justification"], ex["risk"]])
+
+    elif reporte == "abc":
+        data_abc = matriz_abc(db, current_user)
+        writer.writerow(["MATRIZ ABC DE INVENTARIO - ESTRATEGICO"])
+        writer.writerow([])
+        writer.writerow(["Insight:"])
+        writer.writerow([data_abc["insight"]])
+        writer.writerow([])
+        for q in data_abc["quadrants"]:
+            writer.writerow(["Cuadrante: " + q["title"] + " (" + q["subtitle"] + ")"])
+            writer.writerow(["Descripcion: " + q["desc"]])
+            writer.writerow(["Nombre Producto", "Metrica/Margen"])
+            for item in q["items"]:
+                writer.writerow([item["name"], item["value"]])
+            writer.writerow([])
+    else:
+        writer.writerow(["REPORTE DESCONOCIDO"])
+
+    output = io.BytesIO(buffer.getvalue().encode("utf-8-sig"))
+    return StreamingResponse(
+        output,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=reporte_{reporte}_{periodo or 'koda'}.csv"}
+    )
+
+
+@reportes_router.get("/query-builder/exportar")
+def exportar_query_builder(fields: str, periodo: str = None, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    from fastapi.responses import StreamingResponse
+    import io
+    import csv
+    from datetime import datetime, timezone
+    from backend.models.operations import Venta, VentaDetalle, Producto
+    
+    field_keys = [f.strip() for f in fields.split(",") if f.strip()]
+    
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    
+    headers = [k.upper() for k in field_keys]
+    writer.writerow(headers)
+    
+    query = db.query(VentaDetalle).join(Venta).filter(
+        Venta.tenant_id == current_user.tenant_id,
+        Venta.estado == "ACTIVA"
+    )
+    
+    if periodo:
+        try:
+            inicio, fin = periodo_rango(periodo)
+            query = query.filter(Venta.fecha >= inicio, Venta.fecha < fin)
+        except:
+            pass
+            
+    detalles = query.all()
+    
+    for d in detalles:
+        row = []
+        for key in field_keys:
+            if key == "date":
+                row.append(d.venta.fecha.strftime("%Y-%m-%d") if d.venta and d.venta.fecha else "N/A")
+            elif key == "branch":
+                row.append("Principal" if not getattr(d.venta, 'sucursal_id', None) else "Otra Sucursal")
+            elif key == "customer":
+                row.append(d.venta.cliente.nombre if d.venta and d.venta.cliente else "CLIENTE GENERAL")
+            elif key == "sku":
+                row.append(d.producto.sku if d.producto else "N/A")
+            elif key == "category":
+                row.append("General" if not d.producto else ("Exento" if d.producto.es_exento else "Gravado"))
+            elif key == "seller":
+                row.append(d.venta.vendedor.nombre if d.venta and getattr(d.venta, 'vendedor', None) else "NO ASIGNADO")
+            elif key == "netAmount":
+                row.append(f"{float(d.precio_usd_capturado * d.cantidad):.2f}")
+            elif key == "quantity":
+                row.append(f"{float(d.cantidad):.2f}")
+            elif key == "cost":
+                costo = float(d.producto.costo_usd) if d.producto else 0.0
+                row.append(f"{costo * float(d.cantidad):.2f}")
+            elif key == "margin":
+                precio = float(d.precio_usd_capturado)
+                costo = float(d.producto.costo_usd) if d.producto else 0.0
+                margin = ((precio - costo) / precio * 100.0) if precio > 0 else 0.0
+                row.append(f"{margin:.1f}%")
+            elif key == "tax":
+                row.append(f"{float(d.precio_usd_capturado * d.cantidad * Decimal('0.16')):.2f}")
+            else:
+                row.append("")
+        writer.writerow(row)
+        
+    output = io.BytesIO(buffer.getvalue().encode("utf-8-sig"))
+    return StreamingResponse(
+        output,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=query_koda_export.csv"}
+    )
+
+
+@reportes_router.post("/bloquear")
+def bloquear_periodo_critico(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    from backend.models.erp_extended import AuditoriaLog
+    from datetime import datetime, timezone
+    
+    log = AuditoriaLog(
+        tenant_id=current_user.tenant_id,
+        usuario=current_user.email,
+        accion="CIERRE_PERIODO",
+        modulo="REPORTES",
+        detalle="Se ha bloqueado el período operativo crítico para auditoría de control interno por el usuario.",
+        fecha=datetime.now(timezone.utc)
+    )
+    db.add(log)
+    db.commit()
+    return {"status": "ok", "message": "Período crítico bloqueado exitosamente."}
 
 
 # --- VENTAS EXTENDIDAS ---
@@ -2600,6 +4370,158 @@ def get_status_color(estado: str) -> str:
     elif est == "vencida":
         return "bg-amber-50 text-amber-700 border border-amber-100"
     return "bg-slate-100 text-slate-700"
+
+
+@ventas_ext_router.get("/{id}/pdf")
+def descargar_factura_pdf(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Genera el PDF oficial de una factura (venta) usando ReportLab."""
+    import io
+    from fastapi.responses import StreamingResponse
+    from backend.models.operations import Venta
+    
+    venta = db.query(Venta).filter(Venta.id == id).first()
+    if not venta:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+        
+    try:
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib import colors
+        from reportlab.platypus import Table, TableStyle
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Librería reportlab no instalada.")
+        
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    ancho, alto = letter
+    
+    # Emisor (Koda ERP default)
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, alto - 50, "KODA ENTERPRISES, C.A.")
+    c.setFont("Helvetica", 10)
+    c.drawString(50, alto - 65, "R.I.F.: J-41234567-8")
+    c.drawString(50, alto - 78, "Av. Francisco de Miranda, Caracas, Venezuela")
+    
+    # Título Documento
+    c.setFont("Helvetica-Bold", 16)
+    c.setFillColor(colors.HexColor("#0b5156"))
+    c.drawString(380, alto - 50, "FACTURA DE VENTA")
+    c.setFillColor(colors.black)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(380, alto - 68, f"NRO. CONTROL: {venta.numero_factura}")
+    c.setFont("Helvetica", 10)
+    c.drawString(380, alto - 82, f"FECHA EMISIÓN: {venta.fecha.strftime('%d/%m/%Y')}")
+    c.drawString(380, alto - 96, f"ESTADO: {venta.estado}")
+    
+    # Línea divisoria
+    c.setLineWidth(1)
+    c.setStrokeColor(colors.HexColor("#e2e8f0"))
+    c.line(50, alto - 110, ancho - 50, alto - 110)
+    
+    # Información del Cliente
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(50, alto - 130, "DATOS DEL ADQUIRIENTE:")
+    c.setFont("Helvetica", 10)
+    cliente_nombre = venta.cliente.nombre if venta.cliente else "CLIENTE GENERAL"
+    cliente_rif = venta.cliente.rif if venta.cliente else "N/A"
+    c.drawString(50, alto - 148, f"Razón Social: {cliente_nombre}")
+    c.drawString(50, alto - 162, f"R.I.F. / C.I.: {cliente_rif}")
+    c.drawString(50, alto - 176, f"Método de Pago: {venta.metodo_pago}")
+    c.drawString(50, alto - 190, f"Tasa de Cambio: Bs. {float(venta.tasa_cambio_bs):.2f}")
+    
+    # Tabla de Detalles
+    c.line(50, alto - 210, ancho - 50, alto - 210)
+    
+    data_tabla = [["CANT.", "DESCRIPCIÓN PRODUCTO", "PRECIO (USD)", "TOTAL (USD)"]]
+    for item in venta.detalles:
+        prod_nombre = item.producto.nombre if item.producto else "Producto"
+        precio = float(item.precio_usd_capturado)
+        cantidad = float(item.cantidad)
+        sub_total_linea = precio * cantidad
+        data_tabla.append([
+            f"{cantidad:.0f}",
+            prod_nombre.upper(),
+            f"${precio:.2f}",
+            f"${sub_total_linea:.2f}"
+        ])
+        
+    t = Table(data_tabla, colWidths=[50, 260, 100, 100])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#0b5156")),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,0), 9),
+        ('BOTTOMPADDING', (0,0), (-1,0), 6),
+        ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#f8fafc")),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cbd5e1")),
+        ('FONTNAME', (0,1), (-1,-1), 'Helvetica'),
+        ('FONTSIZE', (0,1), (-1,-1), 9),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+    ]))
+    
+    # Calcular alto requerido por la tabla
+    tabla_alto = len(data_tabla) * 20
+    pos_y_tabla = alto - 230 - tabla_alto
+    
+    t.wrapOn(c, ancho - 100, alto)
+    t.drawOn(c, 50, pos_y_tabla)
+    
+    # Resumen de Totales
+    pos_y_totales = pos_y_tabla - 20
+    c.setLineWidth(1)
+    c.line(50, pos_y_totales, ancho - 50, pos_y_totales)
+    
+    subtotal = float(venta.subtotal_usd)
+    iva = float(venta.iva_usd)
+    igtf = float(venta.igtf_usd)
+    total_usd = float(venta.total_usd)
+    total_bs = total_usd * float(venta.tasa_cambio_bs)
+    
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(350, pos_y_totales - 20, "SUBTOTAL (USD):")
+    c.drawRightString(ancho - 50, pos_y_totales - 20, f"${subtotal:.2f}")
+    
+    c.drawString(350, pos_y_totales - 35, "I.V.A. (16% USD):")
+    c.drawRightString(ancho - 50, pos_y_totales - 35, f"${iva:.2f}")
+    
+    if igtf > 0:
+        c.drawString(350, pos_y_totales - 50, "I.G.T.F. (3% USD):")
+        c.drawRightString(ancho - 50, pos_y_totales - 50, f"${igtf:.2f}")
+        offset_y = 65
+    else:
+        offset_y = 50
+        
+    c.setFont("Helvetica-Bold", 11)
+    c.setFillColor(colors.HexColor("#0b5156"))
+    c.drawString(350, pos_y_totales - offset_y, "TOTAL GENERAL (USD):")
+    c.drawRightString(ancho - 50, pos_y_totales - offset_y, f"${total_usd:.2f}")
+    
+    c.setFont("Helvetica-Bold", 10)
+    c.setFillColor(colors.HexColor("#1e293b"))
+    c.drawString(350, pos_y_totales - offset_y - 18, "TOTAL GENERAL (Bs.):")
+    c.drawRightString(ancho - 50, pos_y_totales - offset_y - 18, f"Bs. {total_bs:.2f}")
+    
+    # Pie de Página Legal
+    c.setFillColor(colors.black)
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawCentredString(ancho / 2, 40, "Este documento es una representación digital válida de la factura correspondiente de Koda ERP.")
+    c.drawCentredString(ancho / 2, 28, "Conforme a la providencia administrativa Nro. SNAT/2014/00071 dictada por el SENIAT.")
+    
+    c.showPage()
+    c.save()
+    
+    buffer.seek(0)
+    filename = f"Factura-{venta.numero_factura}.pdf"
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 
 @ventas_ext_router.get("/cotizaciones")
@@ -3123,10 +5045,10 @@ inventario_ext_router = APIRouter(prefix="/inventario", tags=["Inventario"], dep
 
 
 @inventario_ext_router.get("/dashboard")
-def inventario_dashboard(db: Session = Depends(get_db)):
-    total_sku = db.query(func.count(Producto.id)).scalar() or 0
-    agotados = db.query(func.count(Producto.id)).filter(Producto.stock <= 0).scalar() or 0
-    valor = db.query(func.sum(Producto.stock * Producto.costo_usd)).scalar() or 0
+def inventario_dashboard(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    total_sku = db.query(func.count(Producto.id)).filter(Producto.tenant_id == current_user.tenant_id).scalar() or 0
+    agotados = db.query(func.count(Producto.id)).filter(Producto.stock <= 0, Producto.tenant_id == current_user.tenant_id).scalar() or 0
+    valor = db.query(func.sum(Producto.stock * Producto.costo_usd)).filter(Producto.tenant_id == current_user.tenant_id).scalar() or 0
 
     # 1. VPD (Venta Promedio Diaria) - Últimos 30 días
     hace_30_dias = datetime.now(timezone.utc) - timedelta(days=30)
@@ -3135,7 +5057,8 @@ def inventario_dashboard(db: Session = Depends(get_db)):
         func.sum(VentaDetalle.cantidad).label('total_vendido')
     ).select_from(VentaDetalle).join(Venta, VentaDetalle.venta_id == Venta.id).join(Producto, VentaDetalle.producto_id == Producto.id).filter(
         Venta.fecha >= hace_30_dias,
-        Venta.estado != 'ANULADA'
+        Venta.estado != 'ANULADA',
+        Producto.tenant_id == current_user.tenant_id
     ).group_by(Producto.id).all()
     
     vpdItems = []
@@ -3166,8 +5089,8 @@ def inventario_dashboard(db: Session = Depends(get_db)):
     vpdItems = vpdItems[:5] # Top 5 for dashboard
 
     # 2. Valorización por Categoría (usando es_exento temporalmente como categoría)
-    valor_exento = db.query(func.sum(Producto.stock * Producto.costo_usd)).filter(Producto.es_exento == True).scalar() or 0
-    valor_gravado = db.query(func.sum(Producto.stock * Producto.costo_usd)).filter(Producto.es_exento == False).scalar() or 0
+    valor_exento = db.query(func.sum(Producto.stock * Producto.costo_usd)).filter(Producto.es_exento == True, Producto.tenant_id == current_user.tenant_id).scalar() or 0
+    valor_gravado = db.query(func.sum(Producto.stock * Producto.costo_usd)).filter(Producto.es_exento == False, Producto.tenant_id == current_user.tenant_id).scalar() or 0
     
     total_val = float(valor or 0)
     categoryValorization = []
@@ -3194,12 +5117,13 @@ def inventario_dashboard(db: Session = Depends(get_db)):
     lotes_proximos = db.query(LoteProducto).filter(
         LoteProducto.fecha_vencimiento != None,
         LoteProducto.fecha_vencimiento <= dentro_de_60_dias,
-        LoteProducto.cantidad > 0
+        LoteProducto.cantidad > 0,
+        LoteProducto.tenant_id == current_user.tenant_id
     ).order_by(LoteProducto.fecha_vencimiento.asc()).limit(5).all()
     
     expiryAlerts = []
     for lote in lotes_proximos:
-        prod = db.query(Producto).filter(Producto.id == lote.producto_id).first()
+        prod = db.query(Producto).filter(Producto.id == lote.producto_id, Producto.tenant_id == current_user.tenant_id).first()
         dias_restantes = (lote.fecha_vencimiento - datetime.now(timezone.utc)).days
         if dias_restantes < 0: dias_restantes = 0
         
@@ -3215,7 +5139,7 @@ def inventario_dashboard(db: Session = Depends(get_db)):
         })
 
     # 4. Cálculo de concentración de inventario (Análisis ABC) basado en valor de stock
-    productos_abc = db.query(Producto).filter(Producto.stock > 0, Producto.costo_usd > 0).all()
+    productos_abc = db.query(Producto).filter(Producto.stock > 0, Producto.costo_usd > 0, Producto.tenant_id == current_user.tenant_id).all()
     abcAnalysis = "Sin datos suficientes para procesar la concentración de inventario (Análisis ABC). Registre compras y ventas para alimentar el motor de análisis."
     if productos_abc:
         items_value = []
@@ -3278,16 +5202,16 @@ def inventario_dashboard(db: Session = Depends(get_db)):
 
 @inventario_ext_router.get("/kardex-stats")
 def kardex_stats(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    movs = db.query(func.count(KardexMovimiento.id)).scalar() or 0
-    prods_mov = db.query(func.count(func.distinct(KardexMovimiento.producto_id))).scalar() or 0
+    movs = db.query(func.count(KardexMovimiento.id)).filter(KardexMovimiento.tenant_id == current_user.tenant_id).scalar() or 0
+    prods_mov = db.query(func.count(func.distinct(KardexMovimiento.producto_id))).filter(KardexMovimiento.tenant_id == current_user.tenant_id).scalar() or 0
     
     # Obtener fecha del último movimiento
-    ultimo = db.query(KardexMovimiento).order_by(KardexMovimiento.fecha.desc()).first()
+    ultimo = db.query(KardexMovimiento).filter(KardexMovimiento.tenant_id == current_user.tenant_id).order_by(KardexMovimiento.fecha.desc()).first()
     ultimo_mov_fecha = ultimo.fecha.strftime("%d/%m/%Y %H:%M") if ultimo else "N/A"
     
     # Calcular promedio de costo y valor total de inventario
-    avg_cost = db.query(func.avg(Producto.costo_usd)).scalar() or 0.0
-    total_cost = db.query(func.sum(Producto.stock * Producto.costo_usd)).scalar() or 0.0
+    avg_cost = db.query(func.avg(Producto.costo_usd)).filter(Producto.tenant_id == current_user.tenant_id).scalar() or 0.0
+    total_cost = db.query(func.sum(Producto.stock * Producto.costo_usd)).filter(Producto.tenant_id == current_user.tenant_id).scalar() or 0.0
     
     return {
         "movimientos": movs,
@@ -3306,8 +5230,14 @@ def kardex_stats(db: Session = Depends(get_db), current_user = Depends(get_curre
 
 
 @inventario_ext_router.get("/kardex/{producto_id}")
-def kardex_producto(producto_id: int, db: Session = Depends(get_db)):
-    movs = db.query(KardexMovimiento).filter(KardexMovimiento.producto_id == producto_id).order_by(KardexMovimiento.fecha.desc()).all()
+def kardex_producto(producto_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    prod = db.query(Producto).filter(Producto.id == producto_id, Producto.tenant_id == current_user.tenant_id).first()
+    if not prod:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    movs = db.query(KardexMovimiento).filter(
+        KardexMovimiento.producto_id == producto_id,
+        KardexMovimiento.tenant_id == current_user.tenant_id
+    ).order_by(KardexMovimiento.fecha.desc()).all()
     return [{"tipo": m.tipo_movimiento, "cantidad": m.cantidad, "doc": m.documento_referencia, "fecha": m.fecha.isoformat()} for m in movs]
 
 
@@ -3319,10 +5249,10 @@ class TransferenciaCreate(BaseModel):
 
 
 @inventario_ext_router.get("/transferencias")
-def transferencias(db: Session = Depends(get_db)):
-    rows = db.query(TransferenciaInventario).order_by(TransferenciaInventario.fecha.desc()).all()
-    prods = {p.id: p for p in db.query(Producto).all()}
-    almacenes = {a.id: a for a in db.query(Almacen).all()}
+def transferencias(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    rows = db.query(TransferenciaInventario).filter(TransferenciaInventario.tenant_id == current_user.tenant_id).order_by(TransferenciaInventario.fecha.desc()).all()
+    prods = {p.id: p for p in db.query(Producto).filter(Producto.tenant_id == current_user.tenant_id).all()}
+    almacenes = {a.id: a for a in db.query(Almacen).filter(Almacen.tenant_id == current_user.tenant_id).all()}
     return [
         {
             "id": t.id,
@@ -3337,15 +5267,15 @@ def transferencias(db: Session = Depends(get_db)):
 
 
 @inventario_ext_router.post("/transferencias", status_code=201)
-def crear_transferencia(payload: TransferenciaCreate, db: Session = Depends(get_db)):
-    origen = db.query(Almacen).filter(Almacen.id == payload.origen_almacen_id).first()
-    destino = db.query(Almacen).filter(Almacen.id == payload.destino_almacen_id).first()
+def crear_transferencia(payload: TransferenciaCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    origen = db.query(Almacen).filter(Almacen.id == payload.origen_almacen_id, Almacen.tenant_id == current_user.tenant_id).first()
+    destino = db.query(Almacen).filter(Almacen.id == payload.destino_almacen_id, Almacen.tenant_id == current_user.tenant_id).first()
     if not origen or not destino:
         raise HTTPException(status_code=404, detail="Uno o ambos almacenes no existen.")
     if origen.id == destino.id:
         raise HTTPException(status_code=400, detail="El almacén origen y destino no pueden ser el mismo.")
     
-    prod = db.query(Producto).filter(Producto.id == payload.producto_id).first()
+    prod = db.query(Producto).filter(Producto.id == payload.producto_id, Producto.tenant_id == current_user.tenant_id).first()
     if not prod:
         raise HTTPException(status_code=404, detail="El producto a transferir no existe.")
     
@@ -3357,7 +5287,8 @@ def crear_transferencia(payload: TransferenciaCreate, db: Session = Depends(get_
         destino_almacen_id=payload.destino_almacen_id,
         producto_id=payload.producto_id,
         cantidad=Decimal(str(payload.cantidad)),
-        estado="PENDIENTE"
+        estado="PENDIENTE",
+        tenant_id=current_user.tenant_id
     )
     db.add(t)
     db.commit()
@@ -3366,8 +5297,11 @@ def crear_transferencia(payload: TransferenciaCreate, db: Session = Depends(get_
 
 
 @inventario_ext_router.put("/transferencias/{transfer_id}/recibir")
-def recibir_transferencia(transfer_id: int, db: Session = Depends(get_db)):
-    t = db.query(TransferenciaInventario).filter(TransferenciaInventario.id == transfer_id).first()
+def recibir_transferencia(transfer_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    t = db.query(TransferenciaInventario).filter(
+        TransferenciaInventario.id == transfer_id,
+        TransferenciaInventario.tenant_id == current_user.tenant_id
+    ).first()
     if not t:
         raise HTTPException(status_code=404, detail="Transferencia no encontrada.")
     if t.estado in ["COMPLETADA", "RECIBIDA"]:
@@ -3379,9 +5313,15 @@ def recibir_transferencia(transfer_id: int, db: Session = Depends(get_db)):
 
 
 @inventario_ext_router.get("/transferencias/stats")
-def transferencias_stats(db: Session = Depends(get_db)):
-    pend = db.query(func.count(TransferenciaInventario.id)).filter(TransferenciaInventario.estado.in_(["PENDIENTE", "En Tránsito"])).scalar() or 0
-    comp = db.query(func.count(TransferenciaInventario.id)).filter(TransferenciaInventario.estado.in_(["COMPLETADA", "RECIBIDA"])).scalar() or 0
+def transferencias_stats(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    pend = db.query(func.count(TransferenciaInventario.id)).filter(
+        TransferenciaInventario.estado.in_(["PENDIENTE", "En Tránsito"]),
+        TransferenciaInventario.tenant_id == current_user.tenant_id
+    ).scalar() or 0
+    comp = db.query(func.count(TransferenciaInventario.id)).filter(
+        TransferenciaInventario.estado.in_(["COMPLETADA", "RECIBIDA"]),
+        TransferenciaInventario.tenant_id == current_user.tenant_id
+    ).scalar() or 0
     return {"pendientes": pend, "completadas": comp}
 
 

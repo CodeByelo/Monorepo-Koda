@@ -58,7 +58,9 @@ const PurchasingHistory = () => {
 
   const downloadReport = () => {
     if (purchases.length === 0) {
-      alert("No hay datos para exportar.");
+      window.dispatchEvent(new CustomEvent('koda-notification', {
+        detail: { type: 'error', message: "No hay datos para exportar." }
+      }));
       return;
     }
     const headers = ["DOCUMENTO", "PROVEEDOR", "MONTO", "ESTADO", "FECHA"];

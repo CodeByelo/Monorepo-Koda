@@ -87,6 +87,7 @@ class AsientoDetalle(Base):
     cuenta_nombre = Column(String(150), nullable=False)
     debe_usd = Column(Numeric(15, 2), default=0.00, nullable=False)
     haber_usd = Column(Numeric(15, 2), default=0.00, nullable=False)
+    centro_costo = Column(String(50), nullable=True)
 
     asiento = relationship("AsientoContable", back_populates="detalles")
 

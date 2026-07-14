@@ -71,7 +71,7 @@ async def get_user_profile(
     try:
         query = """
             SELECT p.id, p.username, p.nombre, p.apellido, p.email, g.nombre as gerencia_nombre, p.rol_id, r.nombre_rol as role,
-                   p.tenant_id, o.nombre as tenant_name, o.config, sp.allowed_modules as plan_allowed_modules
+                   p.tenant_id, o.name as tenant_name, o.config, sp.allowed_modules as plan_allowed_modules
             FROM profiles p
             LEFT JOIN gerencias g ON p.gerencia_id = g.id
             LEFT JOIN roles r ON p.rol_id = r.id
@@ -139,7 +139,7 @@ async def register(user_data: UserRegister, request: Request, conn = Depends(get
 async def login(login_data: UserLogin, request: Request, conn = Depends(get_db_connection)):
     query = """
         SELECT p.id, p.username, p.nombre, p.apellido, p.password_hash, p.email,
-               p.rol_id, r.nombre_rol, p.tenant_id, o.nombre as tenant_name, p.gerencia_id, g.nombre as gerencia_nombre,
+               p.rol_id, r.nombre_rol, p.tenant_id, o.name as tenant_name, p.gerencia_id, g.nombre as gerencia_nombre,
                p.mfa_enabled, p.totp_secret
         FROM profiles p
         LEFT JOIN roles r ON p.rol_id = r.id

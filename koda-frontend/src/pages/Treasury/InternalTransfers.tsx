@@ -12,6 +12,11 @@ import {
 
 
 const InternalTransfers = () => {
+  const [toast, setToast] = useState<string | null>(null);
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 4000);
+  };
   const [showModal, setShowModal] = useState(false);
   const [trfAmount, setTrfAmount] = useState<number>(0);
   const [trfRate, setTrfRate] = useState<number>(36.50);
@@ -61,11 +66,11 @@ const InternalTransfers = () => {
 
   const handleRegisterTransfer = async () => {
     if (!fromAccountId || !toAccountId || trfAmount <= 0) {
-      alert("Por favor complete todos los datos requeridos.");
+      showToast("Por favor complete todos los datos requeridos.");
       return;
     }
     if (fromAccountId === toAccountId) {
-      alert("La cuenta de origen y destino no pueden ser la misma.");
+      showToast("La cuenta de origen y destino no pueden ser la misma.");
       return;
     }
     try {
@@ -76,25 +81,25 @@ const InternalTransfers = () => {
         tasa_cambio_bs: trfRate,
         concepto: concept || 'Transferencia Interna'
       });
-      alert("Transferencia registrada con éxito. Pendiente por confirmar.");
+      showToast("Transferencia registrada con éxito. Pendiente por confirmar.");
       setShowModal(false);
       setConcept('');
       setTrfAmount(0);
       fetchTransfers();
     } catch (error) {
       console.error("Error registering transfer:", error);
-      alert("Error al registrar la transferencia.");
+      showToast("Error al registrar la transferencia.");
     }
   };
 
   const handleConfirmTransfer = async (dbId: number) => {
     try {
       await api.post(`/tesoreria/transferencias-internas/${dbId}/confirmar`);
-      alert("Transferencia confirmada y saldos actualizados en las cuentas correspondientes.");
+      showToast("Transferencia confirmada y saldos actualizados en las cuentas correspondientes.");
       fetchTransfers();
     } catch (error) {
       console.error("Error confirming transfer:", error);
-      alert("Error al confirmar la transferencia.");
+      showToast("Error al confirmar la transferencia.");
     }
   };
 
@@ -330,6 +335,11 @@ const InternalTransfers = () => {
                  </button>
               </div>
            </div>
+        </div>
+      )}
+      {toast && (
+        <div className="fixed bottom-5 right-5 bg-slate-900/90 backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-xl z-50 border border-slate-700/50 flex items-center gap-3 animate-in slide-in-from-bottom-5 duration-300">
+          <span className="text-xs font-black uppercase tracking-wider">🔔 {toast}</span>
         </div>
       )}
     </div>

@@ -278,7 +278,7 @@ const PaymentsDashboard = () => {
                       <button 
                         onClick={() => {
                           if (isFixed) {
-                            alert("Acción Diferir no implementada, se procederá al pago.");
+                            showToast("Acción Diferir no implementada, se procederá al pago.");
                           }
                           setPayingOrder(p);
                         }} 

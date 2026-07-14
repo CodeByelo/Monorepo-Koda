@@ -15,6 +15,11 @@ import { useNavigate } from 'react-router-dom';
 
 const BankMovements = () => {
   const navigate = useNavigate();
+  const [toast, setToast] = useState<string | null>(null);
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 4000);
+  };
   const [movements, setMovements] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -82,10 +87,10 @@ const BankMovements = () => {
       try {
         await api.post('/tesoreria/movimientos/importar', formData);
         await fetchData();
-        alert('Extracto importado exitosamente.');
+        showToast('Extracto importado exitosamente.');
       } catch (error) {
         console.error("Error importing statement:", error);
-        alert('Error al importar el extracto.');
+        showToast('Error al importar el extracto.');
       }
     }
   };
@@ -226,7 +231,7 @@ const BankMovements = () => {
                     </span>
                   </td>
                   <td className="py-2.5 px-6 text-right">
-                    <button onClick={() => alert('Detalle de movimiento')} className="text-[10px] font-black text-[#0b5156] uppercase hover:underline flex items-center gap-1 justify-end ml-auto">
+                    <button onClick={() => showToast('Detalle de movimiento')} className="text-[10px] font-black text-[#0b5156] uppercase hover:underline flex items-center gap-1 justify-end ml-auto">
                       {row.action || 'Gestionar'} <ChevronRight size={14} />
                     </button>
                   </td>
@@ -257,7 +262,7 @@ const BankMovements = () => {
               { type: 'Comisiones', title: 'Cargos bancarios', desc: 'Deben generar asiento contable hoy.', color: 'text-blue-600', bg: 'bg-blue-50' },
               { type: 'Transferencias', title: 'Ops. pendientes', desc: 'Confirmar cuenta origen y destino.', color: 'text-amber-600', bg: 'bg-amber-50' },
             ].map((item, i) => (
-              <div onClick={() => alert('Abriendo filtro de: ' + item.type)} key={i} className={`p-4 rounded-xl border border-slate-100 ${item.bg} space-y-2 group hover:scale-[1.02] transition-all cursor-pointer`}>
+              <div onClick={() => showToast('Abriendo filtro de: ' + item.type)} key={i} className={`p-4 rounded-xl border border-slate-100 ${item.bg} space-y-2 group hover:scale-[1.02] transition-all cursor-pointer`}>
                  <span className={`text-[9px] font-black px-2 py-0.5 rounded uppercase border border-current/20 ${item.color}`}>{item.type}</span>
                  <h4 className="text-xs font-black text-[#0b5156] uppercase leading-tight">{item.title}</h4>
                  <p className="text-[10px] font-bold text-slate-500 uppercase leading-relaxed">{item.desc}</p>
@@ -293,6 +298,11 @@ const BankMovements = () => {
           </div>
         </article>
       </div>
+      {toast && (
+        <div className="fixed bottom-5 right-5 bg-slate-900/90 backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-xl z-50 border border-slate-700/50 flex items-center gap-3 animate-in slide-in-from-bottom-5 duration-300">
+          <span className="text-xs font-black uppercase tracking-wider">🔔 {toast}</span>
+        </div>
+      )}
     </div>
   );
 };

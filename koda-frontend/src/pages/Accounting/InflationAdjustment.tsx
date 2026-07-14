@@ -14,12 +14,19 @@ import { api } from '@/api/client';
 
 const InflationAdjustment = () => {
   const [showIndexModal, setShowIndexModal] = useState(false);
+  const [showManual, setShowManual] = useState(false);
   const [items, setItems] = useState<any[]>([]);
   const [indices, setIndices] = useState<any[]>([]);
   const [inflacionAcumulada, setInflacionAcumulada] = useState(0);
   const [periodo, setPeriodo] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [adjustmentToast, setAdjustmentToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setAdjustmentToast({ message, type });
+    setTimeout(() => setAdjustmentToast(null), 5000);
+  };
 
   useEffect(() => {
     fetchData();
@@ -51,11 +58,11 @@ const InflationAdjustment = () => {
       setIsProcessing(true);
       const res = await api.post<any>('/contabilidad/ajuste-inflacion/ejecutar', { periodo });
       if (res && res.ok) {
-        alert(`Ajuste procesado exitosamente. Asiento contable N° ${res.asiento_id} generado por un monto de Bs. ${res.monto_ves.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`);
+        showToast(`✅ Ajuste procesado exitosamente. Asiento N° ${res.asiento_id} generado por Bs. ${res.monto_ves.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`, 'success');
         fetchData();
       }
     } catch (err: any) {
-      alert(err.message || 'Error al procesar el ajuste.');
+      showToast(err.message || 'Error al procesar el ajuste.', 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -196,7 +203,7 @@ const InflationAdjustment = () => {
             <p className="text-[10px] font-bold text-blue-800/60 uppercase leading-relaxed max-w-4xl">
                El sistema identifica automáticamente las partidas <strong>no monetarias</strong> (Propiedad, Planta y Equipo, Inventarios, Patrimonio) y aplica el factor de ajuste basado en el INPC publicado. Las partidas monetarias generan el REME por diferencia.
             </p>
-            <button className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-1 hover:underline">
+            <button onClick={() => setShowManual(true)} className="text-[10px] font-black text-blue-600 uppercase flex items-center gap-1 hover:underline">
                Leer manual de políticas contables <ArrowRight size={12} />
             </button>
          </div>
@@ -234,6 +241,39 @@ const InflationAdjustment = () => {
                        Guardar Índices
                     </button>
                  </div>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* Manual Modal */}
+      {showManual && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 animate-in fade-in zoom-in duration-300">
+           <div className="absolute inset-0 bg-slate-900/90 backdrop-blur-sm" onClick={() => setShowManual(false)} />
+           <div className="relative bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden border border-slate-200 flex flex-col max-h-[80vh]">
+              <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                 <div className="space-y-1">
+                    <h2 className="text-xl font-black text-[#0b5156] uppercase tracking-tighter leading-none">Manual de Políticas Contables</h2>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">Normativa VEN-NIF y NIC 29.</p>
+                 </div>
+                 <button onClick={() => setShowManual(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-400">
+                    <X size={20} />
+                  </button>
+              </div>
+              <div className="p-6 overflow-y-auto space-y-4 text-xs text-slate-600 font-medium">
+                 <h3 className="font-black text-slate-800 uppercase text-sm">1. Objetivo y Alcance</h3>
+                 <p>El objetivo de esta política es establecer las bases para la reexpresión de los estados financieros de la empresa, reconociendo los efectos de la inflación conforme a la Norma Internacional de Contabilidad (NIC 29) y los lineamientos de la VEN-NIF.</p>
+                 <h3 className="font-black text-slate-800 uppercase text-sm">2. Partidas No Monetarias</h3>
+                 <p>Las partidas no monetarias (Ej. Propiedad, Planta y Equipo, Inventarios, Patrimonio) deben reexpresarse aplicando el factor de ajuste derivado del Índice Nacional de Precios al Consumidor (INPC) publicado por el Banco Central de Venezuela.</p>
+                 <h3 className="font-black text-slate-800 uppercase text-sm">3. Resultado Monetario (REME)</h3>
+                 <p>La diferencia neta originada por el mantenimiento de activos y pasivos monetarios durante un período de inflación se reconocerá en los resultados del período bajo la cuenta de Resultado Monetario del Ejercicio (REME).</p>
+                 <h3 className="font-black text-slate-800 uppercase text-sm">4. Periodicidad</h3>
+                 <p>El ajuste por inflación se procesará al cierre de cada ejercicio contable, salvo que la gerencia determine su ejecución mensual para fines de control gerencial.</p>
+              </div>
+              <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
+                  <button onClick={() => setShowManual(false)} className="py-2 px-6 bg-[#0b5156] text-white rounded-xl text-[10px] font-black uppercase shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all">
+                     Cerrar Manual
+                  </button>
               </div>
            </div>
         </div>

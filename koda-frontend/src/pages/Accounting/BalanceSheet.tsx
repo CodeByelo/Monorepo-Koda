@@ -19,6 +19,7 @@ const BalanceSheet = () => {
   const [periodo, setPeriodo] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
   const [balanceData, setBalanceData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const fetchBalance = async () => {
     try {
@@ -60,7 +61,8 @@ const BalanceSheet = () => {
       setShowExportModal(false);
     } catch (error) {
       console.error(`Error exportando a ${formato}:`, error);
-      alert(`Error al exportar a ${formato.toUpperCase()}`);
+      setExportError(`Error al exportar a ${formato.toUpperCase()}. Intente nuevamente.`);
+      setTimeout(() => setExportError(null), 4000);
     }
   };
 

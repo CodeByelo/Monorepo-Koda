@@ -67,14 +67,14 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 # DEPENDENCIAS DE AUTENTICACIÓN
 # ==========================================
 
-from backend.services.auth import get_current_user_from_token, role_required as auth_role_required
+# Definición de dependencias con importación perezosa para romper la dependencia circular en tiempo de carga
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    from backend.services.auth import get_current_user_from_token
+    return get_current_user_from_token(token, db)
 
-def get_current_user(db: Session = Depends(get_db)):
-    # Mantener compatibilidad exportando la función
-    pass # Will be injected by fastapi but it's better to just use get_current_user_from_token directly in depends.
-
-get_current_user = get_current_user_from_token
-require_role = auth_role_required
+def require_role(roles_permitidos: list[str]):
+    from backend.services.auth import role_required
+    return role_required(roles_permitidos)
 
 # ==========================================
 # AUDITORÍA (SENIAT / EXTERNOS)

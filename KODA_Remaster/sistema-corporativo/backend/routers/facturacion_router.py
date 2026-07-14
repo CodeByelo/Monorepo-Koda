@@ -259,7 +259,7 @@ async def emitir_factura(
                 RETURNING id
                 """,
                 tenant_id,
-                fecha_emision,
+                datetime.strptime(fecha_emision, "%Y-%m-%d").date(),
                 concepto_asiento,
                 numero_factura,
                 float(monto_total),

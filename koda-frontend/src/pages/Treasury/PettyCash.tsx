@@ -14,6 +14,11 @@ import { useNavigate } from 'react-router-dom';
 
 const PettyCash = () => {
   const navigate = useNavigate();
+  const [toast, setToast] = useState<string | null>(null);
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 4000);
+  };
   const [showModal, setShowModal] = useState(false);
   
   const [funds, setFunds] = useState<any[]>([]);
@@ -56,17 +61,17 @@ const PettyCash = () => {
   const handleReponerCajaChica = async () => {
     try {
       await api.post('/tesoreria/caja-chica/reponer', {});
-      alert("Fondos de Caja Chica repuestos con éxito en todos los fondos.");
+      showToast("Fondos de Caja Chica repuestos con éxito en todos los fondos.");
       fetchData();
     } catch (error) {
       console.error("Error al reponer caja chica:", error);
-      alert("Error al procesar la reposición de fondos.");
+      showToast("Error al procesar la reposición de fondos.");
     }
   };
 
   const handleRegisterFund = async () => {
     if (!fundName || !fundResponsable || fundAsignado <= 0) {
-      alert("Por favor complete todos los datos del fondo.");
+      showToast("Por favor complete todos los datos del fondo.");
       return;
     }
     try {
@@ -75,7 +80,7 @@ const PettyCash = () => {
         responsable: fundResponsable,
         asignado_usd: fundAsignado
       });
-      alert("Nuevo fondo de Caja Chica registrado exitosamente.");
+      showToast("Nuevo fondo de Caja Chica registrado exitosamente.");
       setShowFundModal(false);
       setFundName('');
       setFundResponsable('');
@@ -83,7 +88,7 @@ const PettyCash = () => {
       fetchData();
     } catch (error) {
       console.error("Error registrando fondo:", error);
-      alert("Error al registrar el fondo de caja chica.");
+      showToast("Error al registrar el fondo de caja chica.");
     }
   };
 
@@ -111,14 +116,14 @@ const PettyCash = () => {
         soporte: gastoSoporte,
         no_deducible: gastoNoDeducible
       });
-      alert("Gasto registrado exitosamente.");
+      showToast("Gasto registrado exitosamente.");
       setShowModal(false);
       setGastoMonto('');
       setGastoConcepto('');
       fetchData();
     } catch (error) {
       console.error("Error registrando gasto:", error);
-      alert("Error al registrar el gasto.");
+      showToast("Error al registrar el gasto.");
     }
   };
 
@@ -479,6 +484,11 @@ const PettyCash = () => {
                  </button>
               </div>
            </div>
+        </div>
+      )}
+      {toast && (
+        <div className="fixed bottom-5 right-5 bg-slate-900/90 backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-xl z-50 border border-slate-700/50 flex items-center gap-3 animate-in slide-in-from-bottom-5 duration-300">
+          <span className="text-xs font-black uppercase tracking-wider">🔔 {toast}</span>
         </div>
       )}
     </div>

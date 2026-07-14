@@ -20,8 +20,12 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useState } from 'react';
+import { api } from '@/api/client';
 
 const QueryBuilderReport = () => {
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const [periodo, setPeriodo] = useState(currentMonth);
+  const [modalMessage, setModalMessage] = useState<string | null>(null);
   const [fields, setFields] = useState({
     date: true,
     branch: true,
@@ -38,6 +42,21 @@ const QueryBuilderReport = () => {
 
   const toggleField = (field: keyof typeof fields) => {
     setFields(prev => ({ ...prev, [field]: !prev[field] }));
+  };
+
+  const handleExportCSV = async () => {
+    const selectedFields = Object.keys(fields).filter(key => fields[key as keyof typeof fields]);
+    if (selectedFields.length === 0) {
+      setModalMessage("Por favor seleccione al menos un campo para exportar.");
+      return;
+    }
+    try {
+      const fieldsStr = selectedFields.join(",");
+      await api.download(`/reportes/query-builder/exportar?fields=${fieldsStr}&periodo=${periodo}`, 'query_koda_export.csv');
+    } catch (error) {
+      console.error("Error exporting query builder:", error);
+      setModalMessage("Error al generar la exportación CSV.");
+    }
   };
 
   return (
@@ -57,7 +76,10 @@ const QueryBuilderReport = () => {
             <h1 className="text-xl font-black text-[#0b5156] tracking-tighter uppercase leading-none">Constructor de Consultas</h1>
             <p className="text-slate-500 text-xs font-bold uppercase tracking-tight">Configure dimensiones y métricas para exportar data estructurada para PowerBI o Excel.</p>
           </div>
-          <button className="bg-[#0b5156] text-white px-8 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all">
+          <button 
+             onClick={handleExportCSV}
+             className="bg-[#0b5156] text-white px-8 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all"
+          >
              <Rocket size={14} /> Generar Exportación CSV
           </button>
         </div>
@@ -130,11 +152,12 @@ const QueryBuilderReport = () => {
 
                <div className="mt-4 pt-4 border-t border-slate-100">
                   <h3 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Filtro de Período</h3>
-                  <select className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg text-[9px] font-black uppercase text-[#0b5156] outline-none">
-                     <option>Últimos 30 días</option>
-                     <option>Mes Actual</option>
-                     <option>Año 2026</option>
-                  </select>
+                  <input 
+                    type="month" 
+                    value={periodo} 
+                    onChange={(e) => setPeriodo(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg text-[9px] font-black uppercase text-[#0b5156] outline-none font-sans font-bold"
+                  />
                </div>
             </div>
          </aside>
@@ -178,6 +201,35 @@ const QueryBuilderReport = () => {
          </div>
 
       </div>
+
+      {modalMessage && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-[#0b5156] p-4 text-white flex items-center justify-between">
+              <h3 className="text-xs font-black uppercase tracking-widest">Aviso del Sistema</h3>
+              <button 
+                onClick={() => setModalMessage(null)}
+                className="text-white/70 hover:text-white text-xs font-bold uppercase transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-slate-600 text-xs font-bold uppercase tracking-tight leading-relaxed">
+                {modalMessage}
+              </p>
+              <div className="flex justify-end gap-2">
+                <button 
+                  onClick={() => setModalMessage(null)}
+                  className="bg-[#0b5156] text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all"
+                >
+                  Aceptar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

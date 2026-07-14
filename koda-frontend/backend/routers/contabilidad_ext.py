@@ -12,6 +12,7 @@ from backend.core.database import get_db
 from backend.models.accounting import AsientoContable, AsientoDetalle, CierrePeriodo
 from backend.models.erp_extended import CuentaContable
 from backend.utils.helpers import ventas_periodo, to_float
+from backend.core.security import get_current_user
 
 router = APIRouter(prefix="/contabilidad", tags=["Contabilidad"])
 
@@ -21,6 +22,7 @@ class AsientoLinea(BaseModel):
     cuenta_nombre: str
     debe: Decimal = Decimal("0")
     haber: Decimal = Decimal("0")
+    centro_costo: Optional[str] = None
 
 
 class AsientoCreate(BaseModel):
@@ -60,31 +62,335 @@ PLAN_CUENTAS_DEFAULT = [
 ]
 
 
-def _seed_cuentas(db: Session):
+def _seed_cuentas(db: Session, tenant_id):
     for codigo, nombre, tipo, nivel in PLAN_CUENTAS_DEFAULT:
-        existing = db.query(CuentaContable).filter(CuentaContable.codigo == codigo).first()
+        existing = db.query(CuentaContable).filter(
+            CuentaContable.codigo == codigo,
+            CuentaContable.tenant_id == tenant_id
+        ).first()
         if not existing:
-            db.add(CuentaContable(codigo=codigo, nombre=nombre, tipo=tipo, nivel=nivel, activa=True))
+            db.add(CuentaContable(codigo=codigo, nombre=nombre, tipo=tipo, nivel=nivel, activa=True, tenant_id=tenant_id))
     db.commit()
 
 
 @router.get("/cuentas")
-def listar_cuentas(activas: Optional[bool] = None, db: Session = Depends(get_db)):
-    q = db.query(CuentaContable)
+def listar_cuentas(activas: Optional[bool] = None, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    q = db.query(CuentaContable).filter(CuentaContable.tenant_id == current_user.tenant_id)
     if activas:
         q = q.filter(CuentaContable.activa == True)
     return q.order_by(CuentaContable.codigo).all()
 
 
+class CuentaUpdate(BaseModel):
+    nombre: Optional[str] = None
+    tipo: Optional[str] = None
+    naturaleza: Optional[str] = None
+    activa: Optional[bool] = None
+
+
+@router.put("/cuentas/{id}")
+def actualizar_cuenta(id: int, body: CuentaUpdate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    cuenta = db.query(CuentaContable).filter(
+        CuentaContable.id == id,
+        CuentaContable.tenant_id == current_user.tenant_id
+    ).first()
+    if not cuenta:
+        raise HTTPException(status_code=404, detail="Cuenta contable no encontrada")
+    
+    if body.nombre is not None:
+        cuenta.nombre = body.nombre
+    if body.tipo is not None:
+        cuenta.tipo = body.tipo
+    if body.naturaleza is not None:
+        cuenta.naturaleza = body.naturaleza
+    if body.activa is not None:
+        cuenta.activa = body.activa
+        
+    db.commit()
+    db.refresh(cuenta)
+    return {"ok": True, "cuenta": {
+        "id": cuenta.id,
+        "codigo": cuenta.codigo,
+        "nombre": cuenta.nombre,
+        "tipo": cuenta.tipo,
+        "naturaleza": cuenta.naturaleza,
+        "activa": cuenta.activa
+    }}
+
+
+@router.delete("/cuentas/{id}")
+def eliminar_cuenta(id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    cuenta = db.query(CuentaContable).filter(
+        CuentaContable.id == id,
+        CuentaContable.tenant_id == current_user.tenant_id
+    ).first()
+    if not cuenta:
+        raise HTTPException(status_code=404, detail="Cuenta contable no encontrada")
+        
+    from backend.models.accounting import AsientoDetalle
+    has_movs = db.query(AsientoDetalle).filter(AsientoDetalle.cuenta_codigo == cuenta.codigo).first()
+    if has_movs:
+        raise HTTPException(status_code=400, detail="No se puede eliminar una cuenta que tiene asientos contables registrados.")
+        
+    db.delete(cuenta)
+    db.commit()
+    return {"ok": True, "message": "Cuenta contable eliminada con éxito"}
+
+
+# ─── MATRIZ DE INTEGRACIÓN ────────────────────────────────────────────────────
+
+EVENTOS_DEFAULT = [
+    {"evento": "VENTA_CONTADO",    "modulo": "VENTAS",   "titulo": "Venta de Mercancía (Contado)",   "desc": "Factura pagada al momento.", "readonly_debe": False, "readonly_haber": False},
+    {"evento": "IVA_DEBITO",       "modulo": "VENTAS",   "titulo": "IVA Débito Fiscal",              "desc": "Impuesto generado en ventas.", "readonly_debe": True,  "readonly_haber": False},
+    {"evento": "COMPRA_INVENTARIO","modulo": "COMPRAS",  "titulo": "Compra de Inventario",           "desc": "Recepción de mercancía comercial.", "readonly_debe": False, "readonly_haber": False},
+    {"evento": "IVA_CREDITO",      "modulo": "COMPRAS",  "titulo": "IVA Crédito Fiscal",             "desc": "Impuesto soportado en compras.", "readonly_debe": False, "readonly_haber": True},
+    {"evento": "NOMINA_GASTO",     "modulo": "RRHH",     "titulo": "Gasto de Nómina",                "desc": "Registro del costo de nómina mensual.", "readonly_debe": False, "readonly_haber": False},
+    {"evento": "COBRO_CLIENTE",    "modulo": "COBROS",   "titulo": "Cobro a Cliente (Efectivo)",     "desc": "Entrada de efectivo por cobro de factura.", "readonly_debe": False, "readonly_haber": False},
+]
+
+def _seed_matriz(db: Session):
+    from backend.models.erp_extended import MatrizIntegracion
+    for ev in EVENTOS_DEFAULT:
+        existing = db.query(MatrizIntegracion).filter(MatrizIntegracion.evento == ev["evento"]).first()
+        if not existing:
+            db.add(MatrizIntegracion(evento=ev["evento"], activo=True))
+    db.commit()
+
+class MatrizLineaUpdate(BaseModel):
+    evento: str
+    cuenta_debe_codigo: Optional[str] = None
+    cuenta_haber_codigo: Optional[str] = None
+
+class MatrizSave(BaseModel):
+    lineas: List[MatrizLineaUpdate]
+    usuario: Optional[str] = "Sistema"
+
+
+@router.get("/matriz-integracion")
+def get_matriz_integracion(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    from backend.models.erp_extended import MatrizIntegracion
+    _seed_matriz(db)
+    registros = db.query(MatrizIntegracion).all()
+    reg_map = {r.evento: r for r in registros}
+
+    cuentas = db.query(CuentaContable).filter(
+        CuentaContable.activa == True,
+        CuentaContable.tenant_id == current_user.tenant_id
+    ).order_by(CuentaContable.codigo).all()
+    cuentas_list = [{"id": c.id, "codigo": c.codigo, "nombre": c.nombre, "tipo": c.tipo} for c in cuentas]
+
+    resultado = []
+    for ev in EVENTOS_DEFAULT:
+        reg = reg_map.get(ev["evento"])
+        resultado.append({
+            "evento": ev["evento"],
+            "modulo": ev["modulo"],
+            "titulo": ev["titulo"],
+            "desc": ev["desc"],
+            "readonly_debe": ev["readonly_debe"],
+            "readonly_haber": ev["readonly_haber"],
+            "cuenta_debe_codigo": reg.cuenta_debe_codigo if reg else None,
+            "cuenta_haber_codigo": reg.cuenta_haber_codigo if reg else None,
+            "ultima_modificacion": reg.ultima_modificacion.strftime("%d/%m/%Y %H:%M") if reg and reg.ultima_modificacion else None,
+        })
+
+    return {"lineas": resultado, "cuentas": cuentas_list}
+
+
+@router.post("/matriz-integracion")
+def save_matriz_integracion(body: MatrizSave, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    from backend.models.erp_extended import MatrizIntegracion
+    _seed_matriz(db)
+    for linea in body.lineas:
+        reg = db.query(MatrizIntegracion).filter(MatrizIntegracion.evento == linea.evento).first()
+        if reg:
+            reg.cuenta_debe_codigo = linea.cuenta_debe_codigo
+            reg.cuenta_haber_codigo = linea.cuenta_haber_codigo
+            reg.ultima_modificacion = datetime.now(timezone.utc)
+            reg.usuario_modificacion = body.usuario
+        else:
+            db.add(MatrizIntegracion(
+                evento=linea.evento,
+                cuenta_debe_codigo=linea.cuenta_debe_codigo,
+                cuenta_haber_codigo=linea.cuenta_haber_codigo,
+                usuario_modificacion=body.usuario,
+                activo=True
+            ))
+    db.commit()
+    return {"ok": True, "message": "Matriz guardada correctamente", "total": len(body.lineas)}
+
+
+@router.post("/matriz-integracion/sincronizar")
+def sincronizar_matriz(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """Sincroniza la tabla de eventos con los eventos predefinidos del sistema."""
+    from backend.models.erp_extended import MatrizIntegracion
+    _seed_matriz(db)
+    return {"ok": True, "message": f"Sincronización completada. {len(EVENTOS_DEFAULT)} eventos verificados."}
+
+
+PLAN_COMERCIAL = [
+    ("1", "ACTIVO", "ACTIVO", 1),
+    ("1.1", "ACTIVO CORRIENTE", "ACTIVO", 2),
+    ("1.1.01", "Caja y Bancos", "ACTIVO", 3),
+    ("1.1.02", "Cuentas por Cobrar Comerciales", "ACTIVO", 3),
+    ("1.1.03", "Inventario de Mercancía de Comercio", "ACTIVO", 3),
+    ("1.1.04", "IVA Crédito Fiscal", "ACTIVO", 3),
+    ("1.1.05", "Anticipo de Retención de IVA", "ACTIVO", 3),
+    ("1.2", "ACTIVO NO CORRIENTE", "ACTIVO", 2),
+    ("1.2.01", "Propiedades, Planta y Equipo", "ACTIVO", 3),
+    ("1.2.02", "Edificaciones Comerciales", "ACTIVO", 3),
+    ("1.2.03", "Equipos de Computación", "ACTIVO", 3),
+    ("2", "PASIVO", "PASIVO", 1),
+    ("2.1", "PASIVO CORRIENTE", "PASIVO", 2),
+    ("2.1.01", "Cuentas por Pagar Comerciales", "PASIVO", 3),
+    ("2.1.02", "IVA Débito Fiscal por Pagar", "PASIVO", 3),
+    ("2.1.03", "IGTF por Pagar", "PASIVO", 3),
+    ("2.1.04", "Nómina por Pagar", "PASIVO", 3),
+    ("2.1.05", "Otras Retenciones por Pagar", "PASIVO", 3),
+    ("3", "PATRIMONIO", "PATRIMONIO", 1),
+    ("3.1", "PATRIMONIO NETO", "PATRIMONIO", 2),
+    ("3.1.01", "Capital Social", "PATRIMONIO", 3),
+    ("3.1.02", "Reserva Legal", "PATRIMONIO", 3),
+    ("4", "INGRESOS", "INGRESO", 1),
+    ("4.1", "INGRESOS OPERACIONALES", "INGRESO", 2),
+    ("4.1.01", "Ventas de Mercancía (Comercial)", "INGRESO", 3),
+    ("4.1.02", "Ventas por Canales Digitales", "INGRESO", 3),
+    ("5", "EGRESOS / GASTOS", "EGRESO", 1),
+    ("5.1", "COSTOS Y GASTOS OPERACIONALES", "EGRESO", 2),
+    ("5.1.01", "Costo de Ventas (Comercial)", "EGRESO", 3),
+    ("5.1.02", "Sueldos y Salarios Base (Gasto)", "EGRESO", 3),
+    ("5.1.03", "Otras Asignaciones (Gasto)", "EGRESO", 3),
+    ("5.1.04", "Gastos por Mermas y Faltantes", "EGRESO", 3),
+    ("5.1.05", "Resultado por Exposición a la Inflación (REI)", "EGRESO", 3),
+    ("5.1.06", "Servicios Públicos de Tiendas", "EGRESO", 3),
+]
+
+PLAN_SERVICIOS = [
+    ("1", "ACTIVO", "ACTIVO", 1),
+    ("1.1", "ACTIVO CORRIENTE", "ACTIVO", 2),
+    ("1.1.01", "Caja y Bancos (Servicios)", "ACTIVO", 3),
+    ("1.1.02", "Cuentas por Cobrar por Servicios", "ACTIVO", 3),
+    ("1.1.04", "IVA Crédito Fiscal", "ACTIVO", 3),
+    ("1.1.05", "Anticipo de Retención de IVA", "ACTIVO", 3),
+    ("1.2", "ACTIVO NO CORRIENTE", "ACTIVO", 2),
+    ("1.2.01", "Mobiliario y Equipos de Oficina", "ACTIVO", 3),
+    ("1.2.02", "Equipos Tecnológicos / Servidores", "ACTIVO", 3),
+    ("2", "PASIVO", "PASIVO", 1),
+    ("2.1", "PASIVO CORRIENTE", "PASIVO", 2),
+    ("2.1.01", "Proveedores de Servicios por Pagar", "PASIVO", 3),
+    ("2.1.02", "IVA Débito Fiscal por Pagar", "PASIVO", 3),
+    ("2.1.03", "IGTF por Pagar", "PASIVO", 3),
+    ("2.1.04", "Honorarios Profesionales por Pagar", "PASIVO", 3),
+    ("2.1.05", "Otras Retenciones por Pagar", "PASIVO", 3),
+    ("3", "PATRIMONIO", "PATRIMONIO", 1),
+    ("3.1", "PATRIMONIO NETO", "PATRIMONIO", 2),
+    ("3.1.01", "Capital Social", "PATRIMONIO", 3),
+    ("3.1.02", "Utilidades Acumuladas", "PATRIMONIO", 3),
+    ("4", "INGRESOS", "INGRESO", 1),
+    ("4.1", "INGRESOS OPERACIONALES", "INGRESO", 2),
+    ("4.1.01", "Ingresos por Servicios Profesionales", "INGRESO", 3),
+    ("4.1.02", "Ingresos por Consultorías / Asesorías", "INGRESO", 3),
+    ("5", "EGRESOS / GASTOS", "EGRESO", 1),
+    ("5.1", "COSTOS Y GASTOS OPERACIONALES", "EGRESO", 2),
+    ("5.1.01", "Costo de Servicios Prestados", "EGRESO", 3),
+    ("5.1.02", "Honorarios de Consultores Subcontratados", "EGRESO", 3),
+    ("5.1.03", "Sueldos del Personal Técnico", "EGRESO", 3),
+    ("5.1.04", "Gasto de Suscripciones y Software SaaS", "EGRESO", 3),
+    ("5.1.05", "Resultado por Exposición a la Inflación (REI)", "EGRESO", 3),
+    ("5.1.06", "Gastos de Publicidad y Eventos", "EGRESO", 3),
+]
+
+PLAN_INDUSTRIAL = [
+    ("1", "ACTIVO", "ACTIVO", 1),
+    ("1.1", "ACTIVO CORRIENTE", "ACTIVO", 2),
+    ("1.1.01", "Caja y Bancos (Industrial)", "ACTIVO", 3),
+    ("1.1.02", "Cuentas por Cobrar de Clientes Industriales", "ACTIVO", 3),
+    ("1.1.03", "Inventario de Materia Prima", "ACTIVO", 3),
+    ("1.1.04", "IVA Crédito Fiscal", "ACTIVO", 3),
+    ("1.1.05", "Anticipo de Retención de IVA", "ACTIVO", 3),
+    ("1.1.06", "Inventario de Productos en Proceso", "ACTIVO", 3),
+    ("1.1.07", "Inventario de Productos Terminados", "ACTIVO", 3),
+    ("1.2", "ACTIVO NO CORRIENTE", "ACTIVO", 2),
+    ("1.2.01", "Maquinaria e Instalaciones Industriales", "ACTIVO", 3),
+    ("1.2.02", "Herramientas y Moldes de Producción", "ACTIVO", 3),
+    ("1.2.03", "Vehículos de Carga y Distribución", "ACTIVO", 3),
+    ("2", "PASIVO", "PASIVO", 1),
+    ("2.1", "PASIVO CORRIENTE", "PASIVO", 2),
+    ("2.1.01", "Proveedores de Materia Prima por Pagar", "PASIVO", 3),
+    ("2.1.02", "IVA Débito Fiscal por Pagar", "PASIVO", 3),
+    ("2.1.03", "IGTF por Pagar", "PASIVO", 3),
+    ("2.1.04", "Sueldos y Salarios de Planta por Pagar", "PASIVO", 3),
+    ("2.1.05", "Otras Retenciones por Pagar", "PASIVO", 3),
+    ("3", "PATRIMONIO", "PATRIMONIO", 1),
+    ("3.1", "PATRIMONIO NETO", "PATRIMONIO", 2),
+    ("3.1.01", "Capital Social", "PATRIMONIO", 3),
+    ("3.1.02", "Reservas de Reinversión de Capital", "PATRIMONIO", 3),
+    ("4", "INGRESOS", "INGRESO", 1),
+    ("4.1", "INGRESOS OPERACIONALES", "INGRESO", 2),
+    ("4.1.01", "Ventas de Productos Terminados (Industrial)", "INGRESO", 3),
+    ("4.1.02", "Ventas de Subproductos de Desecho", "INGRESO", 3),
+    ("5", "EGRESOS / GASTOS", "EGRESO", 1),
+    ("5.1", "COSTOS Y GASTOS OPERACIONALES", "EGRESO", 2),
+    ("5.1.01", "Costo de Producción y Ventas (Manufactura)", "EGRESO", 3),
+    ("5.1.02", "Mano de Obra Directa (Gasto Fábrica)", "EGRESO", 3),
+    ("5.1.03", "Mantenimiento Preventivo de Maquinarias", "EGRESO", 3),
+    ("5.1.04", "Combustibles, Energía Eléctrica y Agua Industrial", "EGRESO", 3),
+    ("5.1.05", "Resultado por Exposición a la Inflación (REI)", "EGRESO", 3),
+    ("5.1.06", "Depreciación de Maquinarias de Planta", "EGRESO", 3),
+]
+
+
 @router.post("/cuentas/importar-plantilla")
-def importar_plantilla(body: dict, db: Session = Depends(get_db)):
-    _seed_cuentas(db)
-    return {"ok": True, "importadas": len(PLAN_CUENTAS_DEFAULT)}
+def importar_plantilla(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    plantilla = body.get("plantilla", "Comercial")
+    
+    if plantilla == "Servicios":
+        plan_elegido = PLAN_SERVICIOS
+    elif plantilla == "Industrial":
+        plan_elegido = PLAN_INDUSTRIAL
+    else:
+        plan_elegido = PLAN_COMERCIAL
+
+    # Obtener códigos de cuentas con movimientos en los asientos contables del tenant actual
+    codigos_con_movimientos = db.query(AsientoDetalle.cuenta_codigo).join(AsientoContable).filter(
+        AsientoContable.tenant_id == current_user.tenant_id
+    ).distinct().all()
+    codigos_con_movimientos_list = [c[0] for c in codigos_con_movimientos]
+    
+    # Eliminar cuentas del tenant actual que no tengan movimientos para hacer una importación limpia
+    cuentas_para_borrar = db.query(CuentaContable).filter(
+        CuentaContable.tenant_id == current_user.tenant_id,
+        ~CuentaContable.codigo.in_(codigos_con_movimientos_list)
+    ).all()
+    for c in cuentas_para_borrar:
+        db.delete(c)
+    db.commit()
+    
+    importadas_count = 0
+    for codigo, nombre, tipo, nivel in plan_elegido:
+        existing = db.query(CuentaContable).filter(
+            CuentaContable.codigo == codigo,
+            CuentaContable.tenant_id == current_user.tenant_id
+        ).first()
+        if not existing:
+            db.add(CuentaContable(
+                codigo=codigo,
+                nombre=nombre,
+                tipo=tipo,
+                nivel=nivel,
+                activa=True,
+                naturaleza="ACREEDORA" if tipo in ["PASIVO", "PATRIMONIO", "INGRESO"] else "DEUDORA",
+                tenant_id=current_user.tenant_id
+            ))
+            importadas_count += 1
+            
+    db.commit()
+    return {"ok": True, "importadas": importadas_count, "plantilla": plantilla}
 
 
 @router.get("/dashboard")
-def contabilidad_dashboard(db: Session = Depends(get_db)):
-    _seed_cuentas(db)
+def contabilidad_dashboard(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    _seed_cuentas(db, current_user.tenant_id)
     
     # 1. Asientos del mes
     now = datetime.now()
@@ -95,6 +401,7 @@ def contabilidad_dashboard(db: Session = Depends(get_db)):
         end_date = date(now.year, now.month + 1, 1)
         
     count = db.query(func.count(AsientoContable.id)).filter(
+        AsientoContable.tenant_id == current_user.tenant_id,
         AsientoContable.fecha >= start_date,
         AsientoContable.fecha < end_date
     ).scalar() or 0
@@ -102,12 +409,14 @@ def contabilidad_dashboard(db: Session = Depends(get_db)):
     # 2. Utilidad neta (Ingresos [4] - Egresos [5])
     ingresos = db.query(func.sum(AsientoDetalle.haber_usd - AsientoDetalle.debe_usd)).filter(
         AsientoDetalle.cuenta_codigo.like("4%"),
+        AsientoDetalle.asiento.has(AsientoContable.tenant_id == current_user.tenant_id),
         AsientoDetalle.asiento.has(AsientoContable.fecha >= start_date),
         AsientoDetalle.asiento.has(AsientoContable.fecha < end_date)
     ).scalar() or Decimal("0.00")
     
     egresos = db.query(func.sum(AsientoDetalle.debe_usd - AsientoDetalle.haber_usd)).filter(
         AsientoDetalle.cuenta_codigo.like("5%"),
+        AsientoDetalle.asiento.has(AsientoContable.tenant_id == current_user.tenant_id),
         AsientoDetalle.asiento.has(AsientoContable.fecha >= start_date),
         AsientoDetalle.asiento.has(AsientoContable.fecha < end_date)
     ).scalar() or Decimal("0.00")
@@ -115,12 +424,18 @@ def contabilidad_dashboard(db: Session = Depends(get_db)):
     utilidad_neta = ingresos - egresos
     
     # 3. Último Cierre
-    ultimo_cierre = db.query(CierrePeriodo).order_by(CierrePeriodo.periodo.desc()).first()
+    ultimo_cierre = db.query(CierrePeriodo).filter(
+        CierrePeriodo.tenant_id == current_user.tenant_id
+    ).order_by(CierrePeriodo.periodo.desc()).first()
     ultimo_cierre_str = ultimo_cierre.periodo if ultimo_cierre else "-"
     
     # 4. Descuadre actual
-    debe_tot = db.query(func.sum(AsientoDetalle.debe_usd)).scalar() or Decimal("0.00")
-    haber_tot = db.query(func.sum(AsientoDetalle.haber_usd)).scalar() or Decimal("0.00")
+    debe_tot = db.query(func.sum(AsientoDetalle.debe_usd)).join(AsientoContable).filter(
+        AsientoContable.tenant_id == current_user.tenant_id
+    ).scalar() or Decimal("0.00")
+    haber_tot = db.query(func.sum(AsientoDetalle.haber_usd)).join(AsientoContable).filter(
+        AsientoContable.tenant_id == current_user.tenant_id
+    ).scalar() or Decimal("0.00")
     descuadre = abs(debe_tot - haber_tot)
     descuadre_str = f"${float(descuadre):,.2f}"
     
@@ -139,11 +454,12 @@ def contabilidad_dashboard(db: Session = Depends(get_db)):
 
 
 @router.get("/monitor-forense")
-def monitor_forense(db: Session = Depends(get_db)):
+def monitor_forense(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     checks = []
     
-    # 1. Asientos Descuadrados
+    # 1. Asientos Descuadrados (filtrado por tenant)
     unbalanced_entries = db.query(AsientoContable).filter(
+        AsientoContable.tenant_id == current_user.tenant_id,
         func.round(AsientoContable.total_debe_usd, 2) != func.round(AsientoContable.total_haber_usd, 2)
     ).all()
     
@@ -159,7 +475,7 @@ def monitor_forense(db: Session = Depends(get_db)):
     # 2. Header vs Details Integrity
     header_detail_diff = Decimal("0.00")
     has_header_diff = False
-    asientos = db.query(AsientoContable).all()
+    asientos = db.query(AsientoContable).filter(AsientoContable.tenant_id == current_user.tenant_id).all()
     for a in asientos:
         det_debe = sum(d.debe_usd for d in a.detalles)
         det_haber = sum(d.haber_usd for d in a.detalles)
@@ -230,9 +546,12 @@ def monitor_forense(db: Session = Depends(get_db)):
 
 
 @router.post("/asientos")
-def crear_asiento(body: AsientoCreate, db: Session = Depends(get_db)):
+def crear_asiento(body: AsientoCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     periodo_asiento = datetime.now(timezone.utc).strftime("%Y-%m")
-    cierre = db.query(CierrePeriodo).filter(CierrePeriodo.periodo == periodo_asiento).first()
+    cierre = db.query(CierrePeriodo).filter(
+        CierrePeriodo.periodo == periodo_asiento,
+        CierrePeriodo.tenant_id == current_user.tenant_id
+    ).first()
     if cierre:
         raise HTTPException(403, detail=f"No se pueden registrar asientos en el período {periodo_asiento} porque está CERRADO.")
 
@@ -245,7 +564,8 @@ def crear_asiento(body: AsientoCreate, db: Session = Depends(get_db)):
         referencia=body.referencia,
         total_debe=total_debe,
         total_haber=total_haber,
-        tasa_cambio_bs=Decimal("36.52") # Default rate
+        tasa_cambio_bs=Decimal("36.52"), # Default rate
+        tenant_id=current_user.tenant_id  # Aislar por empresa
     )
     db.add(asiento)
     db.flush()
@@ -256,6 +576,7 @@ def crear_asiento(body: AsientoCreate, db: Session = Depends(get_db)):
             cuenta_nombre=l.cuenta_nombre,
             debe=l.debe,
             haber=l.haber,
+            centro_costo=l.centro_costo,
         ))
     db.commit()
     db.refresh(asiento)
@@ -263,8 +584,8 @@ def crear_asiento(body: AsientoCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/balance-comprobacion")
-def balance_comprobacion(periodo: str, db: Session = Depends(get_db)):
-    _seed_cuentas(db)
+def balance_comprobacion(periodo: str, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    _seed_cuentas(db, current_user.tenant_id)
     
     y, m = map(int, periodo.split("-"))
     start_date = datetime(y, m, 1, 0, 0, 0, tzinfo=timezone.utc)
@@ -281,6 +602,7 @@ def balance_comprobacion(periodo: str, db: Session = Depends(get_db)):
     ).join(
         AsientoContable
     ).filter(
+        AsientoContable.tenant_id == current_user.tenant_id,
         AsientoContable.fecha >= start_date,
         AsientoContable.fecha < end_date
     ).group_by(
@@ -467,8 +789,8 @@ def balance_comprobacion(periodo: str, db: Session = Depends(get_db)):
 
 
 @router.get("/balance-general")
-def balance_general(periodo: str, db: Session = Depends(get_db)):
-    _seed_cuentas(db)
+def balance_general(periodo: str, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    _seed_cuentas(db, current_user.tenant_id)
     
     from backend.models.core import TasaCambio
     tasa_obj = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
@@ -482,10 +804,13 @@ def balance_general(periodo: str, db: Session = Depends(get_db)):
     else:
         end_date = datetime(y, m + 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 
-    # Cuentas contables activas
-    cuentas = db.query(CuentaContable).filter(CuentaContable.activa == True).all()
+    # Cuentas contables activas del tenant
+    cuentas = db.query(CuentaContable).filter(
+        CuentaContable.activa == True,
+        CuentaContable.tenant_id == current_user.tenant_id
+    ).all()
     
-    # Calcular saldos acumulados hasta end_date
+    # Calcular saldos acumulados hasta end_date (filtrado por tenant)
     saldos = {}
     for c in cuentas:
         res = db.query(
@@ -493,6 +818,7 @@ def balance_general(periodo: str, db: Session = Depends(get_db)):
             func.sum(AsientoDetalle.haber_usd).label("haber")
         ).join(AsientoContable).filter(
             AsientoDetalle.cuenta_codigo == c.codigo,
+            AsientoContable.tenant_id == current_user.tenant_id,
             AsientoContable.fecha < end_date
         ).first()
         
@@ -659,8 +985,8 @@ def balance_general(periodo: str, db: Session = Depends(get_db)):
 
 
 @router.get("/balance-general/exportar")
-def exportar_balance(periodo: str, formato: str, db: Session = Depends(get_db)):
-    data = balance_general(periodo, db)
+def exportar_balance(periodo: str, formato: str, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    data = balance_general(periodo, db, current_user)
     
     if formato == "pdf":
         from reportlab.lib.pagesizes import letter
@@ -810,8 +1136,8 @@ def exportar_balance(periodo: str, formato: str, db: Session = Depends(get_db)):
 
 
 @router.get("/estado-resultados")
-def estado_resultados(periodo: str, db: Session = Depends(get_db)):
-    _seed_cuentas(db)
+def estado_resultados(periodo: str, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    _seed_cuentas(db, current_user.tenant_id)
     y, m = map(int, periodo.split("-"))
     start_date = datetime(y, m, 1, 0, 0, 0, tzinfo=timezone.utc)
     if m == 12:
@@ -819,6 +1145,19 @@ def estado_resultados(periodo: str, db: Session = Depends(get_db)):
     else:
         end_date = datetime(y, m + 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 
+    # 1. Periodo anterior para variaciones
+    prev_y = y
+    prev_m = m - 1
+    if prev_m == 0:
+        prev_m = 12
+        prev_y = y - 1
+    prev_start_date = datetime(prev_y, prev_m, 1, 0, 0, 0, tzinfo=timezone.utc)
+    if prev_m == 12:
+        prev_end_date = datetime(prev_y + 1, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    else:
+        prev_end_date = datetime(prev_y, prev_m + 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+    # Consulta periodo actual
     resultados = db.query(
         AsientoDetalle.cuenta_codigo,
         AsientoDetalle.cuenta_nombre,
@@ -827,8 +1166,26 @@ def estado_resultados(periodo: str, db: Session = Depends(get_db)):
     ).join(
         AsientoContable
     ).filter(
+        AsientoContable.tenant_id == current_user.tenant_id,
         AsientoContable.fecha >= start_date,
         AsientoContable.fecha < end_date
+    ).group_by(
+        AsientoDetalle.cuenta_codigo,
+        AsientoDetalle.cuenta_nombre
+    ).all()
+
+    # Consulta periodo anterior
+    resultados_prev = db.query(
+        AsientoDetalle.cuenta_codigo,
+        AsientoDetalle.cuenta_nombre,
+        func.sum(AsientoDetalle.debe_usd).label("debe_total"),
+        func.sum(AsientoDetalle.haber_usd).label("haber_total")
+    ).join(
+        AsientoContable
+    ).filter(
+        AsientoContable.tenant_id == current_user.tenant_id,
+        AsientoContable.fecha >= prev_start_date,
+        AsientoContable.fecha < prev_end_date
     ).group_by(
         AsientoDetalle.cuenta_codigo,
         AsientoDetalle.cuenta_nombre
@@ -854,6 +1211,25 @@ def estado_resultados(periodo: str, db: Session = Depends(get_db)):
             monto = debe - haber
             egresos_map[r.cuenta_nombre] = egresos_map.get(r.cuenta_nombre, 0.0) + monto
 
+    # Periodo anterior maps
+    prev_ingresos_map = {}
+    prev_egresos_map = {}
+    prev_total_ingresos = 0.0
+    prev_total_egresos = 0.0
+
+    for r in resultados_prev:
+        debe = float(r.debe_total or 0.0)
+        haber = float(r.haber_total or 0.0)
+
+        if r.cuenta_codigo.startswith("4"):
+            monto = haber - debe
+            prev_ingresos_map[r.cuenta_nombre] = prev_ingresos_map.get(r.cuenta_nombre, 0.0) + monto
+            prev_total_ingresos += monto
+        elif r.cuenta_codigo.startswith("5"):
+            monto = debe - haber
+            prev_egresos_map[r.cuenta_nombre] = prev_egresos_map.get(r.cuenta_nombre, 0.0) + monto
+            prev_total_egresos += monto
+
     if not ingresos_map:
         ingresos_map["Ventas"] = 0.0
     if not egresos_map:
@@ -867,48 +1243,59 @@ def estado_resultados(periodo: str, db: Session = Depends(get_db)):
         egresos.append({"concepto": k, "monto": v})
         total_egresos += v
 
+    def calc_var(actual: float, anterior: float) -> str:
+        if anterior == 0.0:
+            return "+100.0%" if actual > 0.0 else "0.0%"
+        pct = ((actual - anterior) / anterior) * 100
+        sign = "+" if pct >= 0 else ""
+        return f"{sign}{pct:.1f}%"
+
     filas = []
     # 1. Ingresos
     filas.append({"esCabecera": True, "nombre": "Ingresos Operacionales"})
     for item in ingresos:
+        ant = prev_ingresos_map.get(item["concepto"], 0.0)
         filas.append({
             "nombre": item["concepto"],
             "monto_actual": item["monto"],
-            "monto_anterior": 0.0,
-            "variacion": "0.0%"
+            "monto_anterior": ant,
+            "variacion": calc_var(item["monto"], ant)
         })
     filas.append({
         "esSubtotal": True,
         "nombre": "Total Ingresos Operacionales",
         "monto_actual": total_ingresos,
-        "monto_anterior": 0.0,
-        "variacion": "0.0%"
+        "monto_anterior": prev_total_ingresos,
+        "variacion": calc_var(total_ingresos, prev_total_ingresos)
     })
     
     # 2. Egresos
     filas.append({"esCabecera": True, "nombre": "Costos y Gastos Operacionales"})
     for item in egresos:
+        ant = prev_egresos_map.get(item["concepto"], 0.0)
         filas.append({
             "nombre": item["concepto"],
             "monto_actual": item["monto"],
-            "monto_anterior": 0.0,
-            "variacion": "0.0%"
+            "monto_anterior": ant,
+            "variacion": calc_var(item["monto"], ant)
         })
     filas.append({
         "esSubtotal": True,
         "nombre": "Total Costos y Gastos",
         "monto_actual": total_egresos,
-        "monto_anterior": 0.0,
-        "variacion": "0.0%"
+        "monto_anterior": prev_total_egresos,
+        "variacion": calc_var(total_egresos, prev_total_egresos)
     })
     
     # 3. Utilidad
+    util_actual = total_ingresos - total_egresos
+    util_ant = prev_total_ingresos - prev_total_egresos
     filas.append({
         "esTotal": True,
         "nombre": "Utilidad Neta del Ejercicio",
-        "monto_actual": total_ingresos - total_egresos,
-        "monto_anterior": 0.0,
-        "variacion": "0.0%"
+        "monto_actual": util_actual,
+        "monto_anterior": util_ant,
+        "variacion": calc_var(util_actual, util_ant)
     })
 
     return {
@@ -916,13 +1303,19 @@ def estado_resultados(periodo: str, db: Session = Depends(get_db)):
         "ingresos": ingresos,
         "egresos": egresos,
         "filas": filas,
-        "utilidad_neta": total_ingresos - total_egresos,
+        "utilidad_neta": util_actual,
+        "prev_total_ingresos": prev_total_ingresos,
+        "prev_total_egresos": prev_total_egresos,
+        "prev_utilidad_neta": util_ant,
+        "variacion_ingresos": calc_var(total_ingresos, prev_total_ingresos),
+        "variacion_egresos": calc_var(total_egresos, prev_total_egresos),
+        "variacion_utilidad": calc_var(util_actual, util_ant),
     }
 
 
 @router.get("/estado-resultados/exportar")
-def exportar_er(periodo: str, formato: str, db: Session = Depends(get_db)):
-    data = estado_resultados(periodo, db)
+def exportar_er(periodo: str, formato: str, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    data = estado_resultados(periodo, db, current_user)
     
     if formato == "pdf":
         from reportlab.lib.pagesizes import letter
@@ -1052,8 +1445,8 @@ def exportar_er(periodo: str, formato: str, db: Session = Depends(get_db)):
 
 
 @router.get("/flujo-caja")
-def flujo_caja(periodo: str, db: Session = Depends(get_db)):
-    _seed_cuentas(db)
+def flujo_caja(periodo: str, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    _seed_cuentas(db, current_user.tenant_id)
     y, m = map(int, periodo.split("-"))
     start_date = datetime(y, m, 1, 0, 0, 0, tzinfo=timezone.utc)
     if m == 12:
@@ -1061,34 +1454,57 @@ def flujo_caja(periodo: str, db: Session = Depends(get_db)):
     else:
         end_date = datetime(y, m + 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 
-    detalles = db.query(AsientoDetalle).join(AsientoContable).filter(
-        AsientoDetalle.cuenta_codigo.like("1101%"),
+    # Buscar todos los IDs de asientos contables del período que afecten Caja y Bancos (1.1.01 o 1101)
+    asientos_ids = db.query(AsientoContable.id).join(AsientoDetalle).filter(
+        AsientoDetalle.cuenta_codigo.like("1.1.01%") | AsientoDetalle.cuenta_codigo.like("1101%"),
+        AsientoContable.tenant_id == current_user.tenant_id,
         AsientoContable.fecha >= start_date,
         AsientoContable.fecha < end_date
-    ).all()
+    ).distinct().all()
 
-    operativo = 0.0
+    asiento_ids_list = [a[0] for a in asientos_ids]
+
+    operativo_in = 0.0
+    operativo_out = 0.0
     inversion = 0.0
     financiamiento = 0.0
 
-    for d in detalles:
-        monto = float(d.debe_usd - d.haber_usd)
-        concepto = (d.asiento.concepto or "").lower()
-        if "inversión" in concepto or "compra activo" in concepto or "maquinaria" in concepto:
-            inversion += monto
-        elif "préstamo" in concepto or "capital" in concepto or "financiamiento" in concepto:
-            financiamiento += monto
+    for aid in asiento_ids_list:
+        detalles_asiento = db.query(AsientoDetalle).filter(AsientoDetalle.asiento_id == aid).all()
+        
+        # Calcular impacto neto de efectivo en este asiento
+        cash_debe = sum(float(d.debe_usd) for d in detalles_asiento if d.cuenta_codigo.startswith("1.1.01") or d.cuenta_codigo.startswith("1101"))
+        cash_haber = sum(float(d.haber_usd) for d in detalles_asiento if d.cuenta_codigo.startswith("1.1.01") or d.cuenta_codigo.startswith("1101"))
+        net_cash = cash_debe - cash_haber
+
+        if net_cash == 0.0:
+            continue
+
+        # Clasificación:
+        # Actividades de Inversión: si alguna otra línea toca activo no corriente (1.2 o 12)
+        is_inversion = any(d.cuenta_codigo.startswith("1.2") or d.cuenta_codigo.startswith("12") for d in detalles_asiento)
+        # Actividades de Financiamiento: si toca pasivo no corriente (2.2 o 22) o patrimonio (3)
+        is_financiamiento = any(d.cuenta_codigo.startswith("2.2") or d.cuenta_codigo.startswith("22") or d.cuenta_codigo.startswith("3") for d in detalles_asiento)
+
+        if is_inversion:
+            inversion += net_cash
+        elif is_financiamiento:
+            financiamiento += net_cash
         else:
-            operativo += monto
+            if net_cash > 0:
+                operativo_in += net_cash
+            else:
+                operativo_out += net_cash
 
-    if operativo == 0.0 and inversion == 0.0 and financiamiento == 0.0:
+    # Si la base de datos está vacía de asientos, hacemos un fallback para mostrar actividad
+    if operativo_in == 0.0 and operativo_out == 0.0 and inversion == 0.0 and financiamiento == 0.0:
         ventas = ventas_periodo(db, periodo).all()
-        operativo = sum(to_float(v.total) for v in ventas)
+        operativo_in = sum(to_float(v.total) for v in ventas)
+        operativo_out = -operativo_in * 0.65
 
-    # Build structured lists of lines
     operacion_list = [
-        {"nombre": "Recaudación de Clientes", "monto": operativo},
-        {"nombre": "Pagos a Proveedores y Personal", "monto": -operativo * 0.65}
+        {"nombre": "Recaudación de Clientes", "monto": operativo_in},
+        {"nombre": "Pagos a Proveedores y Personal", "monto": operativo_out}
     ]
     inversion_list = [
         {"nombre": "Adquisición de Propiedades y Equipos", "monto": inversion}
@@ -1096,23 +1512,34 @@ def flujo_caja(periodo: str, db: Session = Depends(get_db)):
     financiamiento_list = [
         {"nombre": "Préstamos Obtenidos / Pagados", "monto": financiamiento}
     ]
-    
-    net_operativo = operativo - (operativo * 0.65)
-    
-    # Query actual values
-    efectivo_inicio = db.query(func.sum(AsientoDetalle.debe_usd - AsientoDetalle.haber_usd)).filter(
-        AsientoDetalle.cuenta_codigo.like("1101%"),
+
+    net_operativo = operativo_in + operativo_out
+
+    # Efectivo inicial (Libro mayor de 1.1.01/1101 acumulado antes de start_date)
+    efectivo_inicio = db.query(func.sum(AsientoDetalle.debe_usd - AsientoDetalle.haber_usd)).join(
+        AsientoContable
+    ).filter(
+        AsientoDetalle.cuenta_codigo.like("1.1.01%") | AsientoDetalle.cuenta_codigo.like("1101%"),
         AsientoContable.fecha < start_date
-    ).join(AsientoContable).scalar() or 0.0
-    
+    ).scalar() or 0.0
+
     efectivo_inicio = float(efectivo_inicio)
-    
+
     incremento_neto = net_operativo + inversion + financiamiento
     efectivo_final = efectivo_inicio + incremento_neto
-    
+
+    # Composición real de saldos de bancos contra caja
+    from backend.models.erp_extended import CuentaBancaria
+    saldo_bancos_real = db.query(func.sum(CuentaBancaria.saldo_actual_usd)).scalar() or Decimal("0.00")
+    bancos_val = float(saldo_bancos_real)
+
+    if bancos_val > efectivo_final:
+        bancos_val = efectivo_final
+    caja_val = max(0.0, efectivo_final - bancos_val)
+
     return {
         "periodo": periodo,
-        "operativo": operativo,
+        "operativo": net_operativo,
         "inversion": inversion,
         "financiamiento": financiamiento,
         "neto": incremento_neto,
@@ -1131,15 +1558,32 @@ def flujo_caja(periodo: str, db: Session = Depends(get_db)):
             "saldo_balance": efectivo_final
         },
         "composicion": {
-            "bancos": efectivo_final * 0.9,
-            "caja": efectivo_final * 0.1
+            "bancos": bancos_val,
+            "caja": caja_val
         }
     }
 
+@router.get("/centros-costo/exportar")
+def exportar_centros_costo(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    from backend.models.erp_extended import CentroCosto
+    import io
+    centros = db.query(CentroCosto).filter(CentroCosto.tenant_id == current_user.tenant_id).all()
+    
+    output = io.StringIO()
+    output.write("ID,Codigo,Nombre,Responsable,Presupuesto,Activo\n")
+    for c in centros:
+        output.write(f"{c.id},{c.codigo},{c.nombre},{c.responsable or 'N/A'},{c.presupuesto or 0},{'Si' if c.activo else 'No'}\n")
+    
+    return StreamingResponse(
+        iter([output.getvalue()]), 
+        media_type="text/csv", 
+        headers={"Content-Disposition": "attachment; filename=Matriz-Centros-Costo.csv"}
+    )
+
 
 @router.get("/flujo-caja/exportar")
-def exportar_flujo(periodo: str, formato: str, db: Session = Depends(get_db)):
-    data = flujo_caja(periodo, db)
+def exportar_flujo(periodo: str, formato: str, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    data = flujo_caja(periodo, db, current_user)
     
     if formato == "pdf":
         from reportlab.lib.pagesizes import letter
@@ -1258,7 +1702,7 @@ def exportar_flujo(periodo: str, formato: str, db: Session = Depends(get_db)):
 
 
 @router.get("/cierre/checklist")
-def cierre_checklist(periodo: str, db: Session = Depends(get_db)):
+def cierre_checklist(periodo: str, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     ventas_count = ventas_periodo(db, periodo).count()
     
     y, m = map(int, periodo.split("-"))
@@ -1268,43 +1712,61 @@ def cierre_checklist(periodo: str, db: Session = Depends(get_db)):
     else:
         end_date = datetime(y, m + 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 
-    unbalanced_count = db.query(AsientoContable).filter(
+    unbalanced_asientos = db.query(AsientoContable).filter(
+        AsientoContable.tenant_id == current_user.tenant_id,
         AsientoContable.fecha >= start_date,
         AsientoContable.fecha < end_date,
         func.round(AsientoContable.total_debe_usd, 2) != func.round(AsientoContable.total_haber_usd, 2)
-    ).count()
-
+    ).all()
+    unbalanced_count = len(unbalanced_asientos)
     asientos_ok = (unbalanced_count == 0)
+    
+    desc_asientos = "Verificación de partida doble completada."
+    if unbalanced_count > 0:
+        desc_asientos = f"Hay {unbalanced_count} asiento(s) descuadrado(s) (Ej. Asiento ID: {unbalanced_asientos[0].id}). Revise contabilidad."
+
+    from backend.models.operations import AjusteInventario
+    pending_adjustments = db.query(AjusteInventario).filter(
+        AjusteInventario.fecha_solicitud >= start_date,
+        AjusteInventario.fecha_solicitud < end_date,
+        AjusteInventario.estado == "PENDIENTE"
+    ).all()
+    pending_adjustments_count = len(pending_adjustments)
+    inventario_ok = (pending_adjustments_count == 0)
+    
+    desc_inventario = "Cierre de lotes y valorización completada."
+    if pending_adjustments_count > 0:
+        desc_inventario = f"Tiene {pending_adjustments_count} ajustes pendientes (Ej. Ajuste ID: {pending_adjustments[0].id}). Revise inventario."
 
     checklist_items = [
         {
             "id": "1",
             "task": "Libro de ventas consolidado",
-            "desc": "Verificar facturación mensual y cierre del periodo de ventas",
+            "desc": f"Facturas del período: {ventas_count} emitidas." if ventas_count > 0 else f"Sin facturas registradas en {periodo}. Debe emitir al menos una.",
             "responsible": "Dpto. Facturación",
             "status": "Completado" if ventas_count > 0 else "No iniciado",
-            "link": "/facturacion/comprobantes"
+            "link": "/historial"
         },
         {
             "id": "2",
             "task": "Asientos contables cuadrados",
-            "desc": "Verificación de partida doble para evitar descuadres contables",
+            "desc": desc_asientos,
             "responsible": "Contabilidad Senior",
-            "status": "Completado" if unbalanced_count == 0 else "No iniciado",
+            "status": "Completado" if asientos_ok else "No iniciado",
             "link": "/contabilidad/diario"
         },
         {
             "id": "3",
             "task": "Inventario valorizado",
-            "desc": "Cierre de lotes y valorización en base a costo promedio ponderado",
+            "desc": desc_inventario,
             "responsible": "Dpto. Almacén",
-            "status": "Completado",
-            "link": ""
+            "status": "Completado" if inventario_ok else "No iniciado",
+            "link": "/inventario/ajustes"
         }
     ]
     
-    completados_count = sum([1 for ok in [ventas_count > 0, unbalanced_count == 0, True] if ok])
-    pendientes_count = sum([1 for ok in [ventas_count > 0, unbalanced_count == 0] if not ok])
+    completados_count = sum([1 for ok in [ventas_count > 0, unbalanced_count == 0, inventario_ok] if ok])
+    pendientes_count = sum([1 for ok in [ventas_count > 0, unbalanced_count == 0, inventario_ok] if not ok])
 
     return {
         "periodo": periodo,
@@ -1312,9 +1774,9 @@ def cierre_checklist(periodo: str, db: Session = Depends(get_db)):
         "items": [
             {"tarea": "Libro de ventas consolidado", "ok": ventas_count > 0},
             {"tarea": "Asientos contables cuadrados", "ok": unbalanced_count == 0},
-            {"tarea": "Inventario valorizado", "ok": True},
+            {"tarea": "Inventario valorizado", "ok": inventario_ok},
         ],
-        "listo": (ventas_count > 0 and unbalanced_count == 0),
+        "listo": (ventas_count > 0 and unbalanced_count == 0 and inventario_ok),
         "metricas": {
             "labelPeriodo": "Período",
             "valuePeriodo": periodo,
@@ -1327,8 +1789,10 @@ def cierre_checklist(periodo: str, db: Session = Depends(get_db)):
 
 
 @router.get("/cierres/historial")
-def cierres_historial(db: Session = Depends(get_db)):
-    cierres = db.query(CierrePeriodo).order_by(CierrePeriodo.periodo.desc()).all()
+def cierres_historial(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    cierres = db.query(CierrePeriodo).filter(
+        CierrePeriodo.tenant_id == current_user.tenant_id
+    ).order_by(CierrePeriodo.periodo.desc()).all()
     return [
         {
             "id": c.id,
@@ -1343,18 +1807,22 @@ def cierres_historial(db: Session = Depends(get_db)):
 
 
 @router.post("/cierre/ejecutar")
-def ejecutar_cierre(body: dict, db: Session = Depends(get_db)):
+def ejecutar_cierre(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     periodo = body.get("periodo")
     if not periodo:
         raise HTTPException(400, detail="Período requerido")
 
-    existing = db.query(CierrePeriodo).filter(CierrePeriodo.periodo == periodo).first()
+    existing = db.query(CierrePeriodo).filter(
+        CierrePeriodo.periodo == periodo,
+        CierrePeriodo.tenant_id == current_user.tenant_id
+    ).first()
     if existing:
         raise HTTPException(400, detail=f"El período {periodo} ya se encuentra cerrado")
 
     nuevo_cierre = CierrePeriodo(
         periodo=periodo,
-        usuario="Henry Rodriguez"
+        tenant_id=current_user.tenant_id,
+        usuario=current_user.nombre or current_user.email
     )
     db.add(nuevo_cierre)
     db.commit()
@@ -1362,12 +1830,15 @@ def ejecutar_cierre(body: dict, db: Session = Depends(get_db)):
 
 
 @router.post("/cierre/reabrir")
-def reabrir_cierre(body: dict, db: Session = Depends(get_db)):
+def reabrir_cierre(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     periodo = body.get("periodo")
     if not periodo:
         raise HTTPException(400, detail="Período requerido")
 
-    existing = db.query(CierrePeriodo).filter(CierrePeriodo.periodo == periodo).first()
+    existing = db.query(CierrePeriodo).filter(
+        CierrePeriodo.periodo == periodo,
+        CierrePeriodo.tenant_id == current_user.tenant_id
+    ).first()
     if not existing:
         raise HTTPException(400, detail=f"El período {periodo} no se encuentra cerrado")
 

@@ -321,17 +321,73 @@ def generar_pdf_retencion_iva(
     c.line(ancho / 2, alto - 180, ancho / 2, alto - 130)
     
     # --- 3. TABLA DE FACTURAS (Formato SENIAT) ---
+    from backend.models.erp_extended import Compra
+    from sqlalchemy import extract
+
+    try:
+        anio = int(periodo[:4])
+        mes = int(periodo[4:])
+    except:
+        anio, mes = datetime.now().year, datetime.now().month
+
+    # Buscamos compras reales de este proveedor en el periodo dado que tengan IVA > 0
+    compras_reales = db.query(Compra).filter(
+        Compra.proveedor_rif == proveedor_id,
+        extract('year', Compra.fecha) == anio,
+        extract('month', Compra.fecha) == mes,
+        Compra.estado != "ANULADA"
+    ).all()
+
     # Cabeceras requeridas legalmente
     data = [
         ["Operación", "Fecha Doc.", "Nro. Factura", "Nro. Control", "Total Compras", "Sin Derecho a \nCrédito Fiscal", "Base Imponible", "% Alícuota", "Impuesto IVA", "% Ret.", "IVA Retenido"]
     ]
     
-    # Datos simulados de facturas procesadas en el periodo
-    data.append(["01 - Reg", "10/05/2026", "001452", "00-001452", "1.160,00", "0,00", "1.000,00", "16%", "160,00", "75%", "120,00"])
-    data.append(["01 - Reg", "12/05/2026", "001489", "00-001489", "2.320,00", "0,00", "2.000,00", "16%", "320,00", "75%", "240,00"])
+    total_compras = 0.0
+    total_base = 0.0
+    total_iva = 0.0
+    total_ret = 0.0
     
+    for c_compra in compras_reales:
+        from backend.utils.helpers import to_float
+        base = to_float(c_compra.base_imponible)
+        iva = to_float(c_compra.iva)
+        total = to_float(c_compra.monto_total)
+        ret = iva * 0.75 # Retención estándar del 75%
+        
+        total_compras += total
+        total_base += base
+        total_iva += iva
+        total_ret += ret
+        
+        data.append([
+            "01 - Reg",
+            c_compra.fecha.strftime("%d/%m/%Y"),
+            c_compra.numero_factura or "S/N",
+            c_compra.numero_control or "S/N",
+            f"{total:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+            "0,00",
+            f"{base:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+            "16%",
+            f"{iva:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+            "75%",
+            f"{ret:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        ])
+        
+    if not compras_reales:
+        data.append(["No hay compras", "-", "-", "-", "0,00", "0,00", "0,00", "16%", "0,00", "75%", "0,00"])
+        
     # Totales
-    data.append(["TOTALES", "", "", "", "3.480,00", "0,00", "3.000,00", "", "480,00", "", "360,00"])
+    data.append([
+        "TOTALES", "", "", "",
+        f"{total_compras:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+        "0,00",
+        f"{total_base:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+        "",
+        f"{total_iva:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+        "",
+        f"{total_ret:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    ])
     
     # Ajustamos anchos de columnas para caber en la página apaisada
     col_widths = [60, 65, 70, 70, 80, 80, 80, 50, 75, 40, 75]

@@ -14,6 +14,8 @@ from backend.models.erp_extended import (
     RetencionISLR
 )
 
+from backend.utils.auth import get_current_user
+
 router = APIRouter(prefix="/tesoreria", tags=["Tesoreria"])
 logger = logging.getLogger(__name__)
 
@@ -24,9 +26,12 @@ def format_currency(val):
     return f"${val:,.2f}"
 
 @router.get("/dashboard")
-def get_treasury_dashboard(db: Session = Depends(get_db)):
+def get_treasury_dashboard(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     # 1. Saldos de Cuentas Bancarias
-    todas_cuentas = db.query(CuentaBancaria).filter(CuentaBancaria.activa == True).all()
+    todas_cuentas = db.query(CuentaBancaria).filter(
+        CuentaBancaria.activa == True,
+        CuentaBancaria.tenant_id == current_user.tenant_id
+    ).all()
     
     bancos_bs = 0.0
     efectivo_zelle = 0.0
@@ -59,12 +64,21 @@ def get_treasury_dashboard(db: Session = Depends(get_db)):
         })
     
     # 2. Reserva Fiscal (IVA/ISLR retenido)
-    ret_iva = db.query(func.sum(RetencionIVA.monto_usd)).filter(RetencionIVA.estado == "PENDIENTE").scalar()
-    ret_islr = db.query(func.sum(RetencionISLR.monto_usd)).filter(RetencionISLR.estado == "PENDIENTE").scalar()
+    ret_iva = db.query(func.sum(RetencionIVA.monto_usd)).filter(
+        RetencionIVA.estado == "PENDIENTE",
+        RetencionIVA.tenant_id == current_user.tenant_id
+    ).scalar()
+    ret_islr = db.query(func.sum(RetencionISLR.monto_usd)).filter(
+        RetencionISLR.estado == "PENDIENTE",
+        RetencionISLR.tenant_id == current_user.tenant_id
+    ).scalar()
     reserva_fiscal = to_float(ret_iva) + to_float(ret_islr)
 
     # 3. Efectivo en Tránsito
-    efectivo_transito = db.query(func.sum(MovimientoBancario.monto_usd)).filter(MovimientoBancario.estado == "PENDIENTE").scalar()
+    efectivo_transito = db.query(func.sum(MovimientoBancario.monto_usd)).filter(
+        MovimientoBancario.estado == "PENDIENTE",
+        MovimientoBancario.tenant_id == current_user.tenant_id
+    ).scalar()
     efectivo_transito = to_float(efectivo_transito)
 
     # 4. Cheques por cobrar (post-datados). Como no hay tabla Cheque, lo dejamos en 0 de forma segura.
@@ -80,7 +94,8 @@ def get_treasury_dashboard(db: Session = Depends(get_db)):
     ahora = datetime.now(timezone.utc)
     cxp_vencidas = db.query(CuentaPorPagar).filter(
         CuentaPorPagar.estado != "PAGADA",
-        CuentaPorPagar.fecha_vencimiento < ahora
+        CuentaPorPagar.fecha_vencimiento < ahora,
+        CuentaPorPagar.tenant_id == current_user.tenant_id
     ).all()
     
     alertas_lista = []

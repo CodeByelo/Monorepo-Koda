@@ -93,12 +93,14 @@ const navItems = [
     path: '/logistica',
     hasSub: true,
     subItems: [
-      { label: 'DESPACHO OPERATIVO' },
+      { label: 'OPERACIONES' },
       { label: 'Tablero de Despacho', path: '/logistica' },
+      { label: 'Planificación Semanal (Gantt)', path: '/logistica/planificacion' },
+      { label: 'REGISTRO Y PERSONAL' },
+      { label: 'Registro de Choferes', path: '/logistica/choferes' },
+      { label: 'Organigrama y Personal', path: '/logistica/personal' },
       { label: 'GESTIÓN DE ACTIVOS' },
-      { label: 'Maestro de Vehículos', path: '/logistica/vehiculos' },
-      { label: 'Directorio de Choferes', path: '/logistica/choferes' },
-      { label: 'MANTENIMIENTO' },
+      { label: 'Maestro de Vehículos (Autos)', path: '/logistica/vehiculos' },
       { label: 'Registro de Servicios', path: '/logistica/mantenimiento' },
     ]
   },

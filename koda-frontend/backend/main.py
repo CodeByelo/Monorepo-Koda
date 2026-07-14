@@ -10,7 +10,7 @@ if not DATABASE_URL or not DATABASE_URL.startswith("postgresql"):
 
 
 # Importar TODOS los modelos para create_all
-from backend.models import core, operations, accounting, hr, fiscal as fiscal_model, audit
+from backend.models import core, operations, accounting, hr, fiscal as fiscal_model, audit, logistics_new
 from backend.models import erp_extended
 
 __all__ = [
@@ -21,12 +21,14 @@ __all__ = [
     "fiscal_model",
     "audit",
     "erp_extended",
+    "logistics_new",
 ]
 from backend.routers import (
     auth, rates, sales, fiscal, inventory, accounting as accounting_router,
     hr as hr_router, productos, proveedores, audit, entidades,
     dashboard_ext, fiscal_ext, contabilidad_ext, modulos_ext, admin_ext, extras_ext,
-    pagos, reportes, developer, developer_router, payroll, facturacion
+    pagos, reportes, developer, developer_router, payroll, facturacion, telegram_api,
+    forense, telemetry,
 )
 from backend.routers import logistica as logistica_router
 from backend.utils.seed_extended import seed_extended_data
@@ -40,8 +42,14 @@ try:
     with engine.begin() as connection:
         connection.execute(text("ALTER TABLE public.nominas ADD COLUMN IF NOT EXISTS total_inces_usd NUMERIC(15, 2) DEFAULT 0.00 NOT NULL"))
         print("\033[92m[DB MIGRATION] Columna total_inces_usd garantizada en la tabla nominas.\033[0m")
+        connection.execute(text("ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS telegram_chat_id VARCHAR(50)"))
+        print("\033[92m[DB MIGRATION] Columna telegram_chat_id garantizada en la tabla profiles.\033[0m")
+        connection.execute(text("ALTER TABLE public.declaraciones_iva DROP CONSTRAINT IF EXISTS declaraciones_iva_periodo_key"))
+        print("\033[92m[DB MIGRATION] Restricción única sobre declaraciones_iva (periodo) removida.\033[0m")
+        connection.execute(text("ALTER TABLE public.correlativos_fiscales DROP CONSTRAINT IF EXISTS correlativos_fiscales_tipo_documento_key"))
+        print("\033[92m[DB MIGRATION] Restricción única sobre correlativos_fiscales (tipo_documento) removida.\033[0m")
 except Exception as migration_error:
-    print(f"\033[93m[DB MIGRATION WARNING] No se pudo alterar la tabla nominas para agregar total_inces_usd: {migration_error}\033[0m")
+    print(f"\033[93m[DB MIGRATION WARNING] No se pudo alterar la tabla para migración: {migration_error}\033[0m")
 
 from backend.core.database import SessionLocal
 from backend.models.core import TasaCambio
@@ -90,6 +98,11 @@ app = FastAPI(
     description="Motor de Backend modular y escalable para el ERP Bimonetario de KODA. Soporta transacciones muti-moneda en tiempo real.",
     version="1.0.0"
 )
+
+from fastapi.staticfiles import StaticFiles
+import os
+os.makedirs("backend/static", exist_ok=True)
+app.mount("/static", StaticFiles(directory="backend/static"), name="static")
 
 # Configuración de Orígenes Permitidos para CORS (DEBE ir antes de los routers)
 origins = [
@@ -156,6 +169,7 @@ app.include_router(modulos_ext.tesoreria_router)
 app.include_router(modulos_ext.reportes_router)
 app.include_router(modulos_ext.tasas_router)
 app.include_router(admin_ext.router)
+app.include_router(telegram_api.router)
 app.include_router(extras_ext.router)
 app.include_router(pagos.router)
 app.include_router(reportes.router)
@@ -167,6 +181,10 @@ app.include_router(payroll.router, prefix="/api")
 app.include_router(facturacion.router)
 # Módulo Logística (Flota, Choferes, Turnos de Despacho, Mantenimiento)
 app.include_router(logistica_router.router)
+# Búnker Forense — trazabilidad inmutable de entidades del sistema
+app.include_router(forense.router)
+# Telemetría Omniscience
+app.include_router(telemetry.router)
 
 # Endpoints de Dashboard para el Frontend
 @app.get("/repo_dashboard_resumen", tags=["Reportes Financieros"])

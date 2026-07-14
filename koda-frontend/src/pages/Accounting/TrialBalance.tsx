@@ -11,6 +11,7 @@ import {
 import { Link } from 'react-router-dom';
 import { useState, useEffect, useMemo } from 'react';
 import { api } from '@/api/client';
+import { createPortal } from 'react-dom';
 
 const TrialBalance = () => {
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -19,6 +20,12 @@ const TrialBalance = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [lectura, setLectura] = useState<any[]>([]);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
 
   const fetchTrialBalance = async () => {
     try {
@@ -108,7 +115,7 @@ const TrialBalance = () => {
                   className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold text-[#0b5156] outline-none focus:border-[#0b5156]" 
                 />
              </div>
-             <button className="bg-white text-[#0b5156] px-4 py-2.5 rounded-xl text-[10px] font-black uppercase border border-[#0b5156]/20 flex items-center gap-2 hover:bg-[#0b5156]/5 transition-all">
+             <button onClick={() => showToast("El manual de opciones contables está en desarrollo y se incluirá en la próxima actualización.", "error")} className="bg-white text-[#0b5156] px-4 py-2 rounded-xl text-[10px] font-black uppercase border border-[#0b5156]/20 flex items-center gap-2 hover:bg-[#0b5156]/5 transition-all">
                 📘 Manual de Opción
              </button>
              <button onClick={handlePrint} className="bg-[#0b5156] text-white px-4 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all">
@@ -277,6 +284,15 @@ const TrialBalance = () => {
             <div className={`absolute right-0 bottom-0 w-64 h-64 ${totals.diff > 0.01 ? 'bg-red-50 group-hover:bg-red-100' : 'bg-slate-50 group-hover:bg-green-50'} rounded-full blur-3xl transition-all`}></div>
           </div>
         </>
+      )}
+      {toast && typeof document !== 'undefined' && createPortal(
+        <div className="fixed bottom-6 right-6 z-[300] flex items-center gap-3 animate-in slide-in-from-bottom-4 duration-300">
+          <div className={`px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 border ${toast.type === 'success' ? 'bg-[#0b5156] border-[#0b5156]/20 text-white' : 'bg-red-600 border-red-500 text-white'}`}>
+            {toast.type === 'success' ? <ShieldCheck size={20} /> : <AlertTriangle size={20} />}
+            <span className="font-bold text-xs tracking-wide uppercase font-mono">{toast.message}</span>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );

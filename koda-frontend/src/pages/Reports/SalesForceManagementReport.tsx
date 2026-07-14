@@ -16,6 +16,9 @@ import { api } from '@/api/client';
 const SalesForceManagementReport = () => {
   const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [modalMessage, setModalMessage] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showCriticalOnly, setShowCriticalOnly] = useState(false);
 
   useEffect(() => {
     const fetchSalesForce = async () => {
@@ -31,9 +34,28 @@ const SalesForceManagementReport = () => {
     fetchSalesForce();
   }, []);
 
+  const handleExport = async () => {
+    try {
+      await api.download('/reportes/exportar?reporte=vendedores', 'liquidacion_comisiones_vendedores.csv');
+    } catch (error) {
+      console.error("Error exporting sellers:", error);
+      setModalMessage("Error al liquidar comisiones.");
+    }
+  };
+
+  const handleConfigureCommissions = () => {
+    setModalMessage("Las tasas de comisiones se configuran individualmente en la ficha de cada vendedor en el maestro de Fuerza de Ventas.");
+  };
+
   const metrics = data?.metrics || [];
 
   const salesForce = data?.salesForce || [];
+  const filteredSalesForce = salesForce.filter((v: any) => {
+    const nameMatch = (v.name || v.nombre || "").toLowerCase().includes(searchQuery.toLowerCase());
+    const criticalMatch = showCriticalOnly ? (v.isCritical || (v.status || v.estado) === 'REVISIÓN' || parseFloat(v.efficiency || v.eficiencia) < 75) : true;
+    return nameMatch && criticalMatch;
+  });
+
   const insight = data?.insight || "En este reporte, las comisiones se calculan sobre el Monto Cobrado, no sobre la facturación. Esto garantiza que el flujo de caja esté protegido.";
 
   return (
@@ -54,10 +76,16 @@ const SalesForceManagementReport = () => {
             <p className="text-slate-500 text-xs font-bold uppercase tracking-tight">Análisis de rendimiento por vendedor basado en la liquidez real aportada.</p>
           </div>
           <div className="flex gap-2">
-             <button className="bg-white text-slate-500 px-6 py-2 rounded-xl text-[10px] font-black uppercase border border-slate-200 hover:bg-slate-50 transition-all flex items-center gap-2">
+             <button 
+               onClick={handleConfigureCommissions}
+               className="bg-white text-slate-500 px-6 py-2 rounded-xl text-[10px] font-black uppercase border border-slate-200 hover:bg-slate-50 transition-all flex items-center gap-2"
+             >
                 Configurar Comisiones
              </button>
-             <button className="bg-[#0b5156] text-white px-8 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all">
+             <button 
+               onClick={handleExport}
+               className="bg-[#0b5156] text-white px-8 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all"
+             >
                 <Download size={14} /> Liquidar Comisiones por Cobro
              </button>
           </div>
@@ -99,9 +127,23 @@ const SalesForceManagementReport = () => {
           <div className="flex gap-2 w-full md:w-auto">
              <div className="relative flex-1 md:flex-none">
                 <Search className="absolute left-3 top-2 text-slate-400" size={12} />
-                <input type="text" placeholder="Buscar vendedor..." className="w-full md:w-64 bg-white border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs font-bold text-[#0b5156] outline-none focus:border-[#0b5156] shadow-sm" />
+                <input 
+                  type="text" 
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Buscar vendedor..." 
+                  className="w-full md:w-64 bg-white border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs font-bold text-[#0b5156] outline-none focus:border-[#0b5156] shadow-sm" 
+                />
              </div>
-             <button className="p-1.5 bg-white text-slate-600 rounded-lg border border-slate-200 hover:bg-slate-50 shadow-sm transition-all">
+             <button 
+               onClick={() => setShowCriticalOnly(!showCriticalOnly)}
+               title="Mostrar críticos / bajo rendimiento"
+               className={`p-1.5 rounded-lg border shadow-sm transition-all ${
+                 showCriticalOnly 
+                   ? 'bg-[#0b5156] text-white border-[#0b5156]' 
+                   : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+               }`}
+             >
                 <Filter size={14} />
              </button>
           </div>
@@ -122,7 +164,7 @@ const SalesForceManagementReport = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50 text-xs">
-              {salesForce.length > 0 ? salesForce.map((v: any, i: number) => (
+              {filteredSalesForce.length > 0 ? filteredSalesForce.map((v: any, i: number) => (
                 <tr key={i} className={`hover:bg-slate-50 transition-colors group ${v.isCritical ? 'bg-red-50/30' : ''}`}>
                   <td className="py-2 px-4">
                     <div className="flex items-center gap-3">
@@ -169,6 +211,35 @@ const SalesForceManagementReport = () => {
          </div>
          <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-white/5 rounded-full blur-3xl pointer-events-none" />
       </div>
+
+      {modalMessage && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-[#0b5156] p-4 text-white flex items-center justify-between">
+              <h3 className="text-xs font-black uppercase tracking-widest">Aviso del Sistema</h3>
+              <button 
+                onClick={() => setModalMessage(null)}
+                className="text-white/70 hover:text-white text-xs font-bold uppercase transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-slate-600 text-xs font-bold uppercase tracking-tight leading-relaxed">
+                {modalMessage}
+              </p>
+              <div className="flex justify-end gap-2">
+                <button 
+                  onClick={() => setModalMessage(null)}
+                  className="bg-[#0b5156] text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all"
+                >
+                  Aceptar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

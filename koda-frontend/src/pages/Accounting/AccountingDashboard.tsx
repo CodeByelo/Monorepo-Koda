@@ -29,7 +29,7 @@ const AccountingDashboard = () => {
       setIsLoading(true);
       const [metricsRes, entriesRes, monitorRes] = await Promise.all([
         api.get<any>('/contabilidad/dashboard').catch(() => null),
-        api.get<any>('/contabilidad/asientos?limite=5&orden=desc').catch(() => []),
+        api.get<any>('/contabilidad/asientos?limit=5').catch(() => ({ data: [] })),
         api.get<any>('/contabilidad/monitor-forense').catch(() => null)
       ]);
       

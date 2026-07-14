@@ -70,7 +70,7 @@ const InvoiceForm = () => {
         if (productsData.length > 0) setSelectedProducto(productsData[0]);
 
         const tasaData = await api.get<{ valor_ves: number | string }>('/tasa/actual');
-        setTasaBcv(Number(tasaData.valor_ves));
+        setTasaBcv(Number(tasaData?.valor_ves || 0));
         setIsLoadingTasa(false);
       } catch (err) {
         console.error("Error cargando datos para factura:", err);
@@ -174,7 +174,7 @@ const InvoiceForm = () => {
             <div>
                <div className="flex items-center gap-3">
                   <strong className="text-2xl font-black text-slate-800 tracking-tighter uppercase font-mono">
-                    {isLoadingTasa ? "Cargando..." : `Bs.S ${tasaBcv.toFixed(2)}`}
+                    {isLoadingTasa ? "Cargando..." : `Bs.S ${tasaBcv.toFixed(4)}`}
                   </strong>
                   <span className="bg-[#0b5156] text-white text-[10px] font-black px-3 py-1 rounded-full uppercase border border-[#0b5156]/20">Tasa Oficial BCV</span>
                </div>

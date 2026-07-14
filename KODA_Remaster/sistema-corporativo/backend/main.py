@@ -276,13 +276,13 @@ origins = [
     "http://10.0.2.15:3000",
     "http://10.0.2.15:8000",
     "https://koda-remaster.vercel.app",
-    "https://monorepo-koda-backend.onrender.com"
+    "https://sistema-corpoelect-backend.onrender.com"
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_origin_regex=r"^https://(koda-remaster|monorepo-koda)(-[a-zA-Z0-9-]+)?\.vercel\.app$",
+    allow_origin_regex=r"^https://(koda-remaster|sistema-corpoelect)(-[a-zA-Z0-9-]+)?\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -755,7 +755,7 @@ def _apply_cors_headers(request: Request, response: JSONResponse) -> JSONRespons
             allow_origin = True
         else:
             try:
-                if re.match(r"^https://(koda-remaster|monorepo-koda)(-[a-zA-Z0-9-]+)?\.vercel\.app$", origin):
+                if re.match(r"^https://(koda-remaster|sistema-corpoelect)(-[a-zA-Z0-9-]+)?\.vercel\.app$", origin):
                     allow_origin = True
             except re.error:
                 allow_origin = False
@@ -973,7 +973,7 @@ async def login_compat(
 
     query = """
         SELECT p.id, p.username, p.password_hash, p.nombre, p.apellido, p.email, p.rol_id, r.nombre_rol, p.tenant_id,
-               o.nombre as tenant_name,
+               o.name as tenant_name,
                p.permisos,
                p.gerencia_id, g.nombre as gerencia_nombre,
                p.estado, p.mfa_enabled, p.totp_secret
@@ -1142,7 +1142,7 @@ async def validate_auth_session(
         SELECT p.id, p.username, p.nombre, p.apellido, p.email, p.estado, p.permisos,
                p.gerencia_id, COALESCE(g.nombre, 'Sin Asignar') as gerencia_depto,
                COALESCE(r.nombre_rol, 'Usuario') as role,
-               p.tenant_id, o.nombre as tenant_name
+               p.tenant_id, o.name as tenant_name
         FROM profiles p
         LEFT JOIN roles r ON p.rol_id = r.id
         LEFT JOIN gerencias g ON p.gerencia_id = g.id

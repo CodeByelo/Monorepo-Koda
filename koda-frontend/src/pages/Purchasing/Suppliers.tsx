@@ -123,7 +123,7 @@ const Suppliers = () => {
 
   const handleSave = async () => {
     if (!rif || !nombre) {
-      alert('RIF y Nombre son campos obligatorios.');
+      showError('RIF y Nombre son campos obligatorios.');
       return;
     }
     try {

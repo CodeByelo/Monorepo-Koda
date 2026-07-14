@@ -762,7 +762,7 @@ async def list_tenants(
         async with async_db.pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT o.id, o.nombre as name, o.config, o.created_at, o.plan_id, sp.name as plan_name, sp.max_users as plan_max_users, sp.allowed_modules as plan_allowed_modules
+                SELECT o.id, o.name, o.config, o.created_at, o.plan_id, sp.name as plan_name, sp.max_users as plan_max_users, sp.allowed_modules as plan_allowed_modules
                 FROM organizations o
                 LEFT JOIN subscription_plans sp ON o.plan_id = sp.id
                 ORDER BY o.created_at DESC
@@ -1100,7 +1100,7 @@ async def list_company_users(
         async with async_db.pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT p.id, p.username, p.nombre, p.apellido, p.email, p.rol_id, r.nombre_rol as role, p.estado, p.tenant_id, o.nombre as tenant_nombre
+                SELECT p.id, p.username, p.nombre, p.apellido, p.email, p.rol_id, r.nombre_rol as role, p.estado, p.tenant_id, o.name as tenant_nombre
                 FROM profiles p
                 LEFT JOIN roles r ON p.rol_id = r.id
                 LEFT JOIN organizations o ON p.tenant_id = o.id

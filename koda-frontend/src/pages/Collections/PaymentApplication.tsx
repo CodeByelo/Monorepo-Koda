@@ -192,6 +192,11 @@ const PaymentApplication = () => {
                 <h3 className="text-xl font-black text-slate-800 uppercase tracking-tighter">Terminal de Cobro Multimoneda</h3>
              </div>
 
+             <div className="bg-slate-100 p-4 rounded-2xl border border-slate-200 flex flex-col items-center justify-center space-y-1">
+                <strong className="text-slate-800 text-base font-black font-mono">Bs. {bcvRate.toFixed(4)} / USD</strong>
+                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest bg-slate-200 px-2 py-0.5 rounded">Tasa Oficial</span>
+             </div>
+
              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
                 <div className="space-y-2">
                    <label className="text-xs font-black text-slate-500 uppercase tracking-widest pl-2">Cliente</label>

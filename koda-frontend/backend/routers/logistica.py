@@ -18,6 +18,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
 from backend.core.database import get_db
+from backend.core.security import get_current_user, require_role
 from backend.models.erp_extended import Vehiculo, Chofer, TurnoDespacho, RegistroMantenimiento, TurnoVentaAsociacion, TurnoGasto, LogisticaLedger, CuarentenaLogistica
 from backend.models.operations import Venta, VentaDetalle, Producto
 
@@ -389,25 +390,27 @@ class MantenimientoCreate(BaseModel):
 # ─── DASHBOARD ────────────────────────────────────────────────────────────────
 
 @router.get("/dashboard")
-def get_dashboard(db: Session = Depends(get_db)):
+def get_dashboard(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """KPIs y estado general de la flota."""
-    total_vehiculos = db.query(Vehiculo).filter(Vehiculo.activo == True).count()
-    disponibles = db.query(Vehiculo).filter(Vehiculo.estado == "DISPONIBLE", Vehiculo.activo == True).count()
-    en_ruta = db.query(Vehiculo).filter(Vehiculo.estado == "EN_RUTA", Vehiculo.activo == True).count()
-    en_mantenimiento = db.query(Vehiculo).filter(Vehiculo.estado == "EN_MANTENIMIENTO", Vehiculo.activo == True).count()
+    total_vehiculos = db.query(Vehiculo).filter(Vehiculo.activo == True, Vehiculo.tenant_id == current_user.tenant_id).count()
+    disponibles = db.query(Vehiculo).filter(Vehiculo.estado == "DISPONIBLE", Vehiculo.activo == True, Vehiculo.tenant_id == current_user.tenant_id).count()
+    en_ruta = db.query(Vehiculo).filter(Vehiculo.estado == "EN_RUTA", Vehiculo.activo == True, Vehiculo.tenant_id == current_user.tenant_id).count()
+    en_mantenimiento = db.query(Vehiculo).filter(Vehiculo.estado == "EN_MANTENIMIENTO", Vehiculo.activo == True, Vehiculo.tenant_id == current_user.tenant_id).count()
 
     hoy = datetime.now(timezone.utc).date()
     programados_hoy = db.query(TurnoDespacho).filter(
         func.date(TurnoDespacho.fecha_salida) == hoy,
-        TurnoDespacho.estado.in_(["PROGRAMADO", "EN_RUTA"])
+        TurnoDespacho.estado.in_(["PROGRAMADO", "EN_RUTA"]),
+        TurnoDespacho.tenant_id == current_user.tenant_id
     ).count()
     entregados_hoy = db.query(TurnoDespacho).filter(
         func.date(TurnoDespacho.fecha_salida) == hoy,
-        TurnoDespacho.estado == "ENTREGADO"
+        TurnoDespacho.estado == "ENTREGADO",
+        TurnoDespacho.tenant_id == current_user.tenant_id
     ).count()
 
-    total_choferes = db.query(Chofer).filter(Chofer.activo == True).count()
-    choferes_disponibles = db.query(Chofer).filter(Chofer.estado == "DISPONIBLE", Chofer.activo == True).count()
+    total_choferes = db.query(Chofer).filter(Chofer.activo == True, Chofer.tenant_id == current_user.tenant_id).count()
+    choferes_disponibles = db.query(Chofer).filter(Chofer.estado == "DISPONIBLE", Chofer.activo == True, Chofer.tenant_id == current_user.tenant_id).count()
 
     # Alertas de vencimiento de licencia (<= 30 días)
     from datetime import timedelta
@@ -415,7 +418,8 @@ def get_dashboard(db: Session = Depends(get_db)):
     licencias_por_vencer = db.query(Chofer).filter(
         Chofer.licencia_vence != None,
         Chofer.licencia_vence <= alerta_fecha,
-        Chofer.activo == True
+        Chofer.activo == True,
+        Chofer.tenant_id == current_user.tenant_id
     ).count()
 
     return {
@@ -442,8 +446,8 @@ def get_dashboard(db: Session = Depends(get_db)):
 # ─── VEHÍCULOS ────────────────────────────────────────────────────────────────
 
 @router.get("/vehiculos")
-def listar_vehiculos(db: Session = Depends(get_db)):
-    items = db.query(Vehiculo).filter(Vehiculo.activo == True).order_by(Vehiculo.id.asc()).all()
+def listar_vehiculos(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    items = db.query(Vehiculo).filter(Vehiculo.activo == True, Vehiculo.tenant_id == current_user.tenant_id).order_by(Vehiculo.id.asc()).all()
     return [
         {
             "id": v.id, "nombre": v.nombre, "placa": v.placa, "tipo": v.tipo,
@@ -459,9 +463,9 @@ def listar_vehiculos(db: Session = Depends(get_db)):
 
 
 @router.post("/vehiculos", status_code=201)
-def crear_vehiculo(data: VehiculoCreate, db: Session = Depends(get_db)):
+def crear_vehiculo(data: VehiculoCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     # Verificar placa única
-    existe = db.query(Vehiculo).filter(Vehiculo.placa == data.placa.upper()).first()
+    existe = db.query(Vehiculo).filter(Vehiculo.placa == data.placa.upper(), Vehiculo.tenant_id == current_user.tenant_id).first()
     if existe:
         raise HTTPException(status_code=400, detail="Ya existe un vehículo con esa placa.")
     v = Vehiculo(
@@ -475,7 +479,8 @@ def crear_vehiculo(data: VehiculoCreate, db: Session = Depends(get_db)):
         capacidad_kg=data.capacidad_kg,
         km_actuales=data.km_actuales or 0,
         proximo_servicio_km=data.proximo_servicio_km,
-        estado="DISPONIBLE"
+        estado="DISPONIBLE",
+        tenant_id=current_user.tenant_id
     )
     db.add(v)
     db.commit()
@@ -484,8 +489,8 @@ def crear_vehiculo(data: VehiculoCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/vehiculos/{vehiculo_id}")
-def actualizar_vehiculo(vehiculo_id: int, data: VehiculoUpdate, db: Session = Depends(get_db)):
-    v = db.query(Vehiculo).filter(Vehiculo.id == vehiculo_id).first()
+def actualizar_vehiculo(vehiculo_id: int, data: VehiculoUpdate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    v = db.query(Vehiculo).filter(Vehiculo.id == vehiculo_id, Vehiculo.tenant_id == current_user.tenant_id).first()
     if not v:
         raise HTTPException(status_code=404, detail="Vehículo no encontrado.")
     for field, val in data.model_dump(exclude_unset=True).items():
@@ -497,8 +502,8 @@ def actualizar_vehiculo(vehiculo_id: int, data: VehiculoUpdate, db: Session = De
 
 
 @router.delete("/vehiculos/{vehiculo_id}")
-def desactivar_vehiculo(vehiculo_id: int, db: Session = Depends(get_db)):
-    v = db.query(Vehiculo).filter(Vehiculo.id == vehiculo_id).first()
+def desactivar_vehiculo(vehiculo_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    v = db.query(Vehiculo).filter(Vehiculo.id == vehiculo_id, Vehiculo.tenant_id == current_user.tenant_id).first()
     if not v:
         raise HTTPException(status_code=404, detail="Vehículo no encontrado.")
     v.activo = False
@@ -509,8 +514,8 @@ def desactivar_vehiculo(vehiculo_id: int, db: Session = Depends(get_db)):
 # ─── CHOFERES ─────────────────────────────────────────────────────────────────
 
 @router.get("/choferes")
-def listar_choferes(db: Session = Depends(get_db)):
-    items = db.query(Chofer).filter(Chofer.activo == True).order_by(Chofer.id.asc()).all()
+def listar_choferes(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    items = db.query(Chofer).filter(Chofer.activo == True, Chofer.tenant_id == current_user.tenant_id).order_by(Chofer.id.asc()).all()
     from datetime import timedelta
     hoy = datetime.now(timezone.utc).date()
     alerta_fecha = hoy + timedelta(days=30)
@@ -529,12 +534,12 @@ def listar_choferes(db: Session = Depends(get_db)):
 
 
 @router.post("/choferes", status_code=201)
-def crear_chofer(data: ChoferCreate, db: Session = Depends(get_db)):
+def crear_chofer(data: ChoferCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     if data.cedula:
-        existe = db.query(Chofer).filter(Chofer.cedula == data.cedula).first()
+        existe = db.query(Chofer).filter(Chofer.cedula == data.cedula, Chofer.tenant_id == current_user.tenant_id).first()
         if existe:
             raise HTTPException(status_code=400, detail="Ya existe un chofer con esa cédula.")
-    c = Chofer(**data.model_dump())
+    c = Chofer(**data.model_dump(), tenant_id=current_user.tenant_id)
     db.add(c)
     db.commit()
     db.refresh(c)
@@ -542,8 +547,8 @@ def crear_chofer(data: ChoferCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/choferes/{chofer_id}")
-def actualizar_chofer(chofer_id: int, data: ChoferUpdate, db: Session = Depends(get_db)):
-    c = db.query(Chofer).filter(Chofer.id == chofer_id).first()
+def actualizar_chofer(chofer_id: int, data: ChoferUpdate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    c = db.query(Chofer).filter(Chofer.id == chofer_id, Chofer.tenant_id == current_user.tenant_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Chofer no encontrado.")
     for field, val in data.model_dump(exclude_unset=True).items():
@@ -553,8 +558,8 @@ def actualizar_chofer(chofer_id: int, data: ChoferUpdate, db: Session = Depends(
 
 
 @router.delete("/choferes/{chofer_id}")
-def desactivar_chofer(chofer_id: int, db: Session = Depends(get_db)):
-    c = db.query(Chofer).filter(Chofer.id == chofer_id).first()
+def desactivar_chofer(chofer_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    c = db.query(Chofer).filter(Chofer.id == chofer_id, Chofer.tenant_id == current_user.tenant_id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Chofer no encontrado.")
     c.activo = False
@@ -565,9 +570,9 @@ def desactivar_chofer(chofer_id: int, db: Session = Depends(get_db)):
 # ─── TURNOS DE DESPACHO ───────────────────────────────────────────────────────
 
 @router.get("/turnos")
-def listar_turnos(fecha: Optional[str] = None, db: Session = Depends(get_db)):
+def listar_turnos(fecha: Optional[str] = None, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """Lista los turnos. Si se pasa `fecha` (YYYY-MM-DD) filtra por ese día. Sin fecha → todos."""
-    query = db.query(TurnoDespacho)
+    query = db.query(TurnoDespacho).filter(TurnoDespacho.tenant_id == current_user.tenant_id)
     if fecha:
         try:
             filter_date = datetime.strptime(fecha, "%Y-%m-%d").date()
@@ -578,8 +583,8 @@ def listar_turnos(fecha: Optional[str] = None, db: Session = Depends(get_db)):
     turnos = query.order_by(TurnoDespacho.fecha_salida.desc()).all()
     result = []
     for t in turnos:
-      v = db.query(Vehiculo).filter(Vehiculo.id == t.vehiculo_id).first()
-      c = db.query(Chofer).filter(Chofer.id == t.chofer_id).first()
+      v = db.query(Vehiculo).filter(Vehiculo.id == t.vehiculo_id, Vehiculo.tenant_id == current_user.tenant_id).first()
+      c = db.query(Chofer).filter(Chofer.id == t.chofer_id, Chofer.tenant_id == current_user.tenant_id).first()
       
       paradas_list = []
       for va in t.ventas_asociadas:
@@ -633,12 +638,12 @@ def listar_turnos(fecha: Optional[str] = None, db: Session = Depends(get_db)):
 
 
 @router.post("/turnos", status_code=201)
-async def crear_turno(data: TurnoCreate, db: Session = Depends(get_db)):
+async def crear_turno(data: TurnoCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """Crea un turno, asocia múltiples ventas y dispara notificaciones Telegram."""
-    vehiculo = db.query(Vehiculo).filter(Vehiculo.id == data.vehiculo_id).first()
+    vehiculo = db.query(Vehiculo).filter(Vehiculo.id == data.vehiculo_id, Vehiculo.tenant_id == current_user.tenant_id).first()
     if not vehiculo:
         raise HTTPException(status_code=404, detail="Vehículo no encontrado.")
-    chofer = db.query(Chofer).filter(Chofer.id == data.chofer_id).first()
+    chofer = db.query(Chofer).filter(Chofer.id == data.chofer_id, Chofer.tenant_id == current_user.tenant_id).first()
     if not chofer:
         raise HTTPException(status_code=404, detail="Chofer no encontrado.")
 
@@ -654,7 +659,7 @@ async def crear_turno(data: TurnoCreate, db: Session = Depends(get_db)):
         venta_ids_asoc.insert(0, factura_primaria_id)
         
     if not ref_nota and venta_ids_asoc:
-        ventas_db = db.query(Venta).filter(Venta.id.in_(venta_ids_asoc)).all()
+        ventas_db = db.query(Venta).filter(Venta.id.in_(venta_ids_asoc), Venta.tenant_id == current_user.tenant_id).all()
         ref_nota = ", ".join([v.numero_factura for v in ventas_db])
         if ventas_db and not factura_primaria_id:
             factura_primaria_id = ventas_db[0].id
@@ -662,7 +667,7 @@ async def crear_turno(data: TurnoCreate, db: Session = Depends(get_db)):
     # Si es multi-parada y no se dio destino, armamos una ruta
     destino_final = data.destino
     if not destino_final.strip() and venta_ids_asoc:
-        ventas_db = db.query(Venta).filter(Venta.id.in_(venta_ids_asoc)).all()
+        ventas_db = db.query(Venta).filter(Venta.id.in_(venta_ids_asoc), Venta.tenant_id == current_user.tenant_id).all()
         destino_final = " -> ".join([v.cliente.nombre if v.cliente else "Cliente" for v in ventas_db])
 
     turno = TurnoDespacho(
@@ -675,13 +680,18 @@ async def crear_turno(data: TurnoCreate, db: Session = Depends(get_db)):
         destino=destino_final,
         ruta_descripcion=data.ruta_descripcion,
         observaciones=data.observaciones,
-        estado="PROGRAMADO"
+        estado="PROGRAMADO",
+        tenant_id=current_user.tenant_id
     )
     db.add(turno)
     db.flush()  # Para obtener el ID del turno
 
     # Crear paradas individuales
     for idx, v_id in enumerate(venta_ids_asoc, start=1):
+        # Validar que la venta pertenezca al tenant
+        v_db = db.query(Venta).filter(Venta.id == v_id, Venta.tenant_id == current_user.tenant_id).first()
+        if not v_db:
+            raise HTTPException(status_code=403, detail=f"No tiene acceso a la venta ID {v_id}")
         asoc = TurnoVentaAsociacion(
             turno_id=turno.id,
             venta_id=v_id,
@@ -703,7 +713,7 @@ async def crear_turno(data: TurnoCreate, db: Session = Depends(get_db)):
         turno_id=turno.id,
         estado_anterior=None,
         estado_nuevo="PROGRAMADO",
-        usuario="OPERADOR_SISTEMA",
+        usuario=f"USER: {current_user.email}",
         motivo="Creación de despacho y asignación de ruta."
     )
 
@@ -738,9 +748,12 @@ async def crear_turno(data: TurnoCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/turnos/{turno_id}/estado")
-async def actualizar_estado_turno(turno_id: int, data: TurnoEstadoUpdate, db: Session = Depends(get_db)):
+async def actualizar_estado_turno(turno_id: int, data: TurnoEstadoUpdate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """Cambia el estado de un turno, audita en el ledger y deriva a cuarentena si es cancelado."""
-    turno = db.query(TurnoDespacho).filter(TurnoDespacho.id == turno_id).first()
+    turno = db.query(TurnoDespacho).filter(
+        TurnoDespacho.id == turno_id,
+        TurnoDespacho.tenant_id == current_user.tenant_id
+    ).first()
     if not turno:
         raise HTTPException(status_code=404, detail="Turno no encontrado.")
 
@@ -754,8 +767,8 @@ async def actualizar_estado_turno(turno_id: int, data: TurnoEstadoUpdate, db: Se
         turno.fecha_retorno = data.fecha_retorno
 
     # Sincronizar estado del vehículo y chofer
-    vehiculo = db.query(Vehiculo).filter(Vehiculo.id == turno.vehiculo_id).first()
-    chofer = db.query(Chofer).filter(Chofer.id == turno.chofer_id).first()
+    vehiculo = db.query(Vehiculo).filter(Vehiculo.id == turno.vehiculo_id, Vehiculo.tenant_id == current_user.tenant_id).first()
+    chofer = db.query(Chofer).filter(Chofer.id == turno.chofer_id, Chofer.tenant_id == current_user.tenant_id).first()
 
     motivo_ledger = f"Estado actualizado de {estado_anterior} a {data.estado}."
 
@@ -784,7 +797,10 @@ async def actualizar_estado_turno(turno_id: int, data: TurnoEstadoUpdate, db: Se
             
         productos_movidos = 0
         for v_id in venta_ids:
-            detalles = db.query(VentaDetalle).filter(VentaDetalle.venta_id == v_id).all()
+            detalles = db.query(VentaDetalle).join(Venta).filter(
+                VentaDetalle.venta_id == v_id,
+                Venta.tenant_id == current_user.tenant_id
+            ).all()
             for d in detalles:
                 # Insertar en cuarentena
                 item = CuarentenaLogistica(
@@ -845,7 +861,7 @@ async def actualizar_estado_turno(turno_id: int, data: TurnoEstadoUpdate, db: Se
         turno_id=turno.id,
         estado_anterior=estado_anterior,
         estado_nuevo=data.estado,
-        usuario="OPERADOR_SISTEMA",
+        usuario=f"USER: {current_user.email}",
         motivo=motivo_ledger
     )
 
@@ -855,14 +871,17 @@ async def actualizar_estado_turno(turno_id: int, data: TurnoEstadoUpdate, db: Se
 # ─── MANTENIMIENTO ────────────────────────────────────────────────────────────
 
 @router.get("/mantenimiento")
-def listar_mantenimientos(vehiculo_id: Optional[int] = None, db: Session = Depends(get_db)):
-    q = db.query(RegistroMantenimiento)
+def listar_mantenimientos(vehiculo_id: Optional[int] = None, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    q = db.query(RegistroMantenimiento).filter(RegistroMantenimiento.tenant_id == current_user.tenant_id)
     if vehiculo_id:
+        v_check = db.query(Vehiculo).filter(Vehiculo.id == vehiculo_id, Vehiculo.tenant_id == current_user.tenant_id).first()
+        if not v_check:
+            raise HTTPException(status_code=404, detail="Vehículo no encontrado o no pertenece al tenant.")
         q = q.filter(RegistroMantenimiento.vehiculo_id == vehiculo_id)
     items = q.order_by(RegistroMantenimiento.fecha.desc()).limit(100).all()
     result = []
     for m in items:
-        v = db.query(Vehiculo).filter(Vehiculo.id == m.vehiculo_id).first()
+        v = db.query(Vehiculo).filter(Vehiculo.id == m.vehiculo_id, Vehiculo.tenant_id == current_user.tenant_id).first()
         result.append({
             "id": m.id,
             "vehiculo": {"id": v.id, "nombre": v.nombre, "placa": v.placa} if v else None,
@@ -877,12 +896,12 @@ def listar_mantenimientos(vehiculo_id: Optional[int] = None, db: Session = Depen
 
 
 @router.post("/mantenimiento", status_code=201)
-def registrar_mantenimiento(data: MantenimientoCreate, db: Session = Depends(get_db)):
-    vehiculo = db.query(Vehiculo).filter(Vehiculo.id == data.vehiculo_id).first()
+def registrar_mantenimiento(data: MantenimientoCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    vehiculo = db.query(Vehiculo).filter(Vehiculo.id == data.vehiculo_id, Vehiculo.tenant_id == current_user.tenant_id).first()
     if not vehiculo:
         raise HTTPException(status_code=404, detail="Vehículo no encontrado.")
 
-    m = RegistroMantenimiento(**data.model_dump())
+    m = RegistroMantenimiento(**data.model_dump(), tenant_id=current_user.tenant_id)
     db.add(m)
 
     # Actualizar km del próximo servicio y último servicio en el vehículo
@@ -895,16 +914,18 @@ def registrar_mantenimiento(data: MantenimientoCreate, db: Session = Depends(get
 # ─── NUEVOS ENDPOINTS: INTEGRACIÓN DE MERCANCÍAS Y VENTAS ─────────────────────
 
 @router.get("/ventas-pendientes")
-def listar_ventas_pendientes(db: Session = Depends(get_db)):
+def listar_ventas_pendientes(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """Obtiene facturas activas sin despacho asignado o con turnos cancelados."""
-    # Subquery para obtener venta_ids que ya tienen despachos activos
+    # Subquery para obtener venta_ids que ya tienen despachos activos para este tenant
     subquery = db.query(TurnoDespacho.venta_id).filter(
         TurnoDespacho.venta_id != None,
-        TurnoDespacho.estado != "CANCELADO"
+        TurnoDespacho.estado != "CANCELADO",
+        TurnoDespacho.tenant_id == current_user.tenant_id
     ).subquery()
 
     ventas = db.query(Venta).filter(
         Venta.estado == "ACTIVA",
+        Venta.tenant_id == current_user.tenant_id,
         ~Venta.id.in_(subquery)
     ).order_by(Venta.fecha.desc()).all()
 
@@ -930,9 +951,12 @@ def listar_ventas_pendientes(db: Session = Depends(get_db)):
 
 
 @router.get("/turnos/{turno_id}/mercancia")
-def obtener_mercancia_turno(turno_id: int, db: Session = Depends(get_db)):
+def obtener_mercancia_turno(turno_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """Consulta la mercancía consolidada asociada a todas las ventas de un despacho."""
-    turno = db.query(TurnoDespacho).filter(TurnoDespacho.id == turno_id).first()
+    turno = db.query(TurnoDespacho).filter(
+        TurnoDespacho.id == turno_id,
+        TurnoDespacho.tenant_id == current_user.tenant_id
+    ).first()
     if not turno:
         raise HTTPException(status_code=404, detail="Turno no encontrado")
     
@@ -943,7 +967,10 @@ def obtener_mercancia_turno(turno_id: int, db: Session = Depends(get_db)):
     if not venta_ids:
         return []
 
-    detalles = db.query(VentaDetalle).filter(VentaDetalle.venta_id.in_(venta_ids)).all()
+    detalles = db.query(VentaDetalle).join(Venta).filter(
+        VentaDetalle.venta_id.in_(venta_ids),
+        Venta.tenant_id == current_user.tenant_id
+    ).all()
     
     # Consolidar cantidades por producto
     cons = {}
@@ -977,8 +1004,30 @@ async def telegram_webhook(update: dict, db: Session = Depends(get_db)):
     # ─── ROUTING DE COMANDOS DEL BOT DE TELEGRAM ───
     ES_ADMIN = (chat_id == "1910741543" or chat_id == "5552622913")
     
-    # 1. Comando /start (Muestra ID de Chat de Telegram para vinculación)
-    if text.strip().lower() == "/start":
+    # 1. Comando /start (Vinculación automática con token, o muestra ID)
+    if text.strip().lower().startswith("/start"):
+        parts = text.strip().split(" ", 1)
+        if len(parts) > 1:
+            token_code = parts[1].strip()
+            from backend.models.core import Profile
+            from backend.routers.telegram_api import get_linking_token
+            user_id = get_linking_token(token_code)
+            if user_id:
+                user = db.query(Profile).filter(Profile.id == user_id).first()
+                if user:
+                    user.telegram_chat_id = chat_id
+                    db.commit()
+                    mensaje_success = (
+                        "✅ *VINCULACIÓN EXITOSA - KODA ERP*\n\n"
+                        f"Tu cuenta de Telegram ha sido enlazada al usuario *{user.nombre}* ({user.email}).\n\n"
+                        "Ahora recibirás alertas de seguridad y reportes del ERP en tiempo real."
+                    )
+                    await _enviar_telegram(chat_id, mensaje_success)
+                    return {"status": "linking_success", "user_id": user_id}
+            
+            await _enviar_telegram(chat_id, "⚠️ *Código Inválido o Expirado.*\n\nPor favor, genera un nuevo token de vinculación desde el panel de Telegram en Koda ERP.")
+            return {"status": "linking_failed"}
+            
         mensaje_start = (
             "🚀 *KODA LOGÍSTICA - VINCULACIÓN DE CHAT*\n\n"
             "Bienvenido al asistente de despacho digital de Koda ERP.\n\n"
@@ -990,9 +1039,16 @@ async def telegram_webhook(update: dict, db: Session = Depends(get_db)):
 
     # 2. Comando /logistica (Reporte consolidado de despachos de hoy)
     if text.strip().lower() in ["/logistica", "logistica", "/status", "status"]:
-        # Consultar despachos activos del día (PROGRAMADO, EN_RUTA)
+        # Buscar chofer por chat ID para seguridad y alcance de tenant
+        chofer_auth = db.query(Chofer).filter(Chofer.telegram_chat_id == chat_id, Chofer.activo == True).first()
+        if not chofer_auth:
+            await _enviar_telegram(chat_id, "⚠️ No estás registrado como chofer activo en KODA ERP.")
+            return {"status": "unauthorized"}
+
+        # Consultar despachos activos del día (PROGRAMADO, EN_RUTA) para el tenant del chofer
         turnos_activos = db.query(TurnoDespacho).filter(
-            TurnoDespacho.estado.in_(["PROGRAMADO", "EN_RUTA"])
+            TurnoDespacho.estado.in_(["PROGRAMADO", "EN_RUTA"]),
+            TurnoDespacho.tenant_id == chofer_auth.tenant_id
         ).all()
         
         if not turnos_activos:
@@ -1032,6 +1088,27 @@ async def telegram_webhook(update: dict, db: Session = Depends(get_db)):
         )
         await _enviar_telegram(chat_id, mensaje_admin)
         return {"status": "admin_command_handled"}
+
+    # 4. Comandos dinámicos personalizados (Multi-tenant)
+    from backend.models.core import Profile
+    from backend.models.erp_extended import TelegramCommand
+
+    # Resolver tenant del emisor del chat para buscar el comando de su tenant
+    sender_profile = db.query(Profile).filter(Profile.telegram_chat_id == chat_id).first()
+    sender_chofer = db.query(Chofer).filter(Chofer.telegram_chat_id == chat_id, Chofer.activo == True).first()
+    tenant_id = sender_profile.tenant_id if sender_profile else (sender_chofer.tenant_id if sender_chofer else None)
+
+    cmd_query = db.query(TelegramCommand).filter(
+        TelegramCommand.trigger_command == text.strip(),
+        TelegramCommand.is_active == True
+    )
+    if tenant_id:
+        cmd_query = cmd_query.filter(TelegramCommand.tenant_id == tenant_id)
+
+    custom_cmd = cmd_query.first()
+    if custom_cmd:
+        await _enviar_telegram(chat_id, custom_cmd.response_text)
+        return {"status": "custom_command_handled", "command": custom_cmd.trigger_command}
 
     # Buscar chofer por chat ID para operaciones regulares de ruta
     chofer = db.query(Chofer).filter(Chofer.telegram_chat_id == chat_id, Chofer.activo == True).first()
@@ -1228,15 +1305,18 @@ async def telegram_webhook(update: dict, db: Session = Depends(get_db)):
 
 
 @router.post("/turnos/{turno_id}/liquidar")
-def liquidar_gastos_turno(turno_id: int, data: TurnoLiquidar, db: Session = Depends(get_db)):
+def liquidar_gastos_turno(turno_id: int, data: TurnoLiquidar, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """Liquida los gastos de un viaje de despacho (Combustible, viáticos, peajes) y registra el kilometraje de retorno."""
-    turno = db.query(TurnoDespacho).filter(TurnoDespacho.id == turno_id).first()
+    turno = db.query(TurnoDespacho).filter(
+        TurnoDespacho.id == turno_id,
+        TurnoDespacho.tenant_id == current_user.tenant_id
+    ).first()
     if not turno:
         raise HTTPException(status_code=404, detail="Turno no encontrado")
         
     # Registrar kilometraje de retorno en el viaje y actualizar en el vehículo
     turno.km_retorno = data.km_retorno
-    vehiculo = db.query(Vehiculo).filter(Vehiculo.id == turno.vehiculo_id).first()
+    vehiculo = db.query(Vehiculo).filter(Vehiculo.id == turno.vehiculo_id, Vehiculo.tenant_id == current_user.tenant_id).first()
     if vehiculo and data.km_retorno > 0:
         # Validar consistencia
         if data.km_retorno < vehiculo.km_actuales:
@@ -1264,7 +1344,7 @@ def liquidar_gastos_turno(turno_id: int, data: TurnoLiquidar, db: Session = Depe
         turno.fecha_retorno = datetime.now()
         if vehiculo:
             vehiculo.estado = "DISPONIBLE"
-        chofer = db.query(Chofer).filter(Chofer.id == turno.chofer_id).first()
+        chofer = db.query(Chofer).filter(Chofer.id == turno.chofer_id, Chofer.tenant_id == current_user.tenant_id).first()
         if chofer:
             chofer.estado = "DISPONIBLE"
 
@@ -1276,7 +1356,7 @@ def liquidar_gastos_turno(turno_id: int, data: TurnoLiquidar, db: Session = Depe
         turno_id=turno.id,
         estado_anterior=estado_anterior,
         estado_nuevo="ENTREGADO",
-        usuario="OPERADOR_SISTEMA",
+        usuario=f"USER: {current_user.email}",
         motivo=f"Viaje liquidado administrativamente. Gastos registrados. Retorno de vehículo a {data.km_retorno} km."
     )
     
@@ -1284,9 +1364,11 @@ def liquidar_gastos_turno(turno_id: int, data: TurnoLiquidar, db: Session = Depe
 
 
 @router.get("/cuarentena")
-def listar_cuarentena(db: Session = Depends(get_db)):
+def listar_cuarentena(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """Obtiene el listado de mercancía retenida en cuarentena (logística inversa)."""
-    items = db.query(CuarentenaLogistica).order_by(CuarentenaLogistica.created_at.desc()).all()
+    items = db.query(CuarentenaLogistica).join(TurnoDespacho).filter(
+        TurnoDespacho.tenant_id == current_user.tenant_id
+    ).order_by(CuarentenaLogistica.created_at.desc()).all()
     return [
         {
             "id": c.id,
@@ -1304,9 +1386,12 @@ def listar_cuarentena(db: Session = Depends(get_db)):
 
 
 @router.post("/cuarentena/{cuarentena_id}/resolver")
-def resolver_cuarentena(cuarentena_id: int, data: CuarentenaResolve, db: Session = Depends(get_db)):
+def resolver_cuarentena(cuarentena_id: int, data: CuarentenaResolve, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """Aprobación de reingreso o desecho contable del inventario en cuarentena."""
-    item = db.query(CuarentenaLogistica).filter(CuarentenaLogistica.id == cuarentena_id).first()
+    item = db.query(CuarentenaLogistica).join(TurnoDespacho).filter(
+        CuarentenaLogistica.id == cuarentena_id,
+        TurnoDespacho.tenant_id == current_user.tenant_id
+    ).first()
     if not item:
         raise HTTPException(status_code=404, detail="Registro de cuarentena no encontrado")
 
@@ -1320,7 +1405,10 @@ def resolver_cuarentena(cuarentena_id: int, data: CuarentenaResolve, db: Session
     
     # Si es reingreso, sumamos el stock físico del producto
     if data.resolucion == "REINGRESO":
-        producto = db.query(Producto).filter(Producto.id == item.producto_id).first()
+        producto = db.query(Producto).filter(
+            Producto.id == item.producto_id,
+            Producto.tenant_id == current_user.tenant_id
+        ).first()
         if producto:
             producto.stock += item.cantidad
             
@@ -1329,8 +1417,15 @@ def resolver_cuarentena(cuarentena_id: int, data: CuarentenaResolve, db: Session
 
 
 @router.get("/turnos/{turno_id}/ledger")
-def consultar_ledger_turno(turno_id: int, db: Session = Depends(get_db)):
+def consultar_ledger_turno(turno_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """Obtiene la bitácora inmutable de eventos de tránsito de un turno."""
+    turno = db.query(TurnoDespacho).filter(
+        TurnoDespacho.id == turno_id,
+        TurnoDespacho.tenant_id == current_user.tenant_id
+    ).first()
+    if not turno:
+        raise HTTPException(status_code=404, detail="Turno no encontrado o sin permisos")
+        
     logs = db.query(LogisticaLedger).filter(LogisticaLedger.turno_id == turno_id).order_by(LogisticaLedger.fecha_cambio.asc()).all()
     return [
         {
@@ -1351,9 +1446,12 @@ class ParadaEstadoUpdate(BaseModel):
 
 
 @router.put("/turnos/paradas/{parada_id}/estado")
-def actualizar_estado_parada(parada_id: int, data: ParadaEstadoUpdate, db: Session = Depends(get_db)):
+def actualizar_estado_parada(parada_id: int, data: ParadaEstadoUpdate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """Actualiza el estado de entrega de una parada individual y audita en el ledger. Deriva a cuarentena si es rechazada."""
-    parada = db.query(TurnoVentaAsociacion).filter(TurnoVentaAsociacion.id == parada_id).first()
+    parada = db.query(TurnoVentaAsociacion).join(TurnoDespacho).filter(
+        TurnoVentaAsociacion.id == parada_id,
+        TurnoDespacho.tenant_id == current_user.tenant_id
+    ).first()
     if not parada:
         raise HTTPException(status_code=404, detail="Parada no encontrada")
 
@@ -1363,7 +1461,10 @@ def actualizar_estado_parada(parada_id: int, data: ParadaEstadoUpdate, db: Sessi
     if data.estado == "RECHAZADO":
         parada.motivo_rechazo = data.motivo_rechazo
         # Logística inversa: derivar mercancías de esta venta a cuarentena
-        detalles = db.query(VentaDetalle).filter(VentaDetalle.venta_id == parada.venta_id).all()
+        detalles = db.query(VentaDetalle).join(Venta).filter(
+            VentaDetalle.venta_id == parada.venta_id,
+            Venta.tenant_id == current_user.tenant_id
+        ).all()
         for d in detalles:
             item = CuarentenaLogistica(
                 turno_id=parada.turno_id,
@@ -1385,10 +1486,383 @@ def actualizar_estado_parada(parada_id: int, data: ParadaEstadoUpdate, db: Sessi
         turno_id=parada.turno_id,
         estado_anterior=parada.turno.estado if parada.turno else None,
         estado_nuevo=parada.turno.estado if parada.turno else "N/A",
-        usuario="OPERADOR_SISTEMA",
+        usuario=f"USER: {current_user.email}",
         motivo=msg
     )
 
     return {"ok": True, "estado": data.estado}
+
+
+# ─── NUEVO MÓDULO: PLANIFICACIÓN DE PERSONAL Y LOGÍSTICA (FASE 4) ─────────────
+from backend.models.logistics_new import (
+    Crew as NewCrew,
+    CrewMember as NewCrewMember,
+    LogisticsPlan as NewLogisticsPlan,
+    DispatchRecord as NewDispatchRecord,
+    NotificationJob as NewNotificationJob
+)
+from backend.models.core import Profile
+
+# ---- 1. TRIPULACIONES (CREWS) ----
+
+@router.get("/crews", response_model=List[dict])
+def get_crews(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """Lista las tripulaciones del tenant actual."""
+    query = db.query(NewCrew).filter(NewCrew.tenant_id == current_user.tenant_id)
+    if current_user.rol not in ('Admin', 'Supervisor', 'CEO', 'Desarrollador', 'Gerente'):
+        query = query.join(NewCrewMember).filter(NewCrewMember.profile_id == current_user.id)
+    
+    crews = query.all()
+    result = []
+    for c in crews:
+        # Get helpers
+        members = db.query(NewCrewMember).filter(
+            NewCrewMember.crew_id == c.id,
+            NewCrewMember.tenant_id == current_user.tenant_id
+        ).all()
+        ayudantes = []
+        for m in members:
+            p = db.query(Profile).filter(Profile.id == m.profile_id).first()
+            if p:
+                ayudantes.append({
+                    "id": str(p.id),
+                    "nombre": f"{p.nombre or ''} {p.apellido or ''}".strip() or p.username,
+                    "email": p.email
+                })
+        
+        driver = db.query(Profile).filter(Profile.id == c.chofer_id).first()
+        veh = db.query(Vehiculo).filter(Vehiculo.id == c.vehiculo_id).first()
+        
+        result.append({
+            "id": c.id,
+            "nombre": c.nombre,
+            "vehiculo": {
+                "id": veh.id if veh else None,
+                "nombre": veh.nombre if veh else "N/A",
+                "placa": veh.placa if veh else "N/A"
+            },
+            "chofer": {
+                "id": str(driver.id) if driver else None,
+                "nombre": f"{driver.nombre or ''} {driver.apellido or ''}".strip() if driver else "N/A",
+                "email": driver.email if driver else "N/A"
+            },
+            "ayudantes": ayudantes,
+            "activo": c.activo
+        })
+    return result
+
+class CrewCreateSchema(BaseModel):
+    nombre: str
+    vehiculo_id: int
+    chofer_id: str
+    ayudantes_ids: List[str]
+
+@router.post("/crews")
+def create_crew(payload: CrewCreateSchema, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """Crea una tripulaciones y sus miembros asociados (solo Admin/Supervisor)."""
+    if current_user.rol not in ('Admin', 'Supervisor', 'CEO', 'Desarrollador', 'Gerente'):
+        raise HTTPException(status_code=403, detail="Permisos insuficientes.")
+    
+    veh = db.query(Vehiculo).filter(Vehiculo.id == payload.vehiculo_id, Vehiculo.tenant_id == current_user.tenant_id).first()
+    if not veh:
+        raise HTTPException(status_code=404, detail="Vehículo no encontrado.")
+    
+    driver = db.query(Profile).filter(Profile.id == payload.chofer_id, Profile.tenant_id == current_user.tenant_id).first()
+    if not driver:
+        raise HTTPException(status_code=404, detail="Chofer no encontrado.")
+
+    c = NewCrew(
+        tenant_id=current_user.tenant_id,
+        nombre=payload.nombre,
+        vehiculo_id=payload.vehiculo_id,
+        chofer_id=payload.chofer_id,
+        activo=True
+    )
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+
+    for h_id in payload.ayudantes_ids:
+        helper = db.query(Profile).filter(Profile.id == h_id, Profile.tenant_id == current_user.tenant_id).first()
+        if helper:
+            member = NewCrewMember(
+                tenant_id=current_user.tenant_id,
+                crew_id=c.id,
+                profile_id=helper.id,
+                rol="AYUDANTE"
+            )
+            db.add(member)
+    db.commit()
+    return {"ok": True, "id": c.id}
+
+# ---- 3. PLANES LOGÍSTICOS & DESPACHOS ----
+
+@router.get("/planes", response_model=List[dict])
+def get_plans(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """Lista todos los planes logísticos del tenant."""
+    query = db.query(NewLogisticsPlan).filter(NewLogisticsPlan.tenant_id == current_user.tenant_id)
+    if current_user.rol not in ('Admin', 'Supervisor', 'CEO', 'Desarrollador', 'Gerente'):
+        query = query.filter(NewLogisticsPlan.estado == 'APROBADO').join(NewDispatchRecord).join(NewCrew).join(NewCrewMember).filter(NewCrewMember.profile_id == current_user.id)
+    
+    plans = query.order_by(NewLogisticsPlan.fecha_planificacion.desc()).all()
+    result = []
+    for p in plans:
+        dispatches = db.query(NewDispatchRecord).filter(
+            NewDispatchRecord.plan_id == p.id,
+            NewDispatchRecord.tenant_id == current_user.tenant_id
+        ).all()
+        
+        disp_list = []
+        for d in dispatches:
+            crew = db.query(NewCrew).filter(NewCrew.id == d.crew_id).first()
+            disp_list.append({
+                "id": d.id,
+                "crew": {
+                    "id": crew.id if crew else None,
+                    "nombre": crew.nombre if crew else "N/A"
+                },
+                "ruta": d.ruta,
+                "estado": d.estado,
+                "detalles": d.detalles
+            })
+            
+        result.append({
+            "id": p.id,
+            "fecha_planificacion": p.fecha_planificacion.strftime("%Y-%m-%d"),
+            "estado": p.estado,
+            "creado_por": str(p.creado_por),
+            "aprobado_por": str(p.aprobado_por) if p.aprobado_por else None,
+            "despachos": disp_list
+        })
+    return result
+
+class DispatchCreateSchema(BaseModel):
+    crew_id: int
+    ruta: str
+    detalles: Optional[str] = None
+
+class PlanCreateSchema(BaseModel):
+    fecha_planificacion: str
+    despachos: List[DispatchCreateSchema]
+
+@router.post("/planes")
+def create_plan(payload: PlanCreateSchema, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """Crea un plan logístico en borrador (solo Admin/Supervisor)."""
+    if current_user.rol not in ('Admin', 'Supervisor', 'CEO', 'Desarrollador', 'Gerente'):
+        raise HTTPException(status_code=403, detail="Permisos insuficientes.")
+    
+    try:
+        parsed_date = datetime.strptime(payload.fecha_planificacion, "%Y-%m-%d").date()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Formato de fecha inválido. Usar YYYY-MM-DD.")
+    
+    plan = NewLogisticsPlan(
+        tenant_id=current_user.tenant_id,
+        fecha_planificacion=parsed_date,
+        estado="BORRADOR",
+        creado_por=current_user.id
+    )
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+    
+    for d in payload.despachos:
+        crew = db.query(NewCrew).filter(NewCrew.id == d.crew_id, NewCrew.tenant_id == current_user.tenant_id).first()
+        if crew:
+            disp = NewDispatchRecord(
+                tenant_id=current_user.tenant_id,
+                plan_id=plan.id,
+                crew_id=d.crew_id,
+                ruta=d.ruta,
+                estado="PENDIENTE",
+                detalles=d.detalles
+            )
+            db.add(disp)
+    db.commit()
+    return {"ok": True, "id": plan.id}
+
+
+async def process_notification_jobs():
+    """Worker asíncrono en background que consume la cola de notificaciones de Telegram."""
+    from backend.core.database import SessionLocal
+    db = SessionLocal()
+    try:
+        jobs = db.query(NewNotificationJob).filter(NewNotificationJob.estado == "PENDING").all()
+        for job in jobs:
+            job.estado = "PROCESSING"
+            job.intentos += 1
+            db.commit()
+            
+            success = await _enviar_telegram(job.telegram_chat_id, job.mensaje)
+            if success:
+                job.estado = "SENT"
+            else:
+                job.estado = "FAILED"
+                job.error_log = "Error de red o chat ID inválido en Telegram."
+            job.updated_at = datetime.now(timezone.utc)
+            db.commit()
+    except Exception as e:
+        print(f"[WORKER ERROR] Error al procesar cola de notificaciones: {e}", flush=True)
+    finally:
+        db.close()
+
+
+@router.post("/planes/{plan_id}/aprobar")
+def aprobar_plan_logistico(plan_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """Aprobación masiva y atómica de un plan logístico (Maker-Checker, solo Admin/Supervisor)."""
+    if current_user.rol not in ('Admin', 'Supervisor', 'CEO', 'Desarrollador', 'Gerente'):
+        raise HTTPException(status_code=403, detail="Permisos insuficientes para aprobar planes.")
+    
+    plan = db.query(NewLogisticsPlan).filter(
+        NewLogisticsPlan.id == plan_id,
+        NewLogisticsPlan.tenant_id == current_user.tenant_id
+    ).first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan logístico no encontrado.")
+    
+    if plan.estado == "APROBADO":
+        return {"ok": True, "message": "El plan ya se encuentra aprobado."}
+    
+    try:
+        plan.estado = "APROBADO"
+        plan.aprobado_por = current_user.id
+        
+        dispatches = db.query(NewDispatchRecord).filter(
+            NewDispatchRecord.plan_id == plan_id,
+            NewDispatchRecord.tenant_id == current_user.tenant_id
+        ).all()
+        
+        for d in dispatches:
+            d.estado = "PENDIENTE"
+            
+            crew = db.query(NewCrew).filter(NewCrew.id == d.crew_id, NewCrew.tenant_id == current_user.tenant_id).first()
+            if crew:
+                driver = db.query(Profile).filter(Profile.id == crew.chofer_id).first()
+                if driver and getattr(driver, 'telegram_chat_id', None):
+                    msg = f"🚚 *Ruta Asignada: {d.ruta}*\nHola {driver.nombre}, tienes una nueva hoja de ruta aprobada. Detalles: {d.detalles or 'Ninguno'}."
+                    job = NewNotificationJob(
+                        tenant_id=current_user.tenant_id,
+                        dispatch_id=d.id,
+                        profile_id=driver.id,
+                        telegram_chat_id=driver.telegram_chat_id,
+                        mensaje=msg,
+                        estado="PENDING"
+                    )
+                    db.add(job)
+                
+                members = db.query(NewCrewMember).filter(NewCrewMember.crew_id == crew.id, NewCrewMember.tenant_id == current_user.tenant_id).all()
+                for m in members:
+                    helper = db.query(Profile).filter(Profile.id == m.profile_id).first()
+                    if helper and getattr(helper, 'telegram_chat_id', None):
+                        msg = f"👷 *Asignación de Ruta: {d.ruta}*\nHola {helper.nombre}, has sido asignado como Ayudante para la tripulación *{crew.nombre}* hoy."
+                        job = NewNotificationJob(
+                            tenant_id=current_user.tenant_id,
+                            dispatch_id=d.id,
+                            profile_id=helper.id,
+                            telegram_chat_id=helper.telegram_chat_id,
+                            mensaje=msg,
+                            estado="PENDING"
+                        )
+                        db.add(job)
+        
+        db.commit()
+        
+        asyncio.create_task(process_notification_jobs())
+        
+        return {"ok": True, "message": "Plan aprobado exitosamente de forma atómica. Notificaciones encoladas."}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al aprobar plan: {str(e)}")
+
+# ---- 4. MOTOR DE PERSONAL & MÉTRICAS ----
+
+@router.get("/personal", response_model=List[dict])
+def get_personal_engine(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """Retorna jerarquías del personal, tareas asignadas y métricas de desempeño."""
+    profiles = db.query(Profile).filter(Profile.tenant_id == current_user.tenant_id).all()
+    result = []
+    
+    for p in profiles:
+        cm = db.query(NewCrewMember).filter(NewCrewMember.profile_id == p.id, NewCrewMember.tenant_id == current_user.tenant_id).first()
+        crew_name = "Sin Tripulación"
+        role_label = p.rol
+        
+        total_despachos = 0
+        completados = 0
+        
+        if cm:
+            crew = db.query(NewCrew).filter(NewCrew.id == cm.crew_id).first()
+            if crew:
+                crew_name = crew.nombre
+                role_label = cm.rol
+                
+                dispatches = db.query(NewDispatchRecord).filter(
+                    NewDispatchRecord.crew_id == crew.id,
+                    NewDispatchRecord.tenant_id == current_user.tenant_id
+                ).all()
+                total_despachos = len(dispatches)
+                completados = sum(1 for d in dispatches if d.estado == "ENTREGADO" or d.estado == "DELIVERED")
+        else:
+            crew = db.query(NewCrew).filter(NewCrew.chofer_id == p.id, NewCrew.tenant_id == current_user.tenant_id).first()
+            if crew:
+                crew_name = crew.nombre
+                role_label = "CHOFER"
+                
+                dispatches = db.query(NewDispatchRecord).filter(
+                    NewDispatchRecord.crew_id == crew.id,
+                    NewDispatchRecord.tenant_id == current_user.tenant_id
+                ).all()
+                total_despachos = len(dispatches)
+                completados = sum(1 for d in dispatches if d.estado == "ENTREGADO" or d.estado == "DELIVERED")
+
+        efficiency = 100.0 if total_despachos == 0 else round((completados / total_despachos) * 100, 1)
+        
+        reporta_a = "Supervisor" if role_label in ("CHOFER", "AYUDANTE", "Chofer", "Ayudante") else "Admin"
+        if p.rol == "Admin":
+            reporta_a = "CEO"
+
+        result.append({
+            "id": str(p.id),
+            "nombre": f"{p.nombre or ''} {p.apellido or ''}".strip() or p.username,
+            "email": p.email,
+            "rol": role_label,
+            "tripulacion": crew_name,
+            "rutas_totales": total_despachos,
+            "rutas_completadas": completados,
+            "eficiencia": efficiency,
+            "reporta_a": reporta_a,
+            "estado": "Activo" if p.estado == 1 else "Inactivo",
+            "telegram_chat_id": p.telegram_chat_id
+        })
+        
+    return result
+
+class LinkTelegramSchema(BaseModel):
+    profile_id: str
+    telegram_chat_id: str
+
+@router.post("/personal/telegram")
+async def link_telegram(payload: LinkTelegramSchema, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """Asocia un chat ID de Telegram al perfil de un usuario (solo Admin/Supervisor)."""
+    if current_user.rol not in ('Admin', 'Supervisor', 'CEO', 'Desarrollador', 'Gerente'):
+        raise HTTPException(status_code=403, detail="Permisos insuficientes.")
+    
+    p = db.query(Profile).filter(Profile.id == payload.profile_id, Profile.tenant_id == current_user.tenant_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+    
+    p.telegram_chat_id = payload.telegram_chat_id
+    db.commit()
+    
+    # Enviar mensaje de confirmación a Telegram
+    msg = (
+        f"✅ *KODA ERP - Vinculación Exitosa*\n\n"
+        f"Hola *{p.nombre or p.username}*, tu cuenta ha sido vinculada correctamente al sistema.\n"
+        f"A partir de ahora recibirás aquí tus hojas de ruta y notificaciones operativas."
+    )
+    asyncio.create_task(_enviar_telegram(p.telegram_chat_id, msg))
+    
+    return {"ok": True, "message": "Telegram enlazado correctamente."}
+
 
 

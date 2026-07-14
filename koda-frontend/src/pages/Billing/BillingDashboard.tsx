@@ -10,7 +10,7 @@ import {
   Minimize2
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { api } from '@/api/client';
+import { api, BASE_URL } from '@/api/client';
 
 interface VentaRow {
   id: number;
@@ -63,6 +63,7 @@ const BillingDashboard = () => {
     const digits = (v.numero_factura || "").replace(/\D/g, "");
     const controlNumber = digits ? `00-${digits.padStart(8, '0')}` : `00-${String(v.id).padStart(8, '0')}`;
     return {
+      dbId: v.id,
       id: v.numero_factura,
       control: controlNumber,
       client: v.cliente?.nombre || 'Cliente Final',
@@ -102,8 +103,21 @@ const BillingDashboard = () => {
     }
   };
 
-  const handleDownloadPdf = () => {
-    alert('Función de descarga de PDF próximamente disponible.');
+  const handleDownloadPdf = async (id: number) => {
+    try {
+      const token = localStorage.getItem('koda_token') || localStorage.getItem('sgd_token') || '';
+      const response = await fetch(`${BASE_URL}/ventas/${id}/pdf`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (!response.ok) throw new Error('Error al generar el PDF de la factura');
+      const blob = await response.blob();
+      const fileURL = URL.createObjectURL(blob);
+      window.open(fileURL, '_blank');
+    } catch (error: any) {
+      alert(error.message || 'Error al descargar PDF');
+    }
   };
 
   return (
@@ -184,7 +198,14 @@ const BillingDashboard = () => {
                 <tr key={i} className="group hover:bg-slate-50/80 transition-colors">
                   <td className="py-5 px-6 text-xs font-bold text-slate-500 uppercase">{inv.date}</td>
                   <td className="py-5 px-6 text-xs font-bold text-slate-400 tracking-widest">{inv.control}</td>
-                  <td className="py-5 px-6 text-sm font-black text-slate-800 uppercase">{inv.id}</td>
+                  <td className="py-5 px-6 text-sm font-black text-slate-800 uppercase">
+                    <button 
+                      onClick={() => handleDownloadPdf(inv.dbId)}
+                      className="text-left font-black text-slate-800 hover:text-[#0b5156] hover:underline uppercase block outline-none"
+                    >
+                      {inv.id}
+                    </button>
+                  </td>
                   <td className="py-5 px-6">
                     <div className="flex flex-col">
                       <span className="text-xs font-black text-[#0b5156] uppercase">{inv.client}</span>
@@ -199,13 +220,12 @@ const BillingDashboard = () => {
                   </td>
                   <td className="py-5 px-6 text-right">
                     <div className="flex justify-end gap-2">
-                       <button onClick={handleDownloadPdf} className="p-2 hover:bg-white rounded-lg text-[#0b5156] transition-colors" title="Ver PDF">
-                          <Download size={14} />
-                       </button>
+                        <button onClick={() => handleDownloadPdf(inv.dbId)} className="p-2 hover:bg-white rounded-lg text-[#0b5156] transition-colors" title="Ver PDF">
+                           <Download size={14} />
+                        </button>
                        {inv.status !== 'ANULADA' && inv.status !== 'Anulada' && (
                          <button onClick={() => {
-                           const originalVenta = ventas.find(v => v.numero_factura === inv.id);
-                           if (originalVenta) handleAnular(originalVenta.id);
+                           handleAnular(inv.dbId);
                          }} className="p-2 hover:bg-red-50 rounded-lg text-red-400 transition-colors" title="Anular Factura">
                             <Ban size={14} />
                          </button>

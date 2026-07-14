@@ -14,6 +14,7 @@ import { api } from '@/api/client';
 const ABCMatrixReport = () => {
   const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [modalMessage, setModalMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchMatrix = async () => {
@@ -29,8 +30,20 @@ const ABCMatrixReport = () => {
     fetchMatrix();
   }, []);
 
-  const quadrants = data?.quadrants || [];
+  const handleExport = async () => {
+    try {
+      await api.download('/reportes/exportar?reporte=abc', 'estrategia_inventario_abc.csv');
+    } catch (error) {
+      console.error("Error exporting ABC:", error);
+      setModalMessage("Error al exportar matriz ABC.");
+    }
+  };
 
+  const handleParameters = () => {
+    setModalMessage("Los parámetros del algoritmo ABC se calculan automáticamente basándose en los promedios móviles de los últimos 30 días.");
+  };
+
+  const quadrants = data?.quadrants || [];
   const insight = data?.insight || "El algoritmo clasifica el inventario actual. Los productos en Estrellas deben tener stock garantizado. Las Vacas deben optimizarse para flujo. Los Perros representan capital atrapado; se recomienda liquidarlos.";
 
   return (
@@ -51,10 +64,16 @@ const ABCMatrixReport = () => {
             <p className="text-slate-500 text-xs font-bold uppercase tracking-tight">Clasificación estratégica de productos por Rotación vs Rentabilidad.</p>
           </div>
           <div className="flex gap-2">
-             <button className="bg-white text-slate-500 px-6 py-2 rounded-xl text-[10px] font-black uppercase border border-slate-200 hover:bg-slate-50 transition-all flex items-center gap-2">
+             <button 
+               onClick={handleParameters}
+               className="bg-white text-slate-500 px-6 py-2 rounded-xl text-[10px] font-black uppercase border border-slate-200 hover:bg-slate-50 transition-all flex items-center gap-2"
+             >
                 Parámetros de Algoritmo
              </button>
-             <button className="bg-[#0b5156] text-white px-8 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all">
+             <button 
+               onClick={handleExport}
+               className="bg-[#0b5156] text-white px-8 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all"
+             >
                 <Download size={14} /> Exportar Estrategia
              </button>
           </div>
@@ -132,6 +151,35 @@ const ABCMatrixReport = () => {
          </div>
          <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-white/5 rounded-full blur-3xl pointer-events-none" />
       </div>
+
+      {modalMessage && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-[#0b5156] p-4 text-white flex items-center justify-between">
+              <h3 className="text-xs font-black uppercase tracking-widest">Aviso del Sistema</h3>
+              <button 
+                onClick={() => setModalMessage(null)}
+                className="text-white/70 hover:text-white text-xs font-bold uppercase transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-slate-600 text-xs font-bold uppercase tracking-tight leading-relaxed">
+                {modalMessage}
+              </p>
+              <div className="flex justify-end gap-2">
+                <button 
+                  onClick={() => setModalMessage(null)}
+                  className="bg-[#0b5156] text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all"
+                >
+                  Aceptar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

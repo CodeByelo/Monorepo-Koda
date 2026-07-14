@@ -43,9 +43,8 @@ export default function ForensicTimeline({ initialAggregateId = "" }: ForensicTi
     try {
       setLoading(true);
       setError(null);
-      // Petición al endpoint expuesto por el Búnker de Auditoría
-      const res = await api.get<{ events: ForensicEvent[] }>(`/api/v1/auditoria/forense/${idToQuery.trim()}`);
-      setEvents(res.events || []);
+      const res = await api.get<any>(`/api/v1/auditoria/forense/${idToQuery.trim()}`);
+      setEvents(res.events || res.data || []);
     } catch (err: any) {
       console.error("Error al consultar trazabilidad forense:", err);
       setError(err.message || "Fallo en la comunicación con el búnker de auditoría.");
@@ -195,16 +194,16 @@ export default function ForensicTimeline({ initialAggregateId = "" }: ForensicTi
     <div className="bg-[#0A0A0F] border border-slate-800 rounded-3xl p-6 text-white shadow-2xl space-y-6 relative overflow-hidden">
       
       {/* Background neon glows */}
-      <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-950/10 rounded-full blur-3xl pointer-events-none"></div>
+      <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-950/10 rounded-full blur-3xl pointer-events-none"></div>
 
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-4 border-b border-slate-800">
         <div>
-          <span className="bg-indigo-950 text-indigo-400 text-[9px] font-black px-2 py-0.5 rounded border border-indigo-900 uppercase tracking-widest inline-flex items-center gap-1.5 mb-2">
+          <span className="bg-emerald-950 text-emerald-400 text-[9px] font-black px-2 py-0.5 rounded border border-emerald-900 uppercase tracking-widest inline-flex items-center gap-1.5 mb-2">
             <Terminal size={10} /> Forensic Auditor
           </span>
           <h2 className="text-xl font-black text-white uppercase tracking-tighter">Buscador Forense del Ledger</h2>
-          <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">Historial inalterable de auditoría para Tickets y Documentos</p>
+          <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">Busca por usuario, módulo, acción, IP o cualquier término en los logs de auditoría</p>
         </div>
         <button 
           onClick={() => fetchTimeline(aggregateId)}
@@ -221,17 +220,17 @@ export default function ForensicTimeline({ initialAggregateId = "" }: ForensicTi
         <div className="relative flex-1">
           <input
             type="text"
-            placeholder="Ingrese el UUID o ID del agregado (Ej. Documento ID o Ticket ID)..."
+            placeholder="Ej: Hrodriguez, CIERRE_ARQUEO, TESORERIA, LOGIN, José Pérez..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-[#11111A] border border-slate-800 focus:border-indigo-500 rounded-xl px-4 py-3 text-xs font-mono text-white placeholder-slate-600 outline-none transition-all shadow-inner focus:shadow-[0_0_15px_rgba(99,102,241,0.15)]"
+            className="w-full bg-[#11111A] border border-slate-800 focus:border-emerald-500 rounded-xl px-4 py-3 text-xs font-mono text-white placeholder-slate-600 outline-none transition-all shadow-inner focus:shadow-[0_0_15px_rgba(16,185,129,0.15)]"
           />
           <Search size={14} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-600" />
         </div>
         <button
           type="submit"
           disabled={loading || !searchQuery.trim()}
-          className="bg-indigo-600 text-white font-black px-5 rounded-xl text-xs uppercase hover:bg-indigo-500 transition-all shadow-[0_0_15px_rgba(99,102,241,0.2)] disabled:opacity-50 active:scale-95"
+          className="bg-[#0b5156] text-white font-black px-5 rounded-xl text-xs uppercase hover:bg-[#083a3e] border border-[#0b5156]/50 transition-all shadow-[0_0_15px_rgba(11,81,86,0.3)] disabled:opacity-50 active:scale-95"
         >
           Buscar
         </button>
@@ -250,8 +249,8 @@ export default function ForensicTimeline({ initialAggregateId = "" }: ForensicTi
 
       {loading ? (
         <div className="flex flex-col justify-center items-center py-16 space-y-3">
-          <div className="w-8 h-8 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-indigo-400 font-black text-[10px] uppercase tracking-widest animate-pulse">Consultando Ledger Inmutable...</p>
+          <div className="w-8 h-8 border-3 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-emerald-400 font-black text-[10px] uppercase tracking-widest animate-pulse">Consultando Ledger Inmutable...</p>
         </div>
       ) : events.length === 0 ? (
         aggregateId ? (
@@ -335,7 +334,7 @@ export default function ForensicTimeline({ initialAggregateId = "" }: ForensicTi
                     </button>
 
                     {isExpanded && (
-                      <pre className="mt-2.5 p-3.5 bg-slate-950 border border-slate-900 rounded-xl overflow-x-auto text-[10px] text-indigo-400 font-mono leading-relaxed max-h-48 scrollbar-thin select-all">
+                      <pre className="mt-2.5 p-3.5 bg-slate-950 border border-slate-900 rounded-xl overflow-x-auto text-[10px] text-emerald-400 font-mono leading-relaxed max-h-48 scrollbar-thin select-all">
                         {JSON.stringify(event.payload, null, 2)}
                       </pre>
                     )}

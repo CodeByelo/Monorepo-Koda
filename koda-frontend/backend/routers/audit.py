@@ -31,9 +31,12 @@ def enable_auditor_session(
     
     expires_at = datetime.now(timezone.utc) + timedelta(hours=session_data.expires_in_hours)
     
+    # Enforce tenant_id of current admin to prevent tenant spoofing
+    tenant_id_to_use = str(current_admin.tenant_id) if current_admin.tenant_id else session_data.tenant_id
+
     # Creamos el registro de sesión
     new_session = AuditorSession(
-        tenant_id=session_data.tenant_id,
+        tenant_id=tenant_id_to_use,
         auditor_name=session_data.auditor_name,
         organization=session_data.organization,
         scope=session_data.scope,

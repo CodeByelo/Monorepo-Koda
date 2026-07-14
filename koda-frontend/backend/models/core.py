@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Numeric, DateTime
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, Boolean
 from datetime import datetime, timezone
 from backend.core.database import Base
 
@@ -35,6 +35,7 @@ class Profile(Base):
     from sqlalchemy import ForeignKey
     tenant_id = Column(UUID(as_uuid=True), ForeignKey('public.tenants.id'), nullable=True)
     permisos = Column(String)
+    telegram_chat_id = Column(String(50), nullable=True)
     ultima_conexion = Column(DateTime)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -68,3 +69,17 @@ class LoginLockout(Base):
     username = Column(String(150), primary_key=True, index=True)
     failed_count = Column(Integer, default=0, nullable=False)
     locked_until = Column(DateTime, nullable=True)
+
+
+class TenantIntegrationSettings(Base):
+    __tablename__ = "tenant_integration_settings"
+    __table_args__ = {'schema': 'public'}
+
+    tenant_id = Column(UUID(as_uuid=True), primary_key=True, index=True)
+    backup_provider = Column(String(50), default="local")
+    backup_config_json = Column(String, nullable=True)
+    replication_mode = Column(String(50), default="koda_db")
+    replication_api_url = Column(String(500), nullable=True)
+    replication_api_key = Column(String(255), nullable=True)
+    bypass_local_db = Column(Boolean, default=False)
+

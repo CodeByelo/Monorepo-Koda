@@ -21,6 +21,12 @@ interface Adjustment {
 const InventoryApprovals = () => {
   const [pendingAdjustments, setPendingAdjustments] = useState<Adjustment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 4000);
+  };
 
   const fetchPending = async () => {
     try {
@@ -46,10 +52,10 @@ const InventoryApprovals = () => {
 
     try {
       await api.post(`/inventario/ajustes/${id}/aprobar`);
-      alert("✅ Ajuste aprobado, Kardex actualizado y Asiento Contable generado.");
+      showToast("✅ Ajuste aprobado, Kardex actualizado y Asiento Contable generado.");
       fetchPending(); // Refrescar la lista
     } catch (error) {
-      alert("❌ Error al aprobar el ajuste.");
+      showToast("❌ Error al aprobar el ajuste.");
       console.error(error);
     }
   };
@@ -146,6 +152,11 @@ const InventoryApprovals = () => {
           </tbody>
         </table>
       </article>
+      {toast && (
+        <div className="fixed bottom-5 right-5 bg-slate-900/90 backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-xl z-50 border border-slate-700/50 flex items-center gap-3 animate-in slide-in-from-bottom-5 duration-300">
+          <span className="text-xs font-black uppercase tracking-wider">🔔 {toast}</span>
+        </div>
+      )}
     </div>
   );
 };

@@ -15,6 +15,7 @@ import { api } from '@/api/client';
 const AccountsReceivableAging = () => {
   const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [modalMessage, setModalMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchAging = async () => {
@@ -29,6 +30,26 @@ const AccountsReceivableAging = () => {
     };
     fetchAging();
   }, []);
+
+  const handleExport = async () => {
+    try {
+      await api.download('/reportes/exportar?reporte=antiguedad', 'reporte_antiguedad_cartera.csv');
+    } catch (error) {
+      console.error("Error exporting aging:", error);
+      setModalMessage("Error al exportar antigüedad de cartera.");
+    }
+  };
+
+  const handleShowAllClients = () => {
+    if (clientsData.length === 0) {
+      setModalMessage("No hay clientes con saldos pendientes registrados.");
+      return;
+    }
+    const listText = clientsData.map((c: any) => 
+      `• ${c.name || c.nombre}\n  Saldo Total: ${c.total}\n  Vencido: ${c.overdue || '$0'} (0-30d: ${c.days0_30 || '$0'}, 31-60d: ${c.days31_60 || '$0'}, +60d: ${c.daysPlus60 || '$0'})\n  Pérdida Deval.: ${c.loss || c.perdida}\n  Riesgo: ${c.risk || c.riesgo}`
+    ).join("\n\n");
+    setModalMessage(`Listado Completo de Clientes en Cartera:\n\n${listText}`);
+  };
 
   const metrics = data?.metrics || [];
 
@@ -55,12 +76,14 @@ const AccountsReceivableAging = () => {
             <p className="text-slate-500 text-xs font-bold uppercase tracking-tight">Evaluación de riesgo crediticio y salud de las cuentas por cobrar.</p>
           </div>
           <div className="flex gap-2">
-             <button className="bg-white text-slate-500 px-6 py-2 rounded-xl text-[10px] font-black uppercase border border-slate-200 hover:bg-slate-50 transition-all flex items-center gap-2">
-                <Download size={14} /> Exportar PDF Gerencial
+             <button 
+               onClick={handleExport}
+               className="bg-white text-slate-500 px-6 py-2 rounded-xl text-[10px] font-black uppercase border border-slate-200 hover:bg-slate-50 transition-all flex items-center gap-2"
+             >
+                <Download size={14} /> Exportar Reporte de Cartera
              </button>
              <select className="bg-[#0b5156] text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase outline-none shadow-lg shadow-green-900/20 cursor-pointer">
-                <option>Al 30/04/2026</option>
-                <option>Al 31/03/2026</option>
+                <option>Al día de hoy</option>
              </select>
           </div>
         </div>
@@ -134,7 +157,7 @@ const AccountsReceivableAging = () => {
             <h2 className="text-base font-black text-[#0b5156] uppercase tracking-tighter leading-none">Antigüedad por Cliente</h2>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Detalle individual de saldos y pérdida por devaluación proyectada.</p>
           </div>
-          <button className="text-[10px] font-black text-[#0b5156] uppercase flex items-center gap-1.5 hover:underline">
+          <button onClick={handleShowAllClients} className="text-[10px] font-black text-[#0b5156] uppercase flex items-center gap-1.5 hover:underline">
              Ver Todos los Clientes <ChevronRight size={12} />
           </button>
         </div>
@@ -192,6 +215,35 @@ const AccountsReceivableAging = () => {
          </div>
          <div className="absolute right-0 bottom-0 w-40 h-40 bg-white/5 rounded-full blur-3xl group-hover:scale-110 transition-transform duration-1000 pointer-events-none" />
       </div>
+
+      {modalMessage && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-[#0b5156] p-4 text-white flex items-center justify-between">
+              <h3 className="text-xs font-black uppercase tracking-widest">Aviso del Sistema</h3>
+              <button 
+                onClick={() => setModalMessage(null)}
+                className="text-white/70 hover:text-white text-xs font-bold uppercase transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto no-scrollbar">
+              <p className="text-slate-600 text-xs font-bold uppercase tracking-tight leading-relaxed whitespace-pre-line">
+                {modalMessage}
+              </p>
+              <div className="flex justify-end gap-2 pt-2">
+                <button 
+                  onClick={() => setModalMessage(null)}
+                  className="bg-[#0b5156] text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all"
+                >
+                  Aceptar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

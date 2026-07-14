@@ -38,7 +38,7 @@ class PagoRegistroRequest(BaseModel):
 
 @router.post("/registrar", status_code=status.HTTP_200_OK)
 @require_idempotency
-def registrar_pago(request: Request, pago: PagoRegistroRequest, db: Session = Depends(get_db)):
+def registrar_pago(request: Request, pago: PagoRegistroRequest, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """
     Registra un pago de cliente, liquida sus Cuentas por Cobrar (CxC) pendientes
     y crea el movimiento bancario correspondiente.
@@ -49,14 +49,27 @@ def registrar_pago(request: Request, pago: PagoRegistroRequest, db: Session = De
 
     try:
         # 2. Buscar la cuenta bancaria para validar su existencia
-        cuenta_bancaria = db.query(CuentaBancaria).filter(CuentaBancaria.id == pago.cuenta_bancaria_id).first()
+        cuenta_bancaria = db.query(CuentaBancaria).filter(
+            CuentaBancaria.id == pago.cuenta_bancaria_id,
+            CuentaBancaria.tenant_id == current_user.tenant_id
+        ).first()
         if not cuenta_bancaria:
             raise HTTPException(status_code=404, detail="Cuenta bancaria no encontrada.")
+
+        # Validar que el cliente pertenezca al tenant
+        from backend.models.operations import Cliente
+        cliente = db.query(Cliente).filter(
+            Cliente.id == pago.cliente_id,
+            Cliente.tenant_id == current_user.tenant_id
+        ).first()
+        if not cliente:
+            raise HTTPException(status_code=404, detail="Cliente no encontrado.")
 
         # 3. Buscar cuentas por cobrar PENDIENTES del cliente (más antiguas primero)
         cuentas_pendientes = db.query(CuentaPorCobrar).filter(
             CuentaPorCobrar.cliente_id == pago.cliente_id,
-            CuentaPorCobrar.estado == "PENDIENTE"
+            CuentaPorCobrar.estado == "PENDIENTE",
+            CuentaPorCobrar.tenant_id == current_user.tenant_id
         ).order_by(CuentaPorCobrar.fecha_emision.asc()).all()
 
         monto_restante = pago.monto_pagado_usd
@@ -86,7 +99,8 @@ def registrar_pago(request: Request, pago: PagoRegistroRequest, db: Session = De
             tasa_cambio_bs=pago.tasa_cambio_bs,
             tipo="INGRESO",
             referencia=pago.referencia,
-            estado="ACTIVO"
+            estado="ACTIVO",
+            tenant_id=current_user.tenant_id
         )
         db.add(nuevo_movimiento)
 
@@ -94,7 +108,7 @@ def registrar_pago(request: Request, pago: PagoRegistroRequest, db: Session = De
         cuenta_bancaria.saldo_actual_usd += pago.monto_pagado_usd
 
         # 7. Generar Asiento Contable Automático para el Pago
-        ContabilidadService.generar_asiento_pago(pago, db)
+        ContabilidadService.generar_asiento_pago(pago, db, tenant_id=current_user.tenant_id)
 
         # Confirmar la transacción
         db.commit()

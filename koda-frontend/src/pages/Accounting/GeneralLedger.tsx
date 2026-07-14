@@ -37,6 +37,7 @@ const GeneralLedger = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [buscar, setBuscar] = useState('');
   const [fechaFiltro, setFechaFiltro] = useState('');
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const fetchAsientos = async () => {
     try {
@@ -80,7 +81,8 @@ const GeneralLedger = () => {
       window.URL.revokeObjectURL(urlBlob);
     } catch (error) {
       console.error("Error downloading PDF:", error);
-      alert("Error al descargar el PDF. Verifique su sesion.");
+      setDownloadError('Error al descargar el PDF. Verifique su sesión.');
+      setTimeout(() => setDownloadError(null), 4000);
     }
   };
 

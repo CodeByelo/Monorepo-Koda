@@ -45,7 +45,7 @@ def registrar_venta_y_cxc(
         tasa_bs = Decimal(str(tasa_activa.valor_ves))
 
         # 1.5 Validar Cliente
-        cliente = db.query(Cliente).filter(Cliente.id == venta_in.cliente_id).first()
+        cliente = db.query(Cliente).filter(Cliente.id == venta_in.cliente_id, Cliente.tenant_id == current_user.tenant_id).first()
         if not cliente:
             raise HTTPException(status_code=404, detail="Cliente no encontrado")
 
@@ -66,7 +66,10 @@ def registrar_venta_y_cxc(
         unique_producto_ids = list(set(producto_ids))
         
         # Bloquear todos los productos requeridos en una sola consulta
-        productos = db.query(Producto).filter(Producto.id.in_(unique_producto_ids)).with_for_update().all()
+        productos = db.query(Producto).filter(
+            Producto.id.in_(unique_producto_ids),
+            Producto.tenant_id == current_user.tenant_id
+        ).with_for_update().all()
         productos_dict = {p.id: p for p in productos}
         
         for detalle_in in venta_in.detalles:
@@ -74,7 +77,7 @@ def registrar_venta_y_cxc(
             if not producto:
                 raise HTTPException(
                     status_code=404, 
-                    detail=f"Producto con ID {detalle_in.producto_id} no encontrado en inventario."
+                    detail=f"Producto con ID {detalle_in.producto_id} no encontrado en inventario de su empresa."
                 )
             
             # Validar stock disponible
@@ -100,7 +103,8 @@ def registrar_venta_y_cxc(
             nuevo_detalle = VentaDetalle(
                 producto_id=detalle_in.producto_id,
                 cantidad=detalle_in.cantidad,
-                precio_usd_capturado=precio_oficial
+                precio_usd_capturado=precio_oficial,
+                tenant_id=current_user.tenant_id
             )
             detalles_para_guardar.append(nuevo_detalle)
 
@@ -109,7 +113,8 @@ def registrar_venta_y_cxc(
                 producto_id=producto.id,
                 tipo_movimiento="Venta",
                 cantidad=-detalle_in.cantidad,
-                documento_referencia=temp_factura  # Temporalmente, se actualizará tras obtener el FAC_ID definitivo
+                documento_referencia=temp_factura,  # Temporalmente, se actualizará tras obtener el FAC_ID definitivo
+                tenant_id=current_user.tenant_id
             )
             movimientos_kardex.append(nuevo_movimiento)
 
@@ -144,8 +149,9 @@ def registrar_venta_y_cxc(
             total_usd=total_usd_rounded,
             metodo_pago=venta_in.metodo_pago,
             tasa_cambio_bs=tasa_bs,
-            estado="EMITIDA",
-            creado_por=current_user.id
+            estado="ACTIVA",
+            creado_por=current_user.id,
+            tenant_id=current_user.tenant_id
         )
         db.add(nueva_venta)
         db.flush()
@@ -192,13 +198,14 @@ def registrar_venta_y_cxc(
             tasa_cambio_bs=tasa_bs,
             fecha_emision=fecha_venta,
             fecha_vencimiento=fecha_venc,
-            estado="PENDIENTE"
+            estado="PENDIENTE",
+            tenant_id=current_user.tenant_id
         )
         db.add(nueva_cxc)
 
         # Generar Asiento Contable Automático de Ventas y de Costo de Ventas (COGS)
-        ContabilidadService.generar_asiento_venta(nueva_venta, db)
-        ContabilidadService.generar_asiento_costo_ventas(nueva_venta, detalles_para_guardar, db)
+        ContabilidadService.generar_asiento_venta(nueva_venta, db, tenant_id=current_user.tenant_id)
+        ContabilidadService.generar_asiento_costo_ventas(nueva_venta, detalles_para_guardar, db, tenant_id=current_user.tenant_id)
 
         # Confirmación de la transacción atómica
         db.commit()

@@ -86,8 +86,10 @@ const CreditNotes = () => {
             setClientName('NO ASIGNADO');
           });
 
-        const tasa = res.tasa_cambio_bs ? Number(res.tasa_cambio_bs) : 0;
-        setBcvRate(tasa > 0 ? tasa.toFixed(2) : '');
+        const tasa = res.tasa_cambio_bs;
+        if (tasa !== null && tasa !== undefined) {
+          setBcvRate(Number(tasa) > 0 ? Number(tasa).toFixed(4) : '');
+        }
         setAmount(Number(res.total).toFixed(2));
         setSelectedInvoiceTotal(Number(res.total));
       })

@@ -12,6 +12,11 @@ import {
 } from 'lucide-react';
 
 const CashMovements = () => {
+  const [toast, setToast] = useState<string | null>(null);
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 4000);
+  };
   const [showModal, setShowModal] = useState(false);
   const [movements, setMovements] = useState<any[]>([]);
   const [metricsData, setMetricsData] = useState<any>({
@@ -59,7 +64,7 @@ const CashMovements = () => {
 
   const handleRegisterMovement = async () => {
     if (!cuentaId || !monto || !concepto) {
-      alert("Por favor complete todos los datos requeridos.");
+      showToast("Por favor complete todos los datos requeridos.");
       return;
     }
     try {
@@ -71,7 +76,7 @@ const CashMovements = () => {
         referencia: validationFiscal === 'LEGAL' ? (referencia || 'FACT-GEN') : '',
         tasa_cambio_bs: 36.42
       });
-      alert("Movimiento registrado en libro de caja principal.");
+      showToast("Movimiento registrado en libro de caja principal.");
       setShowModal(false);
       setMonto('');
       setConcepto('');
@@ -79,7 +84,7 @@ const CashMovements = () => {
       fetchData();
     } catch (error) {
       console.error("Error registering movement:", error);
-      alert("Error al registrar el movimiento.");
+      showToast("Error al registrar el movimiento.");
     }
   };
 
@@ -348,6 +353,11 @@ const CashMovements = () => {
                  </button>
               </div>
            </div>
+        </div>
+      )}
+      {toast && (
+        <div className="fixed bottom-5 right-5 bg-slate-900/90 backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-xl z-50 border border-slate-700/50 flex items-center gap-3 animate-in slide-in-from-bottom-5 duration-300">
+          <span className="text-xs font-black uppercase tracking-wider">🔔 {toast}</span>
         </div>
       )}
     </div>

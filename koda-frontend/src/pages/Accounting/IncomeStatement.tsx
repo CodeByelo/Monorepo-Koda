@@ -23,6 +23,7 @@ const IncomeStatement = () => {
   const [periodo, setPeriodo] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
   const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchStatement();
@@ -64,7 +65,8 @@ const IncomeStatement = () => {
       setShowExportModal(false);
     } catch (error) {
       console.error(`Error exportando a ${formato}:`, error);
-      alert(`Error al exportar a ${formato.toUpperCase()}`);
+      setExportError(`Error al exportar a ${formato.toUpperCase()}. Intente nuevamente.`);
+      setTimeout(() => setExportError(null), 4000);
     }
   };
 
@@ -86,7 +88,7 @@ const IncomeStatement = () => {
   };
 
   const metrics = [
-    { label: 'Ingresos Netos', value: `$${formatCurrency(ingresosNetos)}`, trend: ingresosNetos > 0 ? '+12.5% vs período anterior' : '0.0% vs período anterior', trendColor: ingresosNetos > 0 ? 'text-green-600' : 'text-slate-400', icon: <TrendingUp size={18} className={ingresosNetos > 0 ? "text-green-600" : "text-slate-400"} /> },
+    { label: 'Ingresos Netos', value: `$${formatCurrency(ingresosNetos)}`, trend: data?.variacion_ingresos ? `${data.variacion_ingresos} vs período anterior` : (ingresosNetos > 0 ? '+0.0% vs período anterior' : '0.0% vs período anterior'), trendColor: ingresosNetos > 0 ? 'text-green-600' : 'text-slate-400', icon: <TrendingUp size={18} className={ingresosNetos > 0 ? "text-green-600" : "text-slate-400"} /> },
     { label: 'Costo de Ventas', value: `$${formatCurrency(costoVentas)}`, trend: `${calcPct(costoVentas, ingresosNetos)} de los ingresos`, trendColor: costoVentas > 0 ? 'text-[#0b5156]' : 'text-slate-400', icon: <PieChart size={18} className={costoVentas > 0 ? "text-[#0b5156]" : "text-slate-400"} /> },
     { label: 'Utilidad Bruta', value: `$${formatCurrency(utilidadBruta)}`, trend: `Margen: ${calcPct(utilidadBruta, ingresosNetos)}`, trendColor: utilidadBruta > 0 ? 'text-green-600' : 'text-slate-400', icon: <Activity size={18} className={utilidadBruta > 0 ? "text-green-600" : "text-slate-400"} /> },
     { label: 'Utilidad Neta', value: `$${formatCurrency(utilidadNeta)}`, trend: `Margen neto: ${calcPct(utilidadNeta, ingresosNetos)}`, trendColor: utilidadNeta > 0 ? 'text-green-600' : 'text-slate-400', icon: <ShieldCheck size={18} className={utilidadNeta > 0 ? "text-green-600" : "text-slate-400"} /> },
