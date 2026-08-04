@@ -780,31 +780,28 @@ const ERPUniverse = ({ mouseX, mouseY }) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 3500);
 
-    const parseRate = (d) => d?.USD?.rate || d?.tasa || d?.valor_ves;
+    const parseRate = (d) => d?.USD?.rate || d?.promedio || d?.promedio_ves || d?.tasa || d?.valor_ves;
 
-    fetch('/api/v1/rates/current', { cache: 'no-store', signal: controller.signal })
-      .then(r => {
-        if (!r.ok) throw new Error('Not 200');
-        return r.json();
-      })
+    // Fetch live official BCV rate directly from DolarApi first
+    fetch('https://ve.dolarapi.com/v1/dolares/oficial', { cache: 'no-store', signal: controller.signal })
+      .then(r => r.json())
       .then(d => {
         clearTimeout(timeoutId);
         const val = parseRate(d);
-        if (val) setBcvRate(Number(val));
-        else setBcvRate(36.52);
+        if (val && Number(val) > 30) setBcvRate(Number(val));
+        else setBcvRate(748.79);
       })
       .catch(() => {
-        // Fallback: try koda-frontend rate endpoint
-        fetch('/api/tasa/actual', { cache: 'no-store', signal: controller.signal })
+        fetch('/api/v1/rates/current', { cache: 'no-store', signal: controller.signal })
           .then(r => r.json())
           .then(d => {
             clearTimeout(timeoutId);
             const val = parseRate(d);
-            setBcvRate(val ? Number(val) : 36.52);
+            setBcvRate(val && Number(val) > 30 ? Number(val) : 748.79);
           })
           .catch(() => {
             clearTimeout(timeoutId);
-            setBcvRate(36.52);
+            setBcvRate(748.79);
           });
       });
   }, []);
@@ -1988,7 +1985,7 @@ export default function LandingPage() {
                 {[
                   { time:'07:02', msg:'📊 Buenos días. Resumen del día anterior: $12,480 en ventas. 8 facturas emitidas. Cartera CxC activa: $84,200.', accent:null },
                   { time:'09:15', msg:'⚠️ Stock crítico: "Cable UTP Cat6" — 5 unidades restantes (mínimo: 20). Se recomienda generar orden de compra.', accent:'#f59e0b' },
-                  { time:'10:00', msg:'💱 Tasa BCV del día: 1 USD = Bs. 36.52. Actualizado automáticamente en tu sistema KODA.', accent:'#00ffb4' },
+                  { time:'10:00', msg:'💱 Tasa BCV del día: 1 USD = Bs. 748.79. Actualizado automáticamente en tu sistema KODA.', accent:'#00ffb4' },
                   { time:'14:35', msg:'✅ Cobro aplicado: $2,400.00 de Distribuidora ABC, C.A. Saldo CxC actualizado en tiempo real.', accent:'#10b981' },
                 ].map((m, i) => (
                   <div key={i} style={{ display:'flex', flexDirection:'column', gap:3 }}>

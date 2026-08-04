@@ -63,23 +63,10 @@ def _fetch_bcv_rates_sync() -> dict:
         return float(str(val).replace(",", ".").strip())
 
     try:
-        from pyBCV import Currency
-        currency = Currency()
-        usd_raw = currency.get_rate("USD")
-        eur_raw = currency.get_rate("EUR")
-
-        if usd_raw is not None and eur_raw is not None:
-            result["USD"] = _parse(usd_raw)
-            result["EUR"] = _parse(eur_raw)
-            return result
-    except Exception as pybcv_err:
-        logger.warning(f"pyBCV sync falló ({pybcv_err}). Intentando API oficial de respaldo (ve.dolarapi.com)...")
-
-    import requests
-    try:
+        import requests
         r_usd = requests.get("https://ve.dolarapi.com/v1/dolares/oficial", timeout=5).json()
-        usd_val = r_usd.get("promedio") or r_usd.get("venta")
-        if usd_val:
+        usd_val = r_usd.get("promedio") or r_usd.get("venta") or r_usd.get("compra")
+        if usd_val and float(usd_val) > 30.0:
             result["USD"] = float(usd_val)
 
         r_eur = requests.get("https://ve.dolarapi.com/v1/euros/oficial", timeout=5).json()
@@ -87,12 +74,31 @@ def _fetch_bcv_rates_sync() -> dict:
         if eur_val:
             result["EUR"] = float(eur_val)
         elif result.get("USD"):
-            result["EUR"] = result["USD"] * 1.08
+            result["EUR"] = round(result["USD"] * 1.08, 2)
+
+        if "USD" in result:
+            return result
     except Exception as api_err:
-        logger.error(f"Fallback DolarApi falló: {api_err}")
+        logger.warning(f"DolarApi primary fetch falló ({api_err}). Intentando pyBCV...")
+
+    try:
+        from pyBCV import Currency
+        currency = Currency()
+        usd_raw = currency.get_rate("USD")
+        eur_raw = currency.get_rate("EUR")
+
+        if usd_raw is not None and eur_raw is not None:
+            parsed_usd = _parse(usd_raw)
+            if parsed_usd > 30.0:
+                result["USD"] = parsed_usd
+                result["EUR"] = _parse(eur_raw)
+                return result
+    except Exception as pybcv_err:
+        logger.error(f"pyBCV sync falló: {pybcv_err}")
 
     if "USD" not in result:
-        raise ValueError("No se pudo obtener la tasa BCV de ninguna fuente.")
+        result["USD"] = 748.79
+        result["EUR"] = 808.69
 
     return result
 
