@@ -372,6 +372,10 @@ uploads_dir = Path("uploads")
 uploads_dir.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
+facturacion_dist = Path(__file__).resolve().parent.parent.parent / "koda-frontend" / "dist"
+if facturacion_dist.exists():
+    app.mount("/facturacion", StaticFiles(directory=str(facturacion_dist), html=True), name="facturacion")
+
 # INCLUSIÓN DE ROUTERS
 app.include_router(auth_router.router)
 app.include_router(users_router.router)
