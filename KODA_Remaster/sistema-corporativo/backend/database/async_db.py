@@ -48,12 +48,10 @@ async def init_db_pool():
                 logger.info("✅ CONEXIÓN EXITOSA - SISTEMA LISTO 🚀")
                 return
             except Exception as e:
-                logger.error(f"❌ Error: {e}")
+                logger.error(f"❌ Error al conectar BD (intento {attempt + 1}/5): {e}")
                 if attempt == 4:
-                    if "tenant or user" in str(e).lower():
-                        logger.warning(f"⚠️ Warning: No se encontró el tenant o el usuario en la base de datos: {e}. Se permite continuar el inicio de la aplicación.")
-                        return
-                    raise
+                    logger.warning(f"⚠️ Warning: No se pudo inicializar el pool de BD ({e}). Se permite iniciar la aplicación en modo degradado/offline.")
+                    return
                 await asyncio.sleep(1)
  # Reducido a 1s para fallar más rápido si es necesario
 
