@@ -2047,7 +2047,7 @@ async def list_documentos(
     except Exception as e:
         logger.error(f"Error listando correos/documentos: {e}")
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        return []
 
 
 @app.get("/documentos/archivo", dependencies=[Depends(get_tenant_context)])

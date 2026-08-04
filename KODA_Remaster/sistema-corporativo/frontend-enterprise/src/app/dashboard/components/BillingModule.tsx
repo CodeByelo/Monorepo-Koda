@@ -4,14 +4,16 @@ import { CreditCard, ExternalLink, Maximize2 } from "lucide-react";
 
 export default function BillingModule({ darkMode }: { darkMode: boolean }) {
   const token = typeof window !== "undefined" ? localStorage.getItem("sgd_token") : null;
-  const isCloudflare = typeof window !== 'undefined' && window.location.hostname.includes('cloudflare');
+  const isProduction = typeof window !== 'undefined' && (
+    window.location.hostname.includes('vercel.app') ||
+    window.location.hostname.includes('onrender.com') ||
+    window.location.hostname.includes('cloudflare')
+  );
   const isTailscale = typeof window !== 'undefined' && window.location.hostname.includes('.ts.net');
   const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
   
-  let baseUrl = `http://${host}:5174`;
-  if (isCloudflare) {
-    baseUrl = '/facturacion/';
-  } else if (isTailscale) {
+  let baseUrl = isProduction ? '/facturacion/' : `http://${host}:5174`;
+  if (isTailscale) {
     baseUrl = `https://${host}:8443`;
   }
   const billingUrl = token ? `${baseUrl}?token=${token}` : baseUrl;

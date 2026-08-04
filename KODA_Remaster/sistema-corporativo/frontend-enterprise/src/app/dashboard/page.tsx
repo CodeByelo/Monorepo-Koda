@@ -5153,10 +5153,9 @@ export default function Dashboard() {
     if (typeof window !== "undefined") {
       const token = localStorage.getItem("sgd_token");
       const host = window.location.hostname;
-      let baseUrl = `http://${host}:5174`;
-      if (host.includes('cloudflare')) {
-        baseUrl = '/facturacion/';
-      } else if (host.includes('.ts.net')) {
+      const isProduction = host.includes('vercel.app') || host.includes('onrender.com') || host.includes('cloudflare');
+      let baseUrl = isProduction ? '/facturacion/' : `http://${host}:5174`;
+      if (host.includes('.ts.net')) {
         baseUrl = `https://${host}:8443`;
       }
       setBillingUrl(token ? `${baseUrl}?token=${token}` : baseUrl);
