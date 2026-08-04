@@ -8,7 +8,7 @@ const API_BASE_URL =
     process.env.INTERNAL_API_URL ||
     process.env.NEXT_PUBLIC_API_URL ||
     (process.env.NODE_ENV === 'production'
-        ? 'https://corpoelect-backend.onrender.com'
+        ? 'https://monorepo-koda.onrender.com'
         : 'http://127.0.0.1:8000');
 
 function withNoCache(response: NextResponse) {

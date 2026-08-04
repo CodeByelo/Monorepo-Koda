@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 const BACKEND_URL =
-  process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || "https://corpoelect-backend.onrender.com";
+  process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || "https://monorepo-koda.onrender.com";
 
 // POST /api/billing/export — reenvía JSON al backend y devuelve el Excel como stream
 export async function POST(request: Request) {
