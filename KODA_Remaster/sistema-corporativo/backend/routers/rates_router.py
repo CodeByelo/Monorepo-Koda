@@ -51,29 +51,49 @@ def _require_privileged_role(current_user: dict = Depends(get_current_user)) -> 
 
 def _fetch_bcv_rates_sync() -> dict:
     """
-    Llama a pyBCV de forma SÍNCRONA (scraping del portal BCV).
+    Llama a pyBCV o DolarApi Oficial de forma SÍNCRONA.
     Se ejecuta en un ThreadPoolExecutor para no bloquear el event loop.
     Retorna un dict con las tasas: {"USD": float, "EUR": float}
     """
-    from pyBCV import Currency  # import tardío para aislar el módulo síncrono
-
-    currency = Currency()
     result = {}
 
-    usd_raw = currency.get_rate("USD")
-    eur_raw = currency.get_rate("EUR")
-
-    if usd_raw is None or eur_raw is None:
-        raise ValueError("pyBCV retornó None para USD o EUR — el portal BCV puede estar caído.")
-
-    # pyBCV puede devolver strings con comas venezolanas (ej. "36,45") o floats
     def _parse(val) -> float:
         if isinstance(val, (int, float)):
             return float(val)
         return float(str(val).replace(",", ".").strip())
 
-    result["USD"] = _parse(usd_raw)
-    result["EUR"] = _parse(eur_raw)
+    try:
+        from pyBCV import Currency
+        currency = Currency()
+        usd_raw = currency.get_rate("USD")
+        eur_raw = currency.get_rate("EUR")
+
+        if usd_raw is not None and eur_raw is not None:
+            result["USD"] = _parse(usd_raw)
+            result["EUR"] = _parse(eur_raw)
+            return result
+    except Exception as pybcv_err:
+        logger.warning(f"pyBCV sync falló ({pybcv_err}). Intentando API oficial de respaldo (ve.dolarapi.com)...")
+
+    import requests
+    try:
+        r_usd = requests.get("https://ve.dolarapi.com/v1/dolares/oficial", timeout=5).json()
+        usd_val = r_usd.get("promedio") or r_usd.get("venta")
+        if usd_val:
+            result["USD"] = float(usd_val)
+
+        r_eur = requests.get("https://ve.dolarapi.com/v1/euros/oficial", timeout=5).json()
+        eur_val = r_eur.get("promedio") or r_eur.get("venta")
+        if eur_val:
+            result["EUR"] = float(eur_val)
+        elif result.get("USD"):
+            result["EUR"] = result["USD"] * 1.08
+    except Exception as api_err:
+        logger.error(f"Fallback DolarApi falló: {api_err}")
+
+    if "USD" not in result:
+        raise ValueError("No se pudo obtener la tasa BCV de ninguna fuente.")
+
     return result
 
 

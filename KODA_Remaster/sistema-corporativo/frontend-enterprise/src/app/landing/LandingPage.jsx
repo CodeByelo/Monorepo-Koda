@@ -8,7 +8,7 @@ import {
   Building2, Database, Star, Layers, TrendingUp, Activity, Users,
   ShieldCheck, Bell, CreditCard, BarChart3,
   Terminal, Play, RefreshCw, Cpu, Code, ArrowUpRight, Settings, AlertTriangle, Check,
-  Sparkles, Lock, Rocket, Crown
+  Sparkles, Lock, Rocket, Crown, Truck, Scale, Wallet, Receipt
 } from 'lucide-react';
 
 /* ═══════════════════════════════════════════════════════════════
@@ -628,7 +628,7 @@ const Particles = ({ density = 10000 }) => {
     const onMove = (e) => { mouse.current = { x: e.clientX, y: e.clientY }; };
     window.addEventListener('resize', onResize);
     window.addEventListener('mousemove', onMove, { passive: true });
-    const N = Math.min(Math.floor(W * H / density), W < 768 ? 40 : 150);
+    const N = Math.min(Math.floor(W * H / density), W < 768 ? 20 : 45);
     const COLS = ['rgba(0,255,180,', 'rgba(56,189,248,', 'rgba(0,230,160,', 'rgba(7,81,89,'];
     const pts = Array.from({ length: N }, () => ({
       x: Math.random() * W, y: Math.random() * H,
@@ -640,7 +640,7 @@ const Particles = ({ density = 10000 }) => {
       const { x: mx, y: my } = mouse.current;
       pts.forEach(p => {
         const dx = p.x - mx, dy = p.y - my, d = Math.sqrt(dx * dx + dy * dy);
-        if (d < 130) { const f = (130 - d) / 130 * .28; p.vx += dx / d * f; p.vy += dy / d * f; }
+        if (d < 100) { const f = (100 - d) / 100 * .2; p.vx += dx / d * f; p.vy += dy / d * f; }
         p.vx *= .984; p.vy *= .984;
         const sp = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
         if (sp > 2) { p.vx = p.vx / sp * 2; p.vy = p.vy / sp * 2; }
@@ -650,7 +650,7 @@ const Particles = ({ density = 10000 }) => {
         ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
         ctx.fillStyle = p.c + '.65)'; ctx.fill();
       });
-      const MD = W < 768 ? 75 : 115;
+      const MD = W < 768 ? 60 : 85;
       for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) {
         const dx = pts[i].x - pts[j].x, dy = pts[i].y - pts[j].y, d = Math.sqrt(dx*dx+dy*dy);
         if (d < MD) { ctx.beginPath(); ctx.moveTo(pts[i].x,pts[i].y); ctx.lineTo(pts[j].x,pts[j].y); ctx.strokeStyle=`rgba(0,255,180,${(1-d/MD)*.12})`; ctx.lineWidth=.5; ctx.stroke(); }
@@ -777,10 +777,36 @@ const ERPUniverse = ({ mouseX, mouseY }) => {
   const [liveRevenue, setLiveRevenue] = useState(1842650);
 
   useEffect(() => {
-    fetch('/api/v1/rates/current', { cache: 'no-store' })
-      .then(r => r.json())
-      .then(d => { if (d?.USD?.rate) setBcvRate(d.USD.rate); })
-      .catch(() => {});
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
+
+    const parseRate = (d) => d?.USD?.rate || d?.tasa || d?.valor_ves;
+
+    fetch('/api/v1/rates/current', { cache: 'no-store', signal: controller.signal })
+      .then(r => {
+        if (!r.ok) throw new Error('Not 200');
+        return r.json();
+      })
+      .then(d => {
+        clearTimeout(timeoutId);
+        const val = parseRate(d);
+        if (val) setBcvRate(Number(val));
+        else setBcvRate(36.52);
+      })
+      .catch(() => {
+        // Fallback: try koda-frontend rate endpoint
+        fetch('/api/tasa/actual', { cache: 'no-store', signal: controller.signal })
+          .then(r => r.json())
+          .then(d => {
+            clearTimeout(timeoutId);
+            const val = parseRate(d);
+            setBcvRate(val ? Number(val) : 36.52);
+          })
+          .catch(() => {
+            clearTimeout(timeoutId);
+            setBcvRate(36.52);
+          });
+      });
   }, []);
 
   useEffect(() => {
@@ -795,12 +821,13 @@ const ERPUniverse = ({ mouseX, mouseY }) => {
   const ty = (mouseY * 8).toFixed(2);
 
   const nodes = [
-    { id: 'ventas', label: 'Ventas', icon: ShoppingBag, x: '50%', y: '8%', color: '#00ffb4', size: 68, info: 'CxC activas' },
-    { id: 'factura', label: 'Facturación', icon: FileText, x: '82%', y: '30%', color: '#a78bfa', size: 58, info: 'SENIAT OK' },
-    { id: 'tesoreria', label: 'Tesorería', icon: Landmark, x: '85%', y: '65%', color: '#38bdf8', size: 58, info: 'Flujo positivo' },
-    { id: 'contab', label: 'Contabilidad', icon: BookOpen, x: '55%', y: '88%', color: '#f59e0b', size: 58, info: 'Balance OK' },
-    { id: 'compras', label: 'Compras', icon: ShoppingCart, x: '18%', y: '68%', color: '#ec4899', size: 58, info: '12 OC activas' },
-    { id: 'inventario', label: 'Inventario', icon: Package, x: '15%', y: '32%', color: '#0ea5e9', size: 58, info: 'Stock OK' },
+    { id: 'ventas', label: 'Ventas', icon: ShoppingBag, x: '50%', y: '8%', color: '#00ffb4', size: 64, info: 'Órdenes activas' },
+    { id: 'factura', label: 'Facturación', icon: FileText, x: '80%', y: '24%', color: '#a78bfa', size: 56, info: 'SENIAT OK' },
+    { id: 'logistica', label: 'Logística', icon: Truck, x: '86%', y: '52%', color: '#38bdf8', size: 56, info: 'Flota activa' },
+    { id: 'fiscal', label: 'Fiscal', icon: Scale, x: '72%', y: '78%', color: '#f59e0b', size: 56, info: 'IVA/ISLR OK' },
+    { id: 'cobranzas', label: 'Cobranzas', icon: Wallet, x: '28%', y: '78%', color: '#ec4899', size: 56, info: 'CxC al día' },
+    { id: 'inventario', label: 'Inventario', icon: Package, x: '14%', y: '52%', color: '#0ea5e9', size: 56, info: 'Stock OK' },
+    { id: 'compras', label: 'Compras', icon: ShoppingCart, x: '20%', y: '24%', color: '#10b981', size: 56, info: '12 OC activas' },
   ];
 
   const centerX = 50, centerY = 50;
@@ -934,7 +961,7 @@ const ERPUniverse = ({ mouseX, mouseY }) => {
         </div>
 
         {/* SENIAT badge */}
-        <div style={{ position:'absolute', top:'55%', left:'-22%', zIndex:8,
+        <div style={{ position:'absolute', top:'70%', left:'-26%', zIndex:8,
           background:'rgba(2,6,8,.92)', border:'1px solid rgba(167,139,250,.3)',
           borderRadius:14, padding:'.65rem .9rem', backdropFilter:'blur(16px)',
           boxShadow:'0 20px 50px rgba(0,0,0,.5)',
@@ -1293,7 +1320,7 @@ const PlanCard = ({ plan, i, total }) => {
               transition:'all .3s',
               ...(isFeatured ? {} : { borderColor:`rgba(255,255,255,.1)`, color:'#fff', background:'rgba(255,255,255,.02)' }),
             }}>
-            {isFeatured ? 'MOUNT_MODULE_NOW' : 'SELECT_MODULE'}
+            {isFeatured ? 'Comenzar ahora' : 'Seleccionar plan'}
             <ArrowUpRight size={14} style={{ marginLeft:4 }} />
           </MagBtn>
         </div>
@@ -1315,6 +1342,9 @@ const ComplianceMarquee = () => {
     { icon: FileText, text: 'Factura Electrónica', color: '#00ffb4' },
     { icon: BookOpen, text: 'Libro Fiscal', color: '#38bdf8' },
     { icon: Landmark, text: 'Multi-Moneda', color: '#a78bfa' },
+    { icon: Truck, text: 'Logística & Despacho', color: '#0ea5e9' },
+    { icon: Users, text: 'Nómina & RRHH', color: '#c084fc' },
+    { icon: Bell, text: 'Bot de Telegram', color: '#0088cc' },
   ];
   const row2 = [
     { icon: Building2, text: 'Multi-Empresa', color: '#38bdf8' },
@@ -1322,9 +1352,11 @@ const ComplianceMarquee = () => {
     { icon: Layers, text: 'Balance General', color: '#00ffb4' },
     { icon: TrendingUp, text: 'Estado de Resultados', color: '#10b981' },
     { icon: Landmark, text: 'Conciliación Bancaria', color: '#f59e0b' },
+    { icon: Wallet, text: 'Cobranzas CxC', color: '#10b981' },
+    { icon: CreditCard, text: 'Pagos CxP', color: '#f472b6' },
     { icon: Activity, text: 'Auditoría de Logs', color: '#00ffb4' },
     { icon: Database, text: 'Respaldo Nube', color: '#38bdf8' },
-    { icon: FileText, text: 'Retenciones', color: '#a78bfa' },
+    { icon: Scale, text: 'Declaración Fiscal', color: '#f59e0b' },
   ];
 
   return (
@@ -1512,13 +1544,18 @@ export default function LandingPage() {
 
   const mods = [
     { icon:Building2, label:'Gestor Empresarial', desc:'Suite corporativa completa. Dashboard ejecutivo, gestión multi-empresa y control de accesos con auditoría en tiempo real.', accent:'#00ffb4', size:'featured', badge:'Core', bullets:['Gestión multi-empresa y multi-sucursal','Dashboard ejecutivo con KPIs en vivo','Control granular de roles y permisos','Auditoría completa de actividad'] },
-    { icon:ShoppingBag, label:'Ventas', desc:'Cotizaciones, órdenes y seguimiento comercial integrado.', accent:'#38bdf8', size:'normal', delay:80, miniChart:[55,70,48,85,60,92,75,88] },
-    { icon:FileText, label:'Facturación', desc:'Emisión fiscal conforme al SENIAT. IVA, IGTF e ISLR.', accent:'#a78bfa', size:'wide', badge:'SENIAT', delay:140 },
-    { icon:ShoppingCart, label:'Compras', desc:'Proveedores, órdenes y aprobaciones en un flujo unificado.', accent:'#f59e0b', size:'normal', delay:100, miniChart:[40,58,35,72,55,68,45,80] },
-    { icon:Package, label:'Inventario', desc:'Stock, kardex, trazabilidad y toma física digital.', accent:'#ec4899', size:'normal', delay:180, miniChart:[65,78,52,88,70,83,60,91] },
-    { icon:Landmark, label:'Tesorería', desc:'Flujo de caja, bancos y conciliación automática.', accent:'#00ffb4', size:'normal', delay:220, miniChart:[48,62,55,78,52,85,68,74] },
-    { icon:BookOpen, label:'Contabilidad', desc:'Asientos, estados financieros y cierre contable.', accent:'#38bdf8', size:'normal', delay:260, miniChart:[58,72,45,82,67,90,75,86] },
-    { icon:PieChart, label:'Reportes & BI', desc:'Business Intelligence y exportación de datos.', accent:'#a78bfa', size:'normal', delay:300, miniChart:[62,75,58,88,72,95,80,92] },
+    { icon:ShoppingBag, label:'Ventas', desc:'Cotizaciones, órdenes, notas de entrega y listas de precios integradas.', accent:'#38bdf8', size:'normal', delay:80, miniChart:[55,70,48,85,60,92,75,88] },
+    { icon:FileText, label:'Facturación', desc:'Emisión fiscal conforme al SENIAT. IVA, IGTF e ISLR. POS integrado.', accent:'#a78bfa', size:'wide', badge:'SENIAT', delay:140 },
+    { icon:ShoppingCart, label:'Compras', desc:'Proveedores, órdenes, aprobaciones y recepción en un flujo unificado.', accent:'#f59e0b', size:'normal', delay:100, miniChart:[40,58,35,72,55,68,45,80] },
+    { icon:Package, label:'Inventario', desc:'Stock, kardex, trazabilidad, almacenes y toma física digital.', accent:'#ec4899', size:'normal', delay:180, miniChart:[65,78,52,88,70,83,60,91] },
+    { icon:Truck, label:'Logística', desc:'Tablero de despacho, planificación Gantt, flota de vehículos y choferes.', accent:'#0ea5e9', size:'normal', delay:200, miniChart:[42,60,38,72,58,80,65,78] },
+    { icon:Wallet, label:'Cobranzas', desc:'Cartera CxC, aplicación de cobros, antigüedad de saldos y flujo de caja.', accent:'#10b981', size:'normal', delay:220, miniChart:[50,68,44,80,62,88,72,84] },
+    { icon:CreditCard, label:'Pagos', desc:'Cartera CxP, órdenes de pago, lotes y programación de egresos.', accent:'#f472b6', size:'normal', delay:240, miniChart:[38,55,42,68,52,75,60,72] },
+    { icon:Landmark, label:'Tesorería', desc:'Posición consolidada, bancos, conciliación, caja chica y préstamos UVC.', accent:'#00ffb4', size:'normal', delay:260, miniChart:[48,62,55,78,52,85,68,74] },
+    { icon:Scale, label:'Fiscal', desc:'Libros de ventas y compras, IVA, IGTF, ISLR, calendario fiscal y ARC.', accent:'#f59e0b', size:'normal', badge:'SENIAT', delay:280, miniChart:[55,68,50,80,65,88,75,82] },
+    { icon:BookOpen, label:'Contabilidad', desc:'Asientos, libro diario/mayor, estados financieros y cierre contable.', accent:'#38bdf8', size:'normal', delay:300, miniChart:[58,72,45,82,67,90,75,86] },
+    { icon:Users, label:'Nómina', desc:'Control de personal, cálculo de nómina y gestión de recursos humanos.', accent:'#c084fc', size:'normal', delay:320, miniChart:[45,60,52,74,58,80,68,76] },
+    { icon:PieChart, label:'Reportes & BI', desc:'Business Intelligence, exportación de datos y auditoría de excepciones.', accent:'#a78bfa', size:'normal', delay:340, miniChart:[62,75,58,88,72,95,80,92] },
   ];
 
   if (!booted) {
@@ -1560,9 +1597,9 @@ export default function LandingPage() {
           </div>
         </div>
         <div className="lp-navlinks" style={{ display:'flex',alignItems:'center',gap:'2.25rem' }}>
-          {['#modulos','#caracteristicas','#cumplimiento','#planes'].map((h,i)=>(
-            <a key={h} href={h} className="lp-navlink">{['Módulos','Características','Cumplimiento','Planes'][i]}</a>
-          ))}
+          {['#modulos','#caracteristicas','#cumplimiento','#planes'].map((h,i)=>
+            <a key={h} href={h} className="lp-navlink">{['Módulos','Características','Cumplimiento Fiscal','Planes'][i]}</a>
+          )}
         </div>
         <div style={{ display:'flex',alignItems:'center',gap:'.75rem' }}>
           <div style={{ display:'flex',alignItems:'center',gap:5,padding:'5px 12px',borderRadius:20,background:'rgba(0,255,180,.07)',border:'1px solid rgba(0,255,180,.18)',fontSize:11,color:'#00ffb4',fontWeight:700,letterSpacing:'.04em',fontFamily:"'Space Mono',monospace" }}>
@@ -1622,9 +1659,9 @@ export default function LandingPage() {
       <section style={{ background:'rgba(0,255,180,.02)',borderTop:'1px solid rgba(0,255,180,.08)',borderBottom:'1px solid rgba(0,255,180,.08)',padding:'3.5rem clamp(1.5rem,5vw,4rem)' }}>
         <div className="lp-stats" style={{ maxWidth:1200,margin:'0 auto',display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'1.5rem',alignItems:'stretch' }}>
           {[
-            {label:'Módulos Integrados', target:12, suffix:'+', icon:Layers},
+            {label:'Módulos Integrados', target:15, suffix:'+', icon:Layers},
             {label:'Uptime Garantizado', target:99, suffix:'.9%', icon:Activity},
-            {label:'Procesos Automáticos', target:48, suffix:'+', icon:Zap},
+            {label:'Procesos Automáticos', target:60, suffix:'+', icon:Zap},
             {label:'Configuración', static:'Multi-Empresa', icon:Building2},
           ].map(({label,target,suffix,static:st,icon:I},i)=>(
             <Reveal key={label} delay={i*80} style={{ height:'100%',display:'flex',flexDirection:'column' }}>
@@ -1710,6 +1747,60 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ═══════════════════════ QUÉ ES KODA / SAAS ═══════════════════════ */}
+      <section style={{ padding:'clamp(4rem,8vw,8rem) clamp(1.5rem,5vw,4rem)', borderTop:'1px solid rgba(255,255,255,.04)', position:'relative', overflow:'hidden' }}>
+        <div style={{ position:'absolute', top:'50%', left:'50%', transform:'translate(-50%,-50%)', width:'65vw', height:'60vh', background:'radial-gradient(ellipse,rgba(56,189,248,.04) 0%,transparent 70%)', pointerEvents:'none', filter:'blur(70px)' }} />
+        <div style={{ maxWidth:1220, margin:'0 auto', position:'relative', zIndex:2 }}>
+          <Reveal>
+            <div style={{ textAlign:'center', marginBottom:'3.5rem' }}>
+              <Label icon={Sparkles} text="Software como Servicio · SaaS" color="#38bdf8" bg="rgba(56,189,248,.07)" border="rgba(56,189,248,.2)" />
+              <SectionH line1="KODA no es un programa." line2grad="Es tu empresa operando sola." />
+              <p style={{ color:'rgba(255,255,255,.38)', fontSize:'1.02rem', maxWidth:720, margin:'0 auto', lineHeight:1.78 }}>
+                KODA es una plataforma <strong style={{ color:'rgba(56,189,248,.85)', fontWeight:700 }}>SaaS (Software como Servicio)</strong>: accedes desde el navegador, sin instalaciones ni servidores propios. Pagas una suscripción mensual y obtienes el sistema completo, actualizado y respaldado automáticamente — como contratar un equipo experto en contabilidad, logística y finanzas, todo integrado en un solo software.
+              </p>
+            </div>
+          </Reveal>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(210px,1fr))', gap:'1.1rem', marginBottom:'3rem' }}>
+            {[
+              { icon:Globe, title:'Acceso desde cualquier lugar', desc:'Solo necesitas un navegador. Funciona en computadora, tablet y celular. Sin instalación ni configuración.', color:'#38bdf8', tag:'CLOUD_NATIVE' },
+              { icon:RefreshCw, title:'Siempre actualizado', desc:'Cada nueva funcionalidad llega automáticamente. Tu sistema crece contigo sin esfuerzo adicional.', color:'#00ffb4', tag:'AUTO_UPDATE' },
+              { icon:Shield, title:'Datos seguros en la nube', desc:'Cifrado SSL, respaldo diario automático y 99.9% de disponibilidad garantizada.', color:'#a78bfa', tag:'SEC_LEVEL_3' },
+              { icon:Zap, title:'Un plan. Todo incluido.', desc:'Sin licencias por módulo. Sin costos ocultos. Una sola suscripción para toda la suite completa.', color:'#f59e0b', tag:'FLAT_RATE' },
+            ].map(({ icon:I, title, desc, color, tag }, idx) => (
+              <Reveal key={title} delay={idx * 80}>
+                <div style={{ background:'rgba(4,14,16,.72)', border:`1px solid ${color}14`, borderRadius:20, padding:'1.75rem', backdropFilter:'blur(14px)', height:'100%', position:'relative', overflow:'hidden', transition:'border-color .3s, transform .2s ease' }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor=`${color}38`; e.currentTarget.style.transform='translateY(-5px)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor=`${color}14`; e.currentTarget.style.transform='translateY(0)'; }}
+                >
+                  <div style={{ position:'absolute', top:10, right:12, fontSize:8, fontFamily:"'Space Mono',monospace", color:`${color}45`, letterSpacing:'.08em' }}>{tag}</div>
+                  <div style={{ width:44, height:44, borderRadius:12, background:`${color}10`, border:`1px solid ${color}28`, display:'flex', alignItems:'center', justifyContent:'center', marginBottom:'1.1rem', boxShadow:`0 0 20px ${color}12` }}>
+                    <I size={19} color={color} />
+                  </div>
+                  <h3 style={{ color:'#fff', fontSize:'.92rem', fontWeight:800, marginBottom:'.4rem', letterSpacing:'-.01em' }}>{title}</h3>
+                  <p style={{ color:'rgba(255,255,255,.34)', fontSize:'.77rem', lineHeight:1.55 }}>{desc}</p>
+                </div>
+              </Reveal>
+            ))}
+          </div>
+          <Reveal delay={120}>
+            <div style={{ background:'rgba(3,10,12,.82)', border:'1px solid rgba(0,255,180,.1)', borderRadius:22, padding:'2rem 2.5rem', backdropFilter:'blur(20px)' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:'1.25rem' }}>
+                <div style={{ width:6, height:6, borderRadius:'50%', background:'#00ffb4', boxShadow:'0 0 8px #00ffb4', animation:'lp-ping 1.8s ease infinite' }} />
+                <span style={{ fontSize:10, fontWeight:800, color:'rgba(0,255,180,.6)', textTransform:'uppercase', letterSpacing:'.14em', fontFamily:"'Space Mono',monospace" }}>Con KODA gestionas todo desde un solo lugar</span>
+              </div>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:'.6rem' }}>
+                {['Ventas & Cotizaciones','Facturación Fiscal SENIAT','Compras & Proveedores','Inventario & Almacenes','Logística & Despacho','Cobranzas CxC','Pagos CxP','Tesorería & Bancos','Módulo Fiscal IVA/ISLR/IGTF','Contabilidad Completa','Nómina & RRHH','Reportes & BI'].map(item => (
+                  <span key={item} style={{ padding:'5px 13px', borderRadius:50, background:'rgba(0,255,180,.06)', border:'1px solid rgba(0,255,180,.14)', fontSize:11, fontWeight:700, color:'rgba(0,255,180,.7)', letterSpacing:'.04em', display:'inline-flex', alignItems:'center', gap:5 }}>
+                    <CheckCircle size={9} color="#00ffb4" style={{ flexShrink:0 }} />
+                    {item}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </Reveal>
+        </div>
+      </section>
+
       {/* ═══════════════════════ MODULES BENTO ═══════════════════════ */}
       <section id="modulos" style={{ padding:'clamp(4rem,8vw,8rem) clamp(1.5rem,5vw,4rem)',borderTop:'1px solid rgba(255,255,255,.04)' }}>
         <div style={{ maxWidth:1340,margin:'0 auto' }}>
@@ -1731,6 +1822,11 @@ export default function LandingPage() {
             <ModCard {...mods[5]} />
             <ModCard {...mods[6]} />
             <ModCard {...mods[7]} />
+            <ModCard {...mods[8]} />
+            <ModCard {...mods[9]} />
+            <ModCard {...mods[10]} />
+            <ModCard {...mods[11]} />
+            <ModCard {...mods[12]} />
           </div>
         </div>
       </section>
@@ -1859,6 +1955,53 @@ export default function LandingPage() {
                 {['Diario ✓','Mayor ✓','SENIAT ✓'].map(t=>(
                   <div key={t} style={{ padding:'.45rem',textAlign:'center',fontSize:10,fontWeight:800,color:'rgba(56,189,248,.7)',background:'rgba(56,189,248,.05)',border:'1px solid rgba(56,189,248,.12)',borderRadius:9,letterSpacing:'.06em',fontFamily:"'Space Mono',monospace" }}>{t}</div>
                 ))}
+              </div>
+            </div>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* ═══════════════════════ TELEGRAM INTEGRATION ═══════════════════════ */}
+      <section style={{ padding:'clamp(4rem,8vw,8rem) clamp(1.5rem,5vw,4rem)', borderTop:'1px solid rgba(255,255,255,.04)' }}>
+        <div className="lp-feat-grid" style={{ maxWidth:1220, margin:'0 auto', display:'grid', gridTemplateColumns:'1fr 1fr', gap:'5rem', alignItems:'center' }}>
+          <Reveal dir="left">
+            <div>
+              <Label icon={Bell} text="Notificaciones Inteligentes" color="#0ea5e9" bg="rgba(14,165,233,.07)" border="rgba(14,165,233,.2)" />
+              <SectionH line1="Tu empresa habla" line2grad="directo a tu Telegram." size="clamp(1.9rem,3.5vw,3.2rem)" />
+              <p style={{ color:'rgba(255,255,255,.42)', lineHeight:1.8, marginBottom:'2rem' }}>KODA se conecta con tu canal de Telegram para enviarte alertas automáticas sin que tengas que abrir el sistema. Desde reportes diarios hasta alertas críticas en tiempo real — tu negocio siempre en tu bolsillo.</p>
+              <CheckList accent="#0ea5e9" items={['Alerta inmediata cuando el stock cae bajo el mínimo','Tasa BCV del día directo a tu chat cada mañana','Notificación de facturas emitidas y cobros aplicados','Alertas de vencimiento de obligaciones fiscales','Resumen diario de ventas, cobranzas y pagos','Aviso de pagos programados por ejecutar']} />
+            </div>
+          </Reveal>
+          <Reveal dir="right" delay={180} className="lp-feat-r">
+            <div style={{ background:'rgba(3,10,12,.85)', border:'1px solid rgba(14,165,233,.18)', borderRadius:24, padding:'1.75rem', backdropFilter:'blur(20px)', boxShadow:'0 48px 96px rgba(0,0,0,.45),0 0 60px rgba(14,165,233,.04)' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:'1.25rem', paddingBottom:'1rem', borderBottom:'1px solid rgba(14,165,233,.08)' }}>
+                <div style={{ width:36, height:36, borderRadius:'50%', background:'linear-gradient(135deg,#0088cc,#00aaee)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow:'0 0 18px rgba(0,136,204,.4)' }}>
+                  <Bell size={16} color="#fff" />
+                </div>
+                <div>
+                  <div style={{ fontSize:'.88rem', fontWeight:800, color:'#fff' }}>KODA Bot</div>
+                  <div style={{ fontSize:'.72rem', color:'#0ea5e9', fontWeight:600 }}>● En línea</div>
+                </div>
+                <div style={{ marginLeft:'auto', padding:'3px 10px', borderRadius:20, background:'rgba(0,255,180,.08)', border:'1px solid rgba(0,255,180,.22)', fontSize:9, fontWeight:800, color:'#00ffb4', fontFamily:"'Space Mono',monospace" }}>EN VIVO</div>
+              </div>
+              <div style={{ display:'flex', flexDirection:'column', gap:'.85rem' }}>
+                {[
+                  { time:'07:02', msg:'📊 Buenos días. Resumen del día anterior: $12,480 en ventas. 8 facturas emitidas. Cartera CxC activa: $84,200.', accent:null },
+                  { time:'09:15', msg:'⚠️ Stock crítico: "Cable UTP Cat6" — 5 unidades restantes (mínimo: 20). Se recomienda generar orden de compra.', accent:'#f59e0b' },
+                  { time:'10:00', msg:'💱 Tasa BCV del día: 1 USD = Bs. 36.52. Actualizado automáticamente en tu sistema KODA.', accent:'#00ffb4' },
+                  { time:'14:35', msg:'✅ Cobro aplicado: $2,400.00 de Distribuidora ABC, C.A. Saldo CxC actualizado en tiempo real.', accent:'#10b981' },
+                ].map((m, i) => (
+                  <div key={i} style={{ display:'flex', flexDirection:'column', gap:3 }}>
+                    <span style={{ fontSize:9, color:'rgba(255,255,255,.22)', marginLeft:4, fontFamily:"'Space Mono',monospace" }}>{m.time}</span>
+                    <div style={{ padding:'.7rem .9rem', borderRadius:'4px 14px 14px 14px', background: m.accent ? `${m.accent}08` : 'rgba(255,255,255,.04)', border: m.accent ? `1px solid ${m.accent}22` : '1px solid rgba(255,255,255,.05)', fontSize:'.78rem', color:'rgba(255,255,255,.68)', lineHeight:1.5 }}>
+                      {m.msg}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ marginTop:'1.25rem', padding:'.65rem 1rem', borderRadius:12, background:'rgba(14,165,233,.05)', border:'1px solid rgba(14,165,233,.15)', display:'flex', alignItems:'center', gap:6, fontSize:10, color:'rgba(14,165,233,.65)', fontFamily:"'Space Mono',monospace", fontWeight:700 }}>
+                <div style={{ width:5, height:5, borderRadius:'50%', background:'#0ea5e9', boxShadow:'0 0 6px #0ea5e9' }} />
+                Configurable en Configuración › Bot de Telegram
               </div>
             </div>
           </Reveal>
