@@ -138,6 +138,7 @@ async def rate_limit_middleware(request: Request, call_next):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=r"^https://([a-zA-Z0-9-]+)\.(vercel\.app|onrender\.com)$",
     allow_credentials=True,
     allow_methods=["*"],  # Permitir todos los métodos (GET, POST, PUT, DELETE, etc.)
     allow_headers=["*"],  # Permitir todos los encabezados

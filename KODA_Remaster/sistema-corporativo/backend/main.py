@@ -242,12 +242,11 @@ async def add_observability_context(request: Request, call_next):
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers["X-Frame-Options"] = "ALLOWALL"
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-    response.headers.setdefault(
-        "Content-Security-Policy",
-        "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com; frame-ancestors 'self';"
+    response.headers["Content-Security-Policy"] = (
+        "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com; frame-ancestors 'self' https://*.vercel.app https://*.onrender.com;"
     )
     if os.getenv("NODE_ENV", "").lower() == "production":
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
@@ -276,13 +275,17 @@ origins = [
     "http://10.0.2.15:3000",
     "http://10.0.2.15:8000",
     "https://koda-remaster.vercel.app",
-    "https://sistema-corpoelect-backend.onrender.com"
+    "https://koda-billing-front.vercel.app",
+    "https://monorepo-koda.vercel.app",
+    "https://sistema-corpoelect-backend.onrender.com",
+    "https://koda-backend-contable.onrender.com",
+    "https://monorepo-koda.onrender.com"
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_origin_regex=r"^https://(koda-remaster|sistema-corpoelect)(-[a-zA-Z0-9-]+)?\.vercel\.app$",
+    allow_origin_regex=r"^https://([a-zA-Z0-9-]+)\.(vercel\.app|onrender\.com)$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
