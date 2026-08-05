@@ -402,6 +402,51 @@ app.include_router(telegram_router.router)
 from routers import rates_router
 app.include_router(rates_router.router)
 
+# Routers extendidos de koda-frontend (logística, ventas, inventario, tesorería, etc.)
+try:
+    import sys
+    koda_fe_dir = Path(__file__).resolve().parent.parent.parent.parent / "koda-frontend"
+    if koda_fe_dir.exists() and str(koda_fe_dir) not in sys.path:
+        sys.path.insert(0, str(koda_fe_dir))
+
+    from backend.routers import (
+        logistica as fe_logistica,
+        sales as fe_sales,
+        fiscal as fe_fiscal,
+        audit as fe_audit,
+        inventory as fe_inventory,
+        accounting as fe_accounting,
+        hr as fe_hr,
+        productos as fe_productos,
+        entidades as fe_entidades,
+        pagos as fe_pagos,
+        reportes as fe_reportes,
+        payroll as fe_payroll,
+        tesoreria as fe_tesoreria,
+        forense as fe_forense,
+        modulos_ext as fe_modulos_ext,
+        contabilidad_ext as fe_contabilidad_ext,
+        admin_ext as fe_admin_ext,
+        fiscal_ext as fe_fiscal_ext,
+        extras_ext as fe_extras_ext,
+    )
+    for fe_module in [
+        fe_logistica, fe_sales, fe_fiscal, fe_audit, fe_inventory,
+        fe_accounting, fe_hr, fe_productos, fe_entidades, fe_pagos,
+        fe_reportes, fe_payroll, fe_tesoreria, fe_forense,
+        fe_contabilidad_ext, fe_admin_ext, fe_fiscal_ext, fe_extras_ext
+    ]:
+        if hasattr(fe_module, "router"):
+            app.include_router(fe_module.router)
+
+    if hasattr(fe_modulos_ext, "ventas_ext_router"):
+        app.include_router(fe_modulos_ext.ventas_ext_router)
+    if hasattr(fe_modulos_ext, "inventario_ext_router"):
+        app.include_router(fe_modulos_ext.inventario_ext_router)
+    print("✅ Routers de koda-frontend registrados exitosamente en FastAPI")
+except Exception as fe_err:
+    print(f"⚠️ Aviso al incluir routers de koda-frontend: {fe_err}")
+
 print("\n📋 RUTAS REGISTRADAS EN FASTAPI:")
 for route in app.routes:
     if hasattr(route, 'methods'):

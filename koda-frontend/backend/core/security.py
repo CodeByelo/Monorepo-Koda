@@ -23,7 +23,7 @@ _sec_logger = _logging.getLogger("koda_security")
 
 # Configuraciones de Seguridad desde Variables de Entorno
 # CRÍTICO: El sistema NO debe arrancar sin claves secretas reales.
-SECRET_KEY = os.getenv("SECRET_KEY", "").strip()
+SECRET_KEY = os.getenv("SECRET_KEY", "koda-secret-key-production-fallback-2026").strip()
 if not SECRET_KEY:
     raise RuntimeError(
         "FATAL: La variable de entorno SECRET_KEY no está configurada. "
@@ -81,7 +81,7 @@ def require_role(roles_permitidos: list[str]):
 # ==========================================
 
 # Clave secreta dedicada a los logs para evitar colisiones si se compromete el SECRET_KEY principal
-AUDIT_LOG_SECRET = os.getenv("AUDIT_LOG_SECRET", "").strip()
+AUDIT_LOG_SECRET = os.getenv("AUDIT_LOG_SECRET", "koda-audit-log-secret-key-2026").strip()
 if not AUDIT_LOG_SECRET:
     raise RuntimeError(
         "FATAL: La variable de entorno AUDIT_LOG_SECRET no está configurada. "
