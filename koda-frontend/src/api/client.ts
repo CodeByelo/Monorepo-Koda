@@ -1,7 +1,9 @@
 export let BASE_URL = (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_API_URL) || (
-  typeof window !== 'undefined' && (window.location.hostname.includes('cloudflare') || window.location.hostname.includes('.ts.net'))
-    ? '/api-facturacion'
-    : '/api'
+  typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')
+    ? 'https://monorepo-koda.onrender.com/api'
+    : (typeof window !== 'undefined' && (window.location.hostname.includes('cloudflare') || window.location.hostname.includes('.ts.net'))
+        ? '/api-facturacion'
+        : '/api')
 );
 
 if (BASE_URL && !BASE_URL.startsWith('http://') && !BASE_URL.startsWith('https://') && !BASE_URL.startsWith('/')) {
