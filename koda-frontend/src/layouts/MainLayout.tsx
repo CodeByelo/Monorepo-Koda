@@ -74,10 +74,9 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   return (
     <div className="flex min-h-screen bg-koda-bg print:bg-white print:block">
       <SessionGuard />
-      {!isIframe && <Sidebar isOpen={isSidebarOpen} />}
+      <Sidebar isOpen={isSidebarOpen} />
       <main className="flex-1 flex flex-col min-w-0 print:block">
-        {!isIframe && (
-          <header className="print:hidden h-14 bg-white border-b border-slate-200 flex items-center justify-between px-8 sticky top-0 z-40">
+        <header className="print:hidden h-14 bg-white border-b border-slate-200 flex items-center justify-between px-8 sticky top-0 z-40">
             <div className="flex items-center gap-4">
             <button 
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -108,8 +107,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
             )}
           </div>
         </header>
-        )}
-        <div className={`flex-1 overflow-y-auto no-scrollbar ${!isIframe ? 'p-6' : 'p-0'} print:p-0 print:overflow-visible`}>
+        <div className="flex-1 overflow-y-auto no-scrollbar p-6 print:p-0 print:overflow-visible">
           <div key={location.pathname} className="animate-page-transition h-full">
             {children}
           </div>
