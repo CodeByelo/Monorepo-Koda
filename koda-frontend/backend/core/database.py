@@ -17,6 +17,10 @@ if not DATABASE_URL or not DATABASE_URL.startswith("postgresql"):
     print(f"\033[91m[DB ERROR] Se requiere una conexión obligatoria a PostgreSQL/Supabase. URL detectada: {DATABASE_URL}\033[0m")
     raise ValueError("DATABASE_URL debe estar configurada en el .env y apuntar a PostgreSQL.")
 
+if DATABASE_URL:
+    import re
+    DATABASE_URL = re.sub(r'[?&]pgbouncer=(true|false)', '', DATABASE_URL, flags=re.IGNORECASE)
+
 # Asegurarse de que la cadena de conexión incluya el parámetro para forzar el esquema 'public'
 if "?" in DATABASE_URL:
     if "options=-csearch_path=" not in DATABASE_URL:
