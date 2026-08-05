@@ -1,6 +1,6 @@
 export let BASE_URL = (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_API_URL) || (
   typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')
-    ? 'https://monorepo-koda.onrender.com/api'
+    ? 'https://koda-backend-contable.onrender.com'
     : (typeof window !== 'undefined' && (window.location.hostname.includes('cloudflare') || window.location.hostname.includes('.ts.net'))
         ? '/api-facturacion'
         : '/api')
