@@ -372,8 +372,14 @@ uploads_dir = Path("uploads")
 uploads_dir.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
-facturacion_dist = Path(__file__).resolve().parent.parent.parent / "koda-frontend" / "dist"
-if facturacion_dist.exists():
+facturacion_dist_candidates = [
+    Path(__file__).resolve().parent.parent.parent.parent / "koda-frontend" / "dist",
+    Path(__file__).resolve().parent.parent.parent / "koda-frontend" / "dist",
+    Path("koda-frontend/dist"),
+    Path("../koda-frontend/dist"),
+]
+facturacion_dist = next((p for p in facturacion_dist_candidates if p.exists()), None)
+if facturacion_dist:
     app.mount("/facturacion", StaticFiles(directory=str(facturacion_dist), html=True), name="facturacion")
 
 # INCLUSIÓN DE ROUTERS
