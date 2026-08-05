@@ -576,11 +576,18 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 };
 
 function App() {
+  const getBasename = () => {
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/facturacion')) {
+      return '/facturacion';
+    }
+    return undefined;
+  };
+
   return (
     <AuthProvider>
       <SecurityProtector>
         <SystemProvider>
-        <Router basename="/facturacion" future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <Router basename={getBasename()} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
           <Route path="/auditoria/ledger" element={
             <Suspense fallback={<PageLoader />}>
