@@ -668,13 +668,13 @@ def cobranzas_kpis(db: Session = Depends(get_db), current_user = Depends(get_cur
     ).scalar() or 0
     vencido = db.query(func.sum(CuentaPorCobrar.monto_total_usd - CuentaPorCobrar.monto_pagado_usd)).filter(
         CuentaPorCobrar.estado != "PAGADA",
-        CuentaPorCobrar.fecha_vencimiento < datetime.now(timezone.utc),
+        CuentaPorCobrar.fecha_vencimiento < datetime.utcnow(),
         CuentaPorCobrar.tenant_id == current_user.tenant_id
     ).scalar() or 0
     
     clientes_mora = db.query(CuentaPorCobrar.cliente_id).filter(
         CuentaPorCobrar.estado != "PAGADA",
-        CuentaPorCobrar.fecha_vencimiento < datetime.now(timezone.utc),
+        CuentaPorCobrar.fecha_vencimiento < datetime.utcnow(),
         CuentaPorCobrar.tenant_id == current_user.tenant_id
     ).distinct().count()
 
@@ -691,7 +691,7 @@ def facturas_criticas(db: Session = Depends(get_db), current_user = Depends(get_
     _sync_cxc_desde_ventas(db, current_user.tenant_id)
     rows = db.query(CuentaPorCobrar).filter(
         CuentaPorCobrar.estado != "PAGADA",
-        CuentaPorCobrar.fecha_vencimiento < datetime.now(timezone.utc),
+        CuentaPorCobrar.fecha_vencimiento < datetime.utcnow(),
         CuentaPorCobrar.tenant_id == current_user.tenant_id
     ).limit(10).all()
     return [{

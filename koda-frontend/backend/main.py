@@ -229,16 +229,31 @@ async def add_security_headers(request: Request, call_next):
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return response
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    import traceback
+    traceback.print_exc()
+    from fastapi.responses import JSONResponse
+    response = JSONResponse(
+        status_code=500,
+        content={"detail": f"Error interno en el servidor: {str(exc)}"},
+    )
+    origin = request.headers.get("origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
+
 # Routers del núcleo (ventas, inventario, maestros)
 app.include_router(auth.router)
 app.include_router(rates.router)
-app.include_router(modulos_ext.ventas_ext_router)
 app.include_router(sales.router)
+app.include_router(modulos_ext.ventas_ext_router)
+app.include_router(inventory.router)
+app.include_router(modulos_ext.inventario_ext_router)
 app.include_router(fiscal.router)
 app.include_router(audit.router)
 app.include_router(fiscal_ext.router)
-app.include_router(modulos_ext.inventario_ext_router)
-app.include_router(inventory.router)
 app.include_router(accounting_router.router)
 app.include_router(contabilidad_ext.router)
 app.include_router(hr_router.router)
@@ -267,6 +282,7 @@ app.include_router(payroll.router, prefix="/api")
 app.include_router(facturacion.router)
 # Módulo Logística (Flota, Choferes, Turnos de Despacho, Mantenimiento)
 app.include_router(logistica_router.router)
+app.include_router(logistica_router.router, prefix="/logistica")
 # Búnker Forense — trazabilidad inmutable de entidades del sistema
 app.include_router(forense.router)
 # Telemetría Omniscience

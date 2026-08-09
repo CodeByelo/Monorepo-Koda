@@ -36,7 +36,9 @@ def ventas_periodo(db: Session, periodo: Optional[str] = None):
 
 def tasa_actual(db: Session) -> float:
     tasa = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
-    return float(tasa.valor_ves) if tasa else 36.52
+    if tasa and getattr(tasa, "valor_ves", None):
+        return to_float(tasa.valor_ves) or 36.52
+    return 36.52
 
 
 def margen_bruto_pct(db: Session) -> float:

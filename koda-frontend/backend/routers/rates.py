@@ -37,6 +37,8 @@ def get_tasas(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), cu
     return tasas
 
 @router.get("/actual")
+@router.get("/bcv")
+@router.get("/tasas/bcv")
 def get_tasa_actual(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     """
     Endpoint público para obtener la tasa de cambio activa más reciente.
