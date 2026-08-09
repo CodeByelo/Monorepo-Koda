@@ -19,12 +19,19 @@ def is_token_blacklisted(jti: str) -> bool:
     """Verifica si el identificador único del token (JTI) está en la lista negra."""
     if not jti:
         return False
-    return redis_client.exists(f"blacklist:{jti}") > 0
+    try:
+        return redis_client.exists(f"blacklist:{jti}") > 0
+    except Exception as e:
+        logger.warning("Redis not available for token blacklist check: %s", str(e))
+        return False
 
 def blacklist_token(jti: str, expires_in_seconds: int):
     """Añade el token a la lista negra hasta que expire naturalmente."""
     if jti and expires_in_seconds > 0:
-        redis_client.setex(f"blacklist:{jti}", expires_in_seconds, "revoked")
+        try:
+            redis_client.setex(f"blacklist:{jti}", expires_in_seconds, "revoked")
+        except Exception as e:
+            logger.warning("Redis not available for blacklisting token: %s", str(e))
 
 def get_current_user_from_token(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> Profile:
     credentials_exception = HTTPException(
@@ -39,18 +46,23 @@ def get_current_user_from_token(token: str = Depends(oauth2_scheme), db: Session
         jti = payload.get("jti")  # Identificador único del JWT
 
         # 1. Verificar Redis Blacklist (JTI, User Level, Tenant Level)
-        if is_token_blacklisted(jti) or redis_client.exists(f"blacklist:user:{user_id}"):
-            logger.warning("Token is blacklisted. jti: %s | user_id: %s", jti, user_id)
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token revocado o sesión cerrada.",
-            )
-        if tenant_id and redis_client.exists(f"blacklist:tenant:{tenant_id}"):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="El acceso para esta empresa ha sido suspendido temporalmente.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+        try:
+            if is_token_blacklisted(jti) or (user_id and redis_client.exists(f"blacklist:user:{user_id}")):
+                logger.warning("Token is blacklisted. jti: %s | user_id: %s", jti, user_id)
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Token revocado o sesión cerrada.",
+                )
+            if tenant_id and redis_client.exists(f"blacklist:tenant:{tenant_id}"):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="El acceso para esta empresa ha sido suspendido temporalmente.",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning("Redis connection error in get_current_user_from_token: %s", str(e))
 
         if not user_id:
             logger.warning("Missing user_id in token payload")
