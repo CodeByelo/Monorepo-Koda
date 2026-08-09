@@ -278,6 +278,13 @@ def listar_ventas(
     return db.query(Venta).options(joinedload(Venta.cliente)).order_by(Venta.fecha.desc()).all()
 
 
+RESERVED_VENTAS_SUBPATHS = {
+    "cotizaciones", "ordenes", "notas-entrega", "notas-credito",
+    "facturar", "clientes", "reporte", "pos", "documentos", "precios",
+    "entregas", "cuentas", "historial", "dashboard", "analisis-costos",
+    "requisiciones", "aprobaciones", "recepciones", "facturas"
+}
+
 @router.get("/{numero_factura}", response_model=VentaResponse)
 def obtener_venta_por_numero(
     numero_factura: str,
@@ -286,6 +293,11 @@ def obtener_venta_por_numero(
     """
     Busca una factura por su correlativo fiscal (ej: FAC-00000001).
     """
+    if numero_factura.lower() in RESERVED_VENTAS_SUBPATHS:
+        raise HTTPException(
+            status_code=404,
+            detail=f"La sub-ruta '{numero_factura}' no es un número de factura"
+        )
     venta = db.query(Venta).filter(Venta.numero_factura == numero_factura).first()
     if not venta:
         raise HTTPException(
