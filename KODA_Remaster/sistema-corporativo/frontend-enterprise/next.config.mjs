@@ -28,7 +28,7 @@ const nextConfig = {
           { key: 'X-DNS-Prefetch-Control', value: 'on' },
           { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
-          { key: 'Content-Security-Policy', value: "frame-ancestors 'self' https://*.vercel.app https://monorepo-koda.vercel.app http://localhost:* https://*.ts.net;" },
+          { key: 'Content-Security-Policy', value: "frame-src 'self' https://*.vercel.app https://koda-billing-front.vercel.app http://localhost:* https://*.ts.net; frame-ancestors 'self' https://*.vercel.app https://monorepo-koda.vercel.app https://koda-billing-front.vercel.app http://localhost:* https://*.ts.net;" },
         ],
       },
       {

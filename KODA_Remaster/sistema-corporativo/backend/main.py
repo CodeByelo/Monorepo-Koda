@@ -247,7 +247,7 @@ async def add_security_headers(request: Request, call_next):
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
     response.headers.setdefault(
         "Content-Security-Policy",
-        "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com; frame-ancestors 'self' https://*.vercel.app https://monorepo-koda.vercel.app http://localhost:3000 http://localhost:5173 http://localhost:5174 https://*.ts.net;"
+        "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://*.vercel.app https://koda-billing-front.vercel.app http://localhost:* https://*.ts.net; frame-ancestors 'self' https://*.vercel.app https://monorepo-koda.vercel.app https://koda-billing-front.vercel.app http://localhost:3000 http://localhost:5173 http://localhost:5174 https://*.ts.net;"
     )
     if os.getenv("NODE_ENV", "").lower() == "production":
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")

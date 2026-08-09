@@ -12,11 +12,12 @@ export default function BillingModule({ darkMode }: { darkMode: boolean }) {
   const isTailscale = typeof window !== 'undefined' && window.location.hostname.includes('.ts.net');
   const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
   
-  let baseUrl = isProduction ? 'https://monorepo-koda.onrender.com/facturacion/' : `http://${host}:5174`;
+  const billingProdUrl = process.env.NEXT_PUBLIC_BILLING_URL || 'https://koda-billing-front.vercel.app';
+  let baseUrl = isProduction ? billingProdUrl : `http://${host}:5174`;
   if (isTailscale) {
     baseUrl = `https://${host}:8443`;
   }
-  const billingUrl = token ? `${baseUrl}?token=${token}` : baseUrl;
+  const billingUrl = token ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}token=${token}` : baseUrl;
 
   return (
     <div

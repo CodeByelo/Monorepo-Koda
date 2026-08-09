@@ -5154,11 +5154,12 @@ export default function Dashboard() {
       const token = localStorage.getItem("sgd_token");
       const host = window.location.hostname;
       const isProduction = host.includes('vercel.app') || host.includes('onrender.com') || host.includes('cloudflare');
-      let baseUrl = isProduction ? '/facturacion/' : `http://${host}:5174`;
+      const billingProdUrl = process.env.NEXT_PUBLIC_BILLING_URL || 'https://koda-billing-front.vercel.app';
+      let baseUrl = isProduction ? billingProdUrl : `http://${host}:5174`;
       if (host.includes('.ts.net')) {
         baseUrl = `https://${host}:8443`;
       }
-      setBillingUrl(token ? `${baseUrl}?token=${token}` : baseUrl);
+      setBillingUrl(token ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}token=${token}` : baseUrl);
     }
   }, []);
 
