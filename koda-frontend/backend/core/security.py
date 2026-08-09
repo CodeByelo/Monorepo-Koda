@@ -23,7 +23,7 @@ _sec_logger = _logging.getLogger("koda_security")
 
 # Configuraciones de Seguridad desde Variables de Entorno
 # CRÍTICO: El sistema NO debe arrancar sin claves secretas reales.
-SECRET_KEY = os.getenv("SECRET_KEY", "koda-secret-key-production-fallback-2026").strip()
+SECRET_KEY = os.getenv("SECRET_KEY", "").strip()
 if not SECRET_KEY:
     raise RuntimeError(
         "FATAL: La variable de entorno SECRET_KEY no está configurada. "
@@ -67,10 +67,30 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 # DEPENDENCIAS DE AUTENTICACIÓN
 # ==========================================
 
+def get_token_from_request(request: Request) -> Optional[str]:
+    """
+    Extrae el token JWT de la petición con la siguiente prioridad:
+    1. Cookie httpOnly 'sgd_token' (más segura, no accesible por JS)
+    2. Header 'Authorization: Bearer <token>' (fallback para APIs externas)
+    Retorna None si no se encuentra token en ninguna fuente.
+    """
+    # 1. Cookie httpOnly (prioridad máxima — no vulnerable a XSS)
+    cookie_token = request.cookies.get("sgd_token")
+    if cookie_token:
+        return cookie_token
+
+    # 2. Header Authorization Bearer (fallback)
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        return auth_header[7:].strip()
+
+    return None
+
 # Definición de dependencias con importación perezosa para romper la dependencia circular en tiempo de carga
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     from backend.services.auth import get_current_user_from_token
-    return get_current_user_from_token(token, db)
+    resolved_token = get_token_from_request(request) or token
+    return get_current_user_from_token(resolved_token, db)
 
 def require_role(roles_permitidos: list[str]):
     from backend.services.auth import role_required
@@ -81,7 +101,7 @@ def require_role(roles_permitidos: list[str]):
 # ==========================================
 
 # Clave secreta dedicada a los logs para evitar colisiones si se compromete el SECRET_KEY principal
-AUDIT_LOG_SECRET = os.getenv("AUDIT_LOG_SECRET", "koda-audit-log-secret-key-2026").strip()
+AUDIT_LOG_SECRET = os.getenv("AUDIT_LOG_SECRET", "").strip()
 if not AUDIT_LOG_SECRET:
     raise RuntimeError(
         "FATAL: La variable de entorno AUDIT_LOG_SECRET no está configurada. "
@@ -116,9 +136,13 @@ def get_current_auditor(request: Request, token: str = Depends(oauth2_scheme), d
         detail="No se pudieron validar las credenciales de auditoría",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    
+
+    resolved_token = get_token_from_request(request) or token
+    if not resolved_token:
+        raise credentials_exception
+
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(resolved_token, SECRET_KEY, algorithms=[ALGORITHM])
         auditor_session_id = payload.get("sub")
         if not auditor_session_id:
             raise credentials_exception

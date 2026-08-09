@@ -67,6 +67,7 @@ class LoginLockout(Base):
     __table_args__ = {'schema': 'public'}
 
     username = Column(String(150), primary_key=True, index=True)
+    ip_address = Column(String(45), primary_key=True, default="unknown")  # IPv4 or IPv6
     failed_count = Column(Integer, default=0, nullable=False)
     locked_until = Column(DateTime, nullable=True)
 

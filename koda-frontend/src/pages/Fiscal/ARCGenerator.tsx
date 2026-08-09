@@ -62,10 +62,11 @@ const ARCGenerator = () => {
     try {
       setIsGenerating(true);
       const token = localStorage.getItem('koda_token') || localStorage.getItem('sgd_token');
+      const headers: any = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch(`${BASE_URL}/fiscal/arc/exportar?formato=pdf&anio=${anio}&sujeto=${selectedSujeto}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers,
+        credentials: 'include',
       });
       if (!res.ok) throw new Error('Error al descargar PDF');
       const blob = await res.blob();
@@ -88,10 +89,11 @@ const ARCGenerator = () => {
     if (!selectedSujeto) return;
     try {
       const token = localStorage.getItem('koda_token') || localStorage.getItem('sgd_token');
+      const headers: any = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch(`${BASE_URL}/fiscal/arc/exportar?formato=xml&anio=${anio}&sujeto=${selectedSujeto}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers,
+        credentials: 'include',
       });
       if (!res.ok) throw new Error('Error al descargar XML');
       const blob = await res.blob();

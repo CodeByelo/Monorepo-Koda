@@ -77,30 +77,45 @@ export default function NuevaFactura() {
     const loadData = async () => {
       try {
         const [clientsData, productsData] = await Promise.all([
-          api.get<Cliente[]>('/clientes'),
-          api.get<Producto[]>('/productos')
+          api.get<Cliente[]>('/clientes').catch(() => []),
+          api.get<Producto[]>('/productos').catch(() => [])
         ]);
         
         if (active) {
-          setClientes(clientsData || []);
-          setProductos(productsData || []);
+          const clientList = clientsData || [];
+          const productList = productsData || [];
+          setClientes(clientList);
+          setProductos(productList);
+
+          if (clientList.length > 0) {
+            setSelectedClienteId(String(clientList[0].id));
+          }
+          
+          if (productList.length > 0 && rows.length > 0 && !rows[0].producto_id) {
+            const firstP = productList[0];
+            setRows([{
+              tempId: 'init-row-1',
+              producto_id: firstP.sku || String(firstP.id),
+              descripcion: firstP.nombre,
+              cantidad: 1,
+              precio_unitario: Number(firstP.precio_usd) || 0
+            }]);
+          }
         }
         
         try {
-          const tasaData = await api.get<{ valor_ves: number | string }>('/tasa/actual');
-          if (active && tasaData && tasaData.valor_ves) {
-            setTasaBcv(Number(tasaData.valor_ves));
+          const tasaData = await api.get<{ valor_ves: number | string; tasa: number }>('/tasa/actual');
+          if (active && tasaData) {
+            const val = Number(tasaData.valor_ves || tasaData.tasa || 0);
+            if (val > 0) setTasaBcv(val);
           }
         } catch (tasaErr) {
-          console.warn("No se pudo obtener la tasa BCV de hoy, utilizando tasa base.", tasaErr);
-        } finally {
-          if (active) setIsLoadingTasa(false);
+          console.warn("No se pudo obtener la tasa BCV:", tasaErr);
         }
       } catch (err) {
         console.error("Error al cargar datos de facturación fiscal:", err);
-        if (active) {
-          setErrorMessage("Error al conectar con los servicios de datos maestros.");
-        }
+      } finally {
+        if (active) setIsLoadingTasa(false);
       }
     };
     
@@ -392,7 +407,10 @@ export default function NuevaFactura() {
                       headers['Authorization'] = `Bearer ${token}`;
                     }
                     const docNum = emittedFactura.numero_factura;
-                    const res = await fetch(`/api/fiscal/retencion-iva/pdf?proveedor_id=J-00000000-0&periodo=${new Date().toISOString().slice(0, 7).replace('-', '')}&correlativo=${docNum}`, { headers });
+                    const res = await fetch(`/api/fiscal/retencion-iva/pdf?proveedor_id=J-00000000-0&periodo=${new Date().toISOString().slice(0, 7).replace('-', '')}&correlativo=${docNum}`, {
+                      headers,
+                      credentials: 'include',
+                    });
                     if (!res.ok) throw new Error("Error generating PDF");
                     const blob = await res.blob();
                     const url = window.URL.createObjectURL(blob);

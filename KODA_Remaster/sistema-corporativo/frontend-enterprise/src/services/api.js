@@ -9,15 +9,16 @@ const api = axios.create({
       ? 'https://monorepo-koda.onrender.com'
       : 'http://127.0.0.1:8000'),
   timeout: 10000,
+  withCredentials: true, // Enviar cookies httpOnly automáticamente
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Interceptor para agregar el token automáticamente
+// Interceptor para agregar el token automáticamente (fallback Bearer)
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('sgd_token'); // O como guardes el token
-  if (token) {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('sgd_token') : null;
+  if (token && !config.headers.Authorization) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;

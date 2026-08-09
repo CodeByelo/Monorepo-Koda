@@ -319,7 +319,10 @@ const IVARetentions = () => {
                                 headers['Authorization'] = `Bearer ${token}`;
                               }
                               const formattedPeriod = periodo.replace('-', '');
-                              const res = await fetch(`/api/fiscal/retencion-iva/pdf?proveedor_id=${row.agente_rif}&periodo=${formattedPeriod}&correlativo=${row.numero_comprobante}`, { headers });
+                              const res = await fetch(`/api/fiscal/retencion-iva/pdf?proveedor_id=${row.agente_rif}&periodo=${formattedPeriod}&correlativo=${row.numero_comprobante}`, {
+                                headers,
+                                credentials: 'include',
+                              });
                               if (!res.ok) throw new Error("Error generating PDF");
                               const blob = await res.blob();
                               const url = window.URL.createObjectURL(blob);

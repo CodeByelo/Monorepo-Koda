@@ -39,9 +39,10 @@ const BillingDashboard = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
+        setIsLoading(true);
         const [ventasRes, reporteRes] = await Promise.all([
-          api.get<VentaRow[]>('/ventas'),
-          api.get<any>('/ventas/reporte'),
+          api.get<VentaRow[]>('/ventas').catch(() => []),
+          api.get<any>('/ventas/reporte').catch(() => null),
         ]);
         setVentas(ventasRes || []);
         setReporte(reporteRes);
@@ -106,10 +107,11 @@ const BillingDashboard = () => {
   const handleDownloadPdf = async (id: number) => {
     try {
       const token = localStorage.getItem('koda_token') || localStorage.getItem('sgd_token') || '';
+      const headers: any = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const response = await fetch(`${BASE_URL}/ventas/${id}/pdf`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers,
+        credentials: 'include',
       });
       if (!response.ok) throw new Error('Error al generar el PDF de la factura');
       const blob = await response.blob();

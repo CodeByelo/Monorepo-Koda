@@ -61,19 +61,21 @@ const InvoiceForm = () => {
   useEffect(() => {
     const initData = async () => {
       try {
-        const clientsData = await api.get<Cliente[]>('/clientes');
-        setClientes(clientsData);
-        if (clientsData.length > 0) setSelectedCliente(clientsData[0]);
+        const clientsData = await api.get<Cliente[]>('/clientes').catch(() => []);
+        setClientes(clientsData || []);
+        if (clientsData && clientsData.length > 0) setSelectedCliente(clientsData[0]);
 
-        const productsData = await api.get<Producto[]>('/productos');
-        setProductos(productsData);
-        if (productsData.length > 0) setSelectedProducto(productsData[0]);
+        const productsData = await api.get<Producto[]>('/productos').catch(() => []);
+        setProductos(productsData || []);
+        if (productsData && productsData.length > 0) setSelectedProducto(productsData[0]);
 
-        const tasaData = await api.get<{ valor_ves: number | string }>('/tasa/actual');
-        setTasaBcv(Number(tasaData?.valor_ves || 0));
-        setIsLoadingTasa(false);
+        const tasaData = await api.get<{ valor_ves: number | string; tasa: number }>('/tasa/actual').catch(() => null);
+        const val = Number(tasaData?.valor_ves || tasaData?.tasa || 0);
+        if (val > 0) setTasaBcv(val);
       } catch (err) {
         console.error("Error cargando datos para factura:", err);
+      } finally {
+        setIsLoadingTasa(false);
       }
     };
     initData();

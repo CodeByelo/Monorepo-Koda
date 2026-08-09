@@ -56,10 +56,11 @@ const CostCenters = () => {
   const handleExportMatrix = async () => {
     try {
       const token = localStorage.getItem('koda_token') || localStorage.getItem('sgd_token') || '';
+      const headers: any = {};
+      if (token) headers['Authorization'] = 'Bearer ' + token;
       const response = await fetch(`${BASE_URL}/contabilidad/centros-costo/exportar`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers,
+        credentials: 'include',
       });
       if (!response.ok) throw new Error('Error al exportar la matriz de centros de costo');
       const blob = await response.blob();

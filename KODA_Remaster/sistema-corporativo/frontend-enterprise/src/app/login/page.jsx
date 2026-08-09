@@ -504,13 +504,11 @@ const LoginForm = () => {
     fetch('/api/auth/logout', { method: 'POST' }).catch(() => undefined);
 
     try {
-      console.log("Intentando login corporativo para:", formData.username);
 
       // ✅ USAMOS EL SISTEMA DE AUTH UNIFICADO
       const result = await authLogin(formData.username, formData.password);
 
       if (result.success) {
-        console.log('Acceso autorizado por AuthContext');
         setLoginSuccess(true);
       } else {
         setLoginError(result.error || 'Credenciales incorrectas o error de servidor');
@@ -652,7 +650,7 @@ const LoginForm = () => {
           </div>
 
           <div className="px-8 pb-8 pt-6">
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <form method="post" onSubmit={handleSubmit} className="space-y-6">
               <AnimatedInput
                 id="username"
                 label="Usuario Corporativo"

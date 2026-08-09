@@ -15,9 +15,21 @@ const nextConfig = {
     formats: ['image/webp', 'image/avif'],
     minimumCacheTTL: 86400, // 24 horas de caché para imágenes
   },
-  // Headers de caché para assets estáticos
+  // Headers de seguridad y caché para assets estáticos
   async headers() {
     return [
+      {
+        // Cabeceras de seguridad HTTP para todas las rutas (OWASP best practices)
+        source: '/(.*)',
+        headers: [
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'X-DNS-Prefetch-Control', value: 'on' },
+          { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+        ],
+      },
       {
         source: '/_next/static/:path*',
         headers: [

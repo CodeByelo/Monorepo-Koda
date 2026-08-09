@@ -39,28 +39,42 @@ const POS = () => {
       setProductos(res?.productos || []);
       setTotalHoy(res?.total_hoy || 0);
       setCountHoy(res?.count_hoy || 0);
-      setTasaBCV(res?.tasa_bcv || 0);
+      const val = Number(res?.tasa_bcv || 0);
+      if (val > 0) {
+        setTasaBCV(val);
+      } else {
+        api.get<any>('/tasa/actual').then((tData) => {
+          const tVal = Number(tData?.valor_ves || tData?.tasa || 0);
+          if (tVal > 0) setTasaBCV(tVal);
+        }).catch(() => {});
+      }
       setRecentTickets((res?.tickets_recientes || []).map((t: any) => ({
         ...t,
         color: t.status === 'EMITIDO' ? 'bg-[#8fb09f]/10 text-[#43584b] border-[#8fb09f]/20' : 'bg-[#bdafa1]/10 text-slate-500 border-[#bdafa1]/20',
       })));
-    }).catch(console.error);
+    }).catch(() => {
+      api.get<any>('/tasa/actual').then((tData) => {
+        const tVal = Number(tData?.valor_ves || tData?.tasa || 0);
+        if (tVal > 0) setTasaBCV(tVal);
+      }).catch(() => {});
+    });
 
     api.get<any[]>('/inventario/criticos').then((data) => {
       setCriticos(data || []);
-    }).catch(console.error);
+    }).catch(() => setCriticos([]));
 
     api.get<any[]>('/clientes').then((data) => {
-      setClientes(data || []);
-      if (data && data.length > 0) {
-        const cf = data.find(c => c.rif === 'G-00000000-0' || c.nombre.toLowerCase().includes('consumidor'));
+      const clientList = data || [];
+      setClientes(clientList);
+      if (clientList.length > 0) {
+        const cf = clientList.find(c => c.rif === 'G-00000000-0' || c.nombre.toLowerCase().includes('consumidor'));
         if (cf) {
           setClient(cf.id.toString());
         } else {
-          setClient(data[0].id.toString());
+          setClient(clientList[0].id.toString());
         }
       }
-    }).catch(console.error);
+    }).catch(() => setClientes([]));
   };
 
   useEffect(() => {

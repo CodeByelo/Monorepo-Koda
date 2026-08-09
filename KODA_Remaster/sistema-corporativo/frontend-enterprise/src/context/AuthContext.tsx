@@ -231,7 +231,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       const data = await response.json();
       const newUser = buildUserFromBackend(data.user);
-      localStorage.setItem("sgd_token", data.access_token);
+      // Tokens ahora se almacenan como cookies httpOnly por el backend.
+      // Mantener en localStorage solo como fallback para compatibilidad.
+      if (data.access_token) {
+        localStorage.setItem("sgd_token", data.access_token);
+      }
       if (data.refresh_token) {
         localStorage.setItem("sgd_refresh_token", data.refresh_token);
       }
@@ -253,7 +257,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (isLoggingOut) return;
     setIsLoggingOut(true);
     try {
-      await fetch("/api/auth/logout", { method: "POST", cache: "no-store" });
+      await fetch("/api/auth/logout", { method: "POST", cache: "no-store", credentials: "include" });
     } catch {
       // no-op
     }

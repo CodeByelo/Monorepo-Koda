@@ -52,28 +52,12 @@ export const SecurityProtector: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     };
 
-    // 3. Anti-Debugger (Disuasion only)
-    const antiDebugger = setInterval(() => {
-      (function () {
-        try {
-          (function (a: any) {
-            return (function (a: any) {
-              return (function (a: any) {
-                return (a + "").length !== 1 || a % 20 === 0;
-              })(a);
-            })(a);
-          })(function () { debugger; });
-        } catch (e) { }
-      })();
-    }, 2000);
-
     document.addEventListener('contextmenu', handleContextMenu);
     document.addEventListener('keydown', handleKeyDown);
 
     return () => {
       document.removeEventListener('contextmenu', handleContextMenu);
       document.removeEventListener('keydown', handleKeyDown);
-      clearInterval(antiDebugger);
     };
   }, [isDev]);
 

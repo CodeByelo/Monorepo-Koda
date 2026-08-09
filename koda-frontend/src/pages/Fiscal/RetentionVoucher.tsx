@@ -80,7 +80,10 @@ const RetentionVoucher = () => {
         headers['Authorization'] = `Bearer ${token}`;
       }
       
-      const res = await fetch(`/api/fiscal/retencion-iva/pdf?${urlParams.toString()}`, { headers });
+      const res = await fetch(`/api/fiscal/retencion-iva/pdf?${urlParams.toString()}`, {
+        headers,
+        credentials: 'include',
+      });
       if (!res.ok) throw new Error("Error generating PDF");
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);

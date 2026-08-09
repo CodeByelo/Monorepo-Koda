@@ -1,9 +1,7 @@
 export let BASE_URL = (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_API_URL) || (
-  typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')
-    ? 'https://koda-backend-contable.onrender.com'
-    : (typeof window !== 'undefined' && (window.location.hostname.includes('cloudflare') || window.location.hostname.includes('.ts.net'))
-        ? '/api-facturacion'
-        : '/api')
+  typeof window !== 'undefined' && (window.location.hostname.includes('cloudflare') || window.location.hostname.includes('.ts.net'))
+    ? '/api-facturacion'
+    : '/api'
 );
 
 if (BASE_URL && !BASE_URL.startsWith('http://') && !BASE_URL.startsWith('https://') && !BASE_URL.startsWith('/')) {
@@ -11,7 +9,6 @@ if (BASE_URL && !BASE_URL.startsWith('http://') && !BASE_URL.startsWith('https:/
 }
 
 export async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = localStorage.getItem('koda_token') || localStorage.getItem('sgd_token');
   const isFormData = options.body instanceof FormData;
   const headers: any = {
     ...options.headers,
@@ -19,13 +16,20 @@ export async function request<T>(endpoint: string, options: RequestInit = {}): P
   if (!isFormData && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json';
   }
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+
+  // Fallback: si hay token en localStorage, enviarlo como Bearer header
+  // (compatibilidad con APIs externas o durante la migración a cookies)
+  if (!headers['Authorization']) {
+    const token = localStorage.getItem('koda_token') || localStorage.getItem('sgd_token');
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
   }
 
   const response = await fetch(`${BASE_URL}${endpoint}`, {
     ...options,
     headers,
+    credentials: 'include', // Enviar cookies httpOnly automáticamente
   });
 
   if (!response.ok) {
@@ -79,14 +83,9 @@ export const api = {
     }),
   delete: <T>(endpoint: string, options?: RequestInit) => request<T>(endpoint, { ...options, method: 'DELETE' }),
   download: async (endpoint: string, filename: string) => {
-    const token = localStorage.getItem('koda_token') || localStorage.getItem('sgd_token');
-    const headers: any = {};
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
     const response = await fetch(`${BASE_URL}${endpoint}`, {
       method: 'GET',
-      headers,
+      credentials: 'include', // Enviar cookies httpOnly automáticamente
     });
     if (!response.ok) {
       throw new Error('Error al descargar el archivo');

@@ -48,10 +48,12 @@ const Quotations = () => {
     setActiveDropdownId(null);
     try {
       const targetId = cot.id_db || cot.id;
+      const token = localStorage.getItem('koda_token') || localStorage.getItem('sgd_token');
+      const headers: any = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const response = await fetch(`/api/ventas/cotizaciones/${targetId}/pdf`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('koda_token')}`
-        }
+        headers,
+        credentials: 'include',
       });
       
       if (!response.ok) {

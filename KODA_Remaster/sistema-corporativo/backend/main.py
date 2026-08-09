@@ -242,11 +242,12 @@ async def add_observability_context(request: Request, call_next):
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers["X-Frame-Options"] = "ALLOWALL"
+    response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-    response.headers["Content-Security-Policy"] = (
-        "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com; frame-ancestors 'self' https://*.vercel.app https://*.onrender.com;"
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com; frame-ancestors 'self';"
     )
     if os.getenv("NODE_ENV", "").lower() == "production":
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
@@ -275,17 +276,13 @@ origins = [
     "http://10.0.2.15:3000",
     "http://10.0.2.15:8000",
     "https://koda-remaster.vercel.app",
-    "https://koda-billing-front.vercel.app",
-    "https://monorepo-koda.vercel.app",
-    "https://sistema-corpoelect-backend.onrender.com",
-    "https://koda-backend-contable.onrender.com",
-    "https://monorepo-koda.onrender.com"
+    "https://sistema-corpoelect-backend.onrender.com"
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_origin_regex=r"^https://([a-zA-Z0-9-]+)\.(vercel\.app|onrender\.com)$",
+    allow_origin_regex=r"^https://(koda-remaster|sistema-corpoelect)(-[a-zA-Z0-9-]+)?\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -375,14 +372,8 @@ uploads_dir = Path("uploads")
 uploads_dir.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
-facturacion_dist_candidates = [
-    Path(__file__).resolve().parent.parent.parent.parent / "koda-frontend" / "dist",
-    Path(__file__).resolve().parent.parent.parent / "koda-frontend" / "dist",
-    Path("koda-frontend/dist"),
-    Path("../koda-frontend/dist"),
-]
-facturacion_dist = next((p for p in facturacion_dist_candidates if p.exists()), None)
-if facturacion_dist:
+facturacion_dist = Path(__file__).resolve().parent.parent.parent / "koda-frontend" / "dist"
+if facturacion_dist.exists():
     app.mount("/facturacion", StaticFiles(directory=str(facturacion_dist), html=True), name="facturacion")
 
 # INCLUSIÓN DE ROUTERS
@@ -401,51 +392,6 @@ app.include_router(telegram_router.router)
 # Tasa BCV
 from routers import rates_router
 app.include_router(rates_router.router)
-
-# Routers extendidos de koda-frontend (logística, ventas, inventario, tesorería, etc.)
-try:
-    import sys
-    koda_fe_dir = Path(__file__).resolve().parent.parent.parent.parent / "koda-frontend"
-    if koda_fe_dir.exists() and str(koda_fe_dir) not in sys.path:
-        sys.path.insert(0, str(koda_fe_dir))
-
-    from backend.routers import (
-        logistica as fe_logistica,
-        sales as fe_sales,
-        fiscal as fe_fiscal,
-        audit as fe_audit,
-        inventory as fe_inventory,
-        accounting as fe_accounting,
-        hr as fe_hr,
-        productos as fe_productos,
-        entidades as fe_entidades,
-        pagos as fe_pagos,
-        reportes as fe_reportes,
-        payroll as fe_payroll,
-        tesoreria as fe_tesoreria,
-        forense as fe_forense,
-        modulos_ext as fe_modulos_ext,
-        contabilidad_ext as fe_contabilidad_ext,
-        admin_ext as fe_admin_ext,
-        fiscal_ext as fe_fiscal_ext,
-        extras_ext as fe_extras_ext,
-    )
-    for fe_module in [
-        fe_logistica, fe_sales, fe_fiscal, fe_audit, fe_inventory,
-        fe_accounting, fe_hr, fe_productos, fe_entidades, fe_pagos,
-        fe_reportes, fe_payroll, fe_tesoreria, fe_forense,
-        fe_contabilidad_ext, fe_admin_ext, fe_fiscal_ext, fe_extras_ext
-    ]:
-        if hasattr(fe_module, "router"):
-            app.include_router(fe_module.router)
-
-    if hasattr(fe_modulos_ext, "ventas_ext_router"):
-        app.include_router(fe_modulos_ext.ventas_ext_router)
-    if hasattr(fe_modulos_ext, "inventario_ext_router"):
-        app.include_router(fe_modulos_ext.inventario_ext_router)
-    print("✅ Routers de koda-frontend registrados exitosamente en FastAPI")
-except Exception as fe_err:
-    print(f"⚠️ Aviso al incluir routers de koda-frontend: {fe_err}")
 
 print("\n📋 RUTAS REGISTRADAS EN FASTAPI:")
 for route in app.routes:
@@ -1004,30 +950,26 @@ async def login_compat(
     username_input = str(form_data.username or "").strip()
     username_norm = username_input.lower()
 
-    await conn.execute("""
-        CREATE TABLE IF NOT EXISTS login_lockouts (
-            username TEXT PRIMARY KEY,
-            failed_count INT NOT NULL DEFAULT 0,
-            locked_until TIMESTAMPTZ
-        )
-    """)
+    client_ip = _extract_client_ip(request) or "unknown"
+
+    # Verificar lockout por IP + username (no solo username, para evitar DoS)
     lock_row = await conn.fetchrow(
-        "SELECT failed_count, locked_until FROM login_lockouts WHERE username = $1",
+        "SELECT failed_count, locked_until FROM login_lockouts WHERE username = $1 AND ip_address = $2",
         username_norm,
+        client_ip,
     )
     now_utc = datetime.now(timezone.utc)
     if lock_row and lock_row["locked_until"] and lock_row["locked_until"] > now_utc:
+        remaining_seconds = int((lock_row["locked_until"] - now_utc).total_seconds())
         raise HTTPException(
             status_code=423,
             detail={
-                "message": "Usuario bloqueado contacte a un administrador",
+                "message": f"Demasiados intentos fallidos. Intente nuevamente en {max(1, remaining_seconds // 60)} minuto(s).",
                 "failed_count": int(lock_row["failed_count"] or 3),
                 "remaining_attempts": 0,
                 "is_locked": True,
             },
         )
-
-    client_ip = _extract_client_ip(request)
 
     query = """
         SELECT p.id, p.username, p.password_hash, p.nombre, p.apellido, p.email, p.rol_id, r.nombre_rol, p.tenant_id,
@@ -1048,16 +990,25 @@ async def login_compat(
 
     if not user or not verify_password(form_data.password, user["password_hash"]):
         failed_count = (lock_row["failed_count"] if lock_row else 0) + 1
-        is_locked = failed_count >= 3
-        locked_until = datetime.now(timezone.utc) + timedelta(days=3650) if is_locked else None
+        locked_until = None
+
+        # Backoff exponencial: 3 → 1 min, 6 → 15 min, 9+ → 1 hora (nunca permanente)
+        if failed_count >= 9:
+            locked_until = now_utc + timedelta(hours=1)
+        elif failed_count >= 6:
+            locked_until = now_utc + timedelta(minutes=15)
+        elif failed_count >= 3:
+            locked_until = now_utc + timedelta(minutes=1)
+
         await conn.execute(
             """
-            INSERT INTO login_lockouts (username, failed_count, locked_until)
-            VALUES ($1, $2, $3)
-            ON CONFLICT (username)
+            INSERT INTO login_lockouts (username, ip_address, failed_count, locked_until)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (username, ip_address)
             DO UPDATE SET failed_count = EXCLUDED.failed_count, locked_until = EXCLUDED.locked_until
             """,
             username_norm,
+            client_ip,
             failed_count,
             locked_until,
         )
@@ -1071,36 +1022,38 @@ async def login_compat(
                 user["tenant_id"] if user else None,
                 user["id"] if user else None,
                 user["username"] if user else username_input,
-                "LOGIN_FALLIDO" if not is_locked else "USUARIO_BLOQUEADO",
-                f"Intento fallido #{failed_count}" if not is_locked else "Bloqueado tras 3 intentos fallidos",
-                "warning" if not is_locked else "danger",
+                "LOGIN_FALLIDO" if not locked_until else "LOCKOUT_ACTIVADO",
+                f"Intento fallido #{failed_count} (IP: {client_ip})" if not locked_until else f"Lockout activado tras {failed_count} intentos (IP: {client_ip})",
+                "warning" if not locked_until else "danger",
                 "/login",
                 client_ip,
             )
         except Exception:
             pass
-        if is_locked:
+        if locked_until:
+            remaining_seconds = int((locked_until - now_utc).total_seconds())
             raise HTTPException(
                 status_code=423,
                 detail={
-                    "message": "Usuario bloqueado contacte a un administrador",
+                    "message": f"Demasiados intentos fallidos. Intente nuevamente en {max(1, remaining_seconds // 60)} minuto(s).",
                     "failed_count": int(failed_count),
                     "remaining_attempts": 0,
                     "is_locked": True,
                 },
             )
-        remaining_attempts = max(0, 3 - int(failed_count))
+        remaining_attempts = max(0, 3 - (failed_count % 3)) if failed_count % 3 != 0 else 3
         raise HTTPException(
             status_code=401,
             detail={
-                "message": f"Credenciales incorrectas. Intento {failed_count} de 3.",
+                "message": f"Credenciales incorrectas. Intento {failed_count}.",
                 "failed_count": int(failed_count),
                 "remaining_attempts": int(remaining_attempts),
                 "is_locked": False,
             },
         )
 
-    await conn.execute("DELETE FROM login_lockouts WHERE username = $1", username_norm)
+    # Login exitoso — limpiar lockouts para esta IP+usuario
+    await conn.execute("DELETE FROM login_lockouts WHERE username = $1 AND ip_address = $2", username_norm, client_ip)
 
     role_norm = _normalize_text(user["nombre_rol"])
     is_dev = role_norm in {"desarrollador", "dev", "developer"}
@@ -1166,7 +1119,9 @@ async def login_compat(
     except Exception:
         pass
 
-    return {
+    # Construir respuesta con cookies httpOnly
+    _is_production = os.getenv("NODE_ENV", "").lower() == "production" or os.getenv("ENVIRONMENT", "").lower() == "production"
+    response_data = {
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "bearer",
@@ -1184,6 +1139,19 @@ async def login_compat(
             "permissions": _parse_permissions(user["permisos"]),
         },
     }
+    from fastapi.responses import JSONResponse as _JSONResp
+    response = _JSONResp(content=response_data)
+    response.set_cookie(
+        key="sgd_token", value=access_token,
+        httponly=True, secure=_is_production, samesite="lax",
+        max_age=900, path="/",
+    )
+    response.set_cookie(
+        key="sgd_refresh_token", value=refresh_token,
+        httponly=True, secure=_is_production, samesite="lax",
+        max_age=604800, path="/api/auth/refresh",
+    )
+    return response
 
 
 @app.get("/auth/validate")
@@ -5190,15 +5158,21 @@ async def disable_mfa(
     return {"status": "ok", "message": "MFA deshabilitado exitosamente"}
 
 class RefreshTokenPayload(BaseModel):
-    refresh_token: str
+    refresh_token: str = ""
 
 @app.post("/api/auth/refresh")
 @app.post("/auth/refresh")
 async def refresh_tokens(
+    request: Request,
     payload: RefreshTokenPayload,
     conn = Depends(get_db_connection)
 ):
-    session_data = await verify_refresh_token(payload.refresh_token)
+    # Leer refresh token de la cookie httpOnly (prioridad) o del body (fallback)
+    refresh_token_value = request.cookies.get("sgd_refresh_token") or payload.refresh_token
+    if not refresh_token_value:
+        raise HTTPException(status_code=401, detail="Refresh token no proporcionado")
+
+    session_data = await verify_refresh_token(refresh_token_value)
     if not session_data:
         raise HTTPException(status_code=401, detail="Refresh token inválido o expirado")
 
@@ -5233,18 +5207,32 @@ async def refresh_tokens(
         expires_delta=expires
     )
 
-    await revoke_refresh_token(payload.refresh_token)
+    await revoke_refresh_token(refresh_token_value)
 
     new_refresh_token = await create_refresh_token(
         user_id=str(user["id"]),
         metadata=metadata
     )
 
-    return {
+    # Responder con cookies httpOnly + body para compatibilidad
+    _is_production = os.getenv("NODE_ENV", "").lower() == "production" or os.getenv("ENVIRONMENT", "").lower() == "production"
+    from fastapi.responses import JSONResponse as _JSONResp
+    response = _JSONResp(content={
         "access_token": new_access_token,
         "refresh_token": new_refresh_token,
         "token_type": "bearer"
-    }
+    })
+    response.set_cookie(
+        key="sgd_token", value=new_access_token,
+        httponly=True, secure=_is_production, samesite="lax",
+        max_age=900, path="/",
+    )
+    response.set_cookie(
+        key="sgd_refresh_token", value=new_refresh_token,
+        httponly=True, secure=_is_production, samesite="lax",
+        max_age=604800, path="/api/auth/refresh",
+    )
+    return response
 
 
 if __name__ == "__main__":

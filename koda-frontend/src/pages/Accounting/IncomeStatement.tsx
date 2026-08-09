@@ -47,9 +47,12 @@ const IncomeStatement = () => {
       const token = localStorage.getItem('koda_token') || localStorage.getItem('sgd_token');
       const baseUrl = (window.location.hostname.includes('.ts.net') || window.location.hostname.includes('cloudflare')) ? '/api-facturacion' : '/api';
       const formatParam = formato === 'xlsx' ? 'excel' : formato;
+      const headers: any = {};
+      if (token) headers['Authorization'] = 'Bearer ' + token;
       const response = await fetch(`${baseUrl}/contabilidad/estado-resultados/exportar?periodo=${periodo}&formato=${formatParam}`, {
         method: 'GET',
-        headers: { 'Authorization': 'Bearer ' + (token || '') },
+        headers,
+        credentials: 'include',
       });
       if (!response.ok) throw new Error('Error ' + response.status);
       

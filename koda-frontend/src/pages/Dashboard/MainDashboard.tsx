@@ -100,16 +100,10 @@ const MainDashboard = () => {
     fetchData();
   }, []);
 
-  if (isLoading) {
-    return (
-      <div className="flex flex-col justify-center items-center h-[70vh] space-y-4">
-        <div className="w-12 h-12 border-4 border-[#0b5156] border-t-transparent rounded-full animate-spin"></div>
-        <div className="text-center text-slate-400 font-bold text-xs uppercase tracking-widest animate-pulse">
-          Sincronizando Módulos de Inteligencia Financiera...
-        </div>
-      </div>
-    );
-  }
+  const formatCurrency = (val: number | undefined) => {
+    if (val === undefined) return '$—';
+    return `$${Number(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
 
   if (error) {
     return (
@@ -119,11 +113,6 @@ const MainDashboard = () => {
       </div>
     );
   }
-
-  const formatCurrency = (val: number | undefined) => {
-    if (val === undefined) return '$0.00';
-    return `$${Number(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  };
 
   // Preparamos datos para el gráfico de barras comparativo (Ingresos vs Costos)
   const chartData = [

@@ -152,7 +152,7 @@ function addRefreshSubscriber(cb: (token: string) => void) {
 }
 
 async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-    let res = await fetch(input, init);
+    let res = await fetch(input, { ...init, credentials: "include" });
 
     if (res.status === 401 && typeof window !== "undefined") {
         const refreshToken = localStorage.getItem("sgd_refresh_token");
@@ -179,7 +179,8 @@ async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<R
             const refreshRes = await fetch("/api/auth/refresh", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ refresh_token: refreshToken })
+                body: JSON.stringify({ refresh_token: refreshToken }),
+                credentials: "include",
             });
 
             if (refreshRes.ok) {
@@ -198,7 +199,7 @@ async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<R
                     ...newInit.headers,
                     Authorization: `Bearer ${data.access_token}`,
                 };
-                return await fetch(input, newInit);
+                return await fetch(input, { ...newInit, credentials: "include" });
             } else {
                 isRefreshing = false;
                 // Refresh failed, clear session

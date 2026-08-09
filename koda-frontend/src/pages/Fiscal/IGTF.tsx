@@ -48,10 +48,11 @@ const IGTF = () => {
   const handleExportTXT = async () => {
     try {
       const token = localStorage.getItem('koda_token') || localStorage.getItem('sgd_token');
+      const headers: any = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       const res = await fetch(`${BASE_URL}/fiscal/igtf/exportar?formato=txt&periodo=${periodo}&quincena=${quincena}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers,
+        credentials: 'include',
       });
       if (!res.ok) throw new Error('Error al descargar archivo TXT');
       const blob = await res.blob();

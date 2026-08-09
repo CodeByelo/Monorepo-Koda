@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Truck, Edit2, Trash2, AlertTriangle, CheckCircle2, RefreshCw, X, Save } from 'lucide-react';
+import { Plus, Truck, Edit2, Trash2, AlertTriangle, CheckCircle2, RefreshCw, X, Save, ChevronDown } from 'lucide-react';
 import { api } from '@/api/client';
 import { Toast } from '@/components/common/Toast';
 
@@ -9,6 +9,7 @@ interface Vehiculo {
   capacidad_kg?: number; estado: string;
   km_actuales: number; proximo_servicio_km?: number;
   ultimo_servicio?: string;
+  clasificacion_ambiente?: string;
 }
 
 const TIPOS = ['CAMION', 'CARRO', 'MOTO', 'FURGON', 'AVION', 'BARCO', 'OTRO'];
@@ -22,7 +23,7 @@ const ESTADO_STYLE: Record<string, { bg: string; text: string; border: string }>
   INACTIVO:        { bg: 'bg-slate-50',    text: 'text-slate-400',   border: 'border-slate-200' },
 };
 
-const EMPTY: Partial<Vehiculo> = { tipo: 'CAMION', estado: 'DISPONIBLE', km_actuales: 0 };
+const EMPTY: Partial<Vehiculo> = { tipo: 'CAMION', estado: 'DISPONIBLE', km_actuales: 0, clasificacion_ambiente: 'SECO' };
 
 function VehicleModal({ vehiculo, onClose, onSaved }: { vehiculo: Partial<Vehiculo>; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState<Partial<Vehiculo>>(vehiculo);
@@ -133,7 +134,7 @@ function VehicleModal({ vehiculo, onClose, onSaved }: { vehiculo: Partial<Vehicu
           </div>
           {isEdit && (
             <div>
-              <label className="text-slate-500 text-[10px] font-black uppercase tracking-wider mb-2 block">Estado</label>
+              <label className="text-slate-550 text-[10px] font-black uppercase tracking-wider mb-2 block">Estado</label>
               <div className="grid grid-cols-2 gap-2">
                 {ESTADOS.map(e => (
                   <button key={e} onClick={() => set('estado', e)}
@@ -144,6 +145,18 @@ function VehicleModal({ vehiculo, onClose, onSaved }: { vehiculo: Partial<Vehicu
               </div>
             </div>
           )}
+          <div>
+            <label className="text-slate-550 text-[10px] font-black uppercase tracking-wider mb-1.5 block">Clasificación de Ambiente *</label>
+            <div className="relative">
+              <select value={form.clasificacion_ambiente || 'SECO'} onChange={e => set('clasificacion_ambiente', e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm font-semibold focus:outline-none focus:border-[#0b5156]/50 appearance-none">
+                <option value="SECO">SECO</option>
+                <option value="REFRIGERADO">REFRIGERADO</option>
+                <option value="CONGELADO">CONGELADO</option>
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+            </div>
+          </div>
         </div>
 
         <button onClick={handleSave} disabled={loading}

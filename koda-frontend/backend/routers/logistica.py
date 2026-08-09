@@ -331,6 +331,7 @@ class VehiculoCreate(BaseModel):
     capacidad_kg: Optional[float] = None
     km_actuales: Optional[float] = 0
     proximo_servicio_km: Optional[float] = None
+    clasificacion_ambiente: Optional[str] = "SECO"
 
 class VehiculoUpdate(VehiculoCreate):
     estado: Optional[str] = None
@@ -358,6 +359,8 @@ class TurnoCreate(BaseModel):
     nota_entrega_ref: Optional[str] = None
     venta_id: Optional[int] = None
     venta_ids: Optional[List[int]] = None
+    marca_cliente_principal: Optional[str] = None
+    crew_id: Optional[int] = None
 
 class TurnoEstadoUpdate(BaseModel):
     estado: str  # PROGRAMADO, EN_RUTA, ENTREGADO, CANCELADO
@@ -479,6 +482,7 @@ def crear_vehiculo(data: VehiculoCreate, db: Session = Depends(get_db), current_
         capacidad_kg=data.capacidad_kg,
         km_actuales=data.km_actuales or 0,
         proximo_servicio_km=data.proximo_servicio_km,
+        clasificacion_ambiente=data.clasificacion_ambiente or "SECO",
         estado="DISPONIBLE",
         tenant_id=current_user.tenant_id
     )
@@ -680,6 +684,8 @@ async def crear_turno(data: TurnoCreate, db: Session = Depends(get_db), current_
         destino=destino_final,
         ruta_descripcion=data.ruta_descripcion,
         observaciones=data.observaciones,
+        marca_cliente_principal=data.marca_cliente_principal,
+        crew_id=data.crew_id,
         estado="PROGRAMADO",
         tenant_id=current_user.tenant_id
     )

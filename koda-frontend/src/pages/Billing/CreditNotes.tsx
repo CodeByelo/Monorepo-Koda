@@ -54,7 +54,7 @@ const CreditNotes = () => {
         status: n.estado,
         statusColor: n.estado === 'EMITIDA' ? 'bg-green-100 text-green-700' : 'bg-[#bdafa1]/10 text-slate-500',
       })));
-    }).catch(console.error);
+    }).catch(() => setNotes([]));
   };
 
   useEffect(() => {

@@ -10,7 +10,7 @@ import { api } from '@/api/client';
 import { Toast } from '@/components/common/Toast';
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
-interface Vehiculo { id: number; nombre: string; placa: string; tipo: string; estado: string; marca?: string; modelo?: string; capacidad_kg?: number; km_actuales?: number; }
+interface Vehiculo { id: number; nombre: string; placa: string; tipo: string; estado: string; marca?: string; modelo?: string; capacidad_kg?: number; km_actuales?: number; clasificacion_ambiente?: string; }
 interface Chofer { id: number; nombre: string; tiene_telegram: boolean; estado: string; telefono?: string; licencia_alerta?: boolean; }
 interface Turno {
   id: number; numero_turno: string; estado: string;
@@ -22,6 +22,8 @@ interface Turno {
   paradas?: any[];
   km_retorno?: number;
   gastos?: any[];
+  marca_cliente_principal?: string;
+  crew_id?: number;
 }
 interface Dashboard {
   vehiculos: { total: number; disponibles: number; en_ruta: number; en_mantenimiento: number; };
@@ -1063,6 +1065,9 @@ function NewTurnoSheet({ vehiculos, choferes, turnosActivos, onClose, onSubmit }
   });
   const [notaRef, setNotaRef] = useState('');
   const [obs, setObs] = useState('');
+  const [marcaCliente, setMarcaCliente] = useState('');
+  const [crewId, setCrewId] = useState<number | undefined>(undefined);
+  const [crews, setCrews] = useState<any[]>([]);
   const [ventasPendientes, setVentasPendientes] = useState<VentaPendiente[]>([]);
   const [selectedVentas, setSelectedVentas] = useState<VentaPendiente[]>([]);
   const [loading, setLoading] = useState(false);
@@ -1085,7 +1090,16 @@ function NewTurnoSheet({ vehiculos, choferes, turnosActivos, onClose, onSubmit }
         console.error("Error al obtener ventas pendientes", err);
       }
     };
+    const fetchCrews = async () => {
+      try {
+        const data = await api.get<any[]>('/api/logistica/crews');
+        setCrews(data || []);
+      } catch (err) {
+        console.error("Error al obtener tripulaciones", err);
+      }
+    };
     fetchVentas();
+    fetchCrews();
   }, []);
 
   // Calcular peso total de todas las facturas seleccionadas
@@ -1129,6 +1143,8 @@ function NewTurnoSheet({ vehiculos, choferes, turnosActivos, onClose, onSubmit }
       observaciones: obs || undefined,
       venta_id: selectedVentas[0]?.id || undefined,
       venta_ids: selectedVentas.map(x => x.id),
+      marca_cliente_principal: marcaCliente || undefined,
+      crew_id: crewId || undefined,
     });
     setLoading(false);
     if (ok) onClose();
@@ -1323,6 +1339,33 @@ function NewTurnoSheet({ vehiculos, choferes, turnosActivos, onClose, onSubmit }
                     placeholder="NE-00045"
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-850 placeholder-slate-400 text-sm font-semibold focus:outline-none focus:border-[#0b5156]/50"
                   />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-550 text-[10px] font-black uppercase tracking-wider mb-1.5 block">Cliente Principal</label>
+                  <input
+                    value={marcaCliente}
+                    onChange={e => setMarcaCliente(e.target.value)}
+                    placeholder="Ej: Bigott, Tunal"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-850 placeholder-slate-400 text-sm font-semibold focus:outline-none focus:border-[#0b5156]/50"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-550 text-[10px] font-black uppercase tracking-wider mb-1.5 block">Tripulación (Gantt)</label>
+                  <div className="relative">
+                    <select
+                      value={crewId || ''}
+                      onChange={e => setCrewId(e.target.value ? Number(e.target.value) : undefined)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-850 text-sm font-semibold focus:outline-none focus:border-[#0b5156]/50 appearance-none"
+                    >
+                      <option value="">Ninguna</option>
+                      {crews.map(c => (
+                        <option key={c.id} value={c.id}>{c.nombre} ({c.vehiculo?.placa || 'N/A'})</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                  </div>
                 </div>
               </div>
               <div>

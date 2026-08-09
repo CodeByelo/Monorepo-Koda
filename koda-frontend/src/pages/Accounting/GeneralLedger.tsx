@@ -64,9 +64,12 @@ const GeneralLedger = () => {
       const baseUrl = (window.location.hostname.includes('.ts.net') || window.location.hostname.includes('cloudflare')) ? '/api-facturacion' : '/api';
       const url = `${baseUrl}/contabilidad/asientos/exportar-pdf${fechaFiltro ? '?fecha=' + fechaFiltro : ''}`;
       
+      const headers: any = {};
+      if (token) headers['Authorization'] = 'Bearer ' + token;
       const response = await fetch(url, {
         method: 'GET',
-        headers: { 'Authorization': 'Bearer ' + (token || '') },
+        headers,
+        credentials: 'include',
       });
       if (!response.ok) throw new Error('Error ' + response.status);
       

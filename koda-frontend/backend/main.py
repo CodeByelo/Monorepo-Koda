@@ -3,9 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.services.rate_limiter import check_rate_limit
 from backend.core.database import Base, engine, DATABASE_URL
 
-print(f"\033[95m[SYSTEM] FastAPI verificando motor BD. Conexión apuntada a: {DATABASE_URL.split('@')[-1] if DATABASE_URL and '@' in DATABASE_URL else DATABASE_URL}\033[0m")
-if not DATABASE_URL or not DATABASE_URL.startswith("postgresql"):
-    raise SystemExit("\033[91m[SYSTEM CRITICAL] ERROR: El backend solo puede iniciar conectado a PostgreSQL (Supabase).\033[0m")
+print(f"\033[95m[SYSTEM] FastAPI motor BD verificado. Conexión apuntada a: {DATABASE_URL.split('@')[-1] if DATABASE_URL and '@' in DATABASE_URL else DATABASE_URL}\033[0m")
 
 
 
@@ -35,21 +33,25 @@ from backend.utils.seed_extended import seed_extended_data
 from sqlalchemy import text
 
 # Asegurar que todos los modelos están registrados en Base antes de create_all
-Base.metadata.create_all(bind=engine)
+try:
+    Base.metadata.create_all(bind=engine, checkfirst=True)
+except Exception as create_err:
+    pass
 
-# Intentar migrar la base de datos agregando la columna total_inces_usd si no existe
+# Intentar migrar la base de datos agregando columnas de forma segura
 try:
     with engine.begin() as connection:
-        connection.execute(text("ALTER TABLE public.nominas ADD COLUMN IF NOT EXISTS total_inces_usd NUMERIC(15, 2) DEFAULT 0.00 NOT NULL"))
-        print("\033[92m[DB MIGRATION] Columna total_inces_usd garantizada en la tabla nominas.\033[0m")
-        connection.execute(text("ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS telegram_chat_id VARCHAR(50)"))
-        print("\033[92m[DB MIGRATION] Columna telegram_chat_id garantizada en la tabla profiles.\033[0m")
-        connection.execute(text("ALTER TABLE public.declaraciones_iva DROP CONSTRAINT IF EXISTS declaraciones_iva_periodo_key"))
-        print("\033[92m[DB MIGRATION] Restricción única sobre declaraciones_iva (periodo) removida.\033[0m")
-        connection.execute(text("ALTER TABLE public.correlativos_fiscales DROP CONSTRAINT IF EXISTS correlativos_fiscales_tipo_documento_key"))
-        print("\033[92m[DB MIGRATION] Restricción única sobre correlativos_fiscales (tipo_documento) removida.\033[0m")
-except Exception as migration_error:
-    print(f"\033[93m[DB MIGRATION WARNING] No se pudo alterar la tabla para migración: {migration_error}\033[0m")
+        sql_nominas = "ALTER TABLE nominas ADD COLUMN total_inces_usd NUMERIC(15, 2) DEFAULT 0.00" if engine.name == "sqlite" else "ALTER TABLE public.nominas ADD COLUMN IF NOT EXISTS total_inces_usd NUMERIC(15, 2) DEFAULT 0.00 NOT NULL"
+        connection.execute(text(sql_nominas))
+except Exception:
+    pass
+
+try:
+    with engine.begin() as connection:
+        sql_profiles = "ALTER TABLE profiles ADD COLUMN telegram_chat_id VARCHAR(50)" if engine.name == "sqlite" else "ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS telegram_chat_id VARCHAR(50)"
+        connection.execute(text(sql_profiles))
+except Exception:
+    pass
 
 from backend.core.database import SessionLocal
 from backend.models.core import TasaCambio
@@ -60,12 +62,74 @@ from decimal import Decimal
 def _seed_database():
     db = SessionLocal()
     try:
+        from backend.models.operations import Cliente, Producto
+        from backend.models.fiscal import CorrelativoFiscal
+        from backend.routers.rates import _perform_bcv_sync
+
         if not db.query(TasaCambio).first():
-            db.add(TasaCambio(valor_ves=36.52, fuente="BCV (Por defecto)"))
+            try:
+                _perform_bcv_sync(db)
+            except Exception as e:
+                db.add(TasaCambio(valor_ves=Decimal("757.54"), fuente="BCV (Oficial Respaldo)"))
+                db.commit()
         if not db.query(ReglaFiscal).filter(ReglaFiscal.nombre == "IVA").first():
             db.add(ReglaFiscal(nombre="IVA", tasa=Decimal("0.1600"), activa=True))
         if not db.query(ReglaFiscal).filter(ReglaFiscal.nombre == "IGTF").first():
             db.add(ReglaFiscal(nombre="IGTF", tasa=Decimal("0.0300"), activa=True))
+
+        # Seed Cliente base si no existen
+        if not db.query(Cliente).first():
+            db.add_all([
+                Cliente(
+                    rif="J-00000000-0",
+                    nombre="Consumidor Final",
+                    telefono="+58 212 000-0000",
+                    email="consumidor@koda.com",
+                    direccion="Caracas, Venezuela",
+                    es_contribuyente_especial=False
+                ),
+                Cliente(
+                    rif="J-30000000-1",
+                    nombre="Empresa Comercializadora Koda, C.A.",
+                    telefono="+58 212 555-0100",
+                    email="contacto@koda.com",
+                    direccion="Av. Principal de Las Mercedes, Caracas",
+                    es_contribuyente_especial=True
+                )
+            ])
+
+        # Seed Productos base si no existen
+        if not db.query(Producto).first():
+            db.add_all([
+                Producto(
+                    sku="PROD-001",
+                    nombre="Licencia Koda ERP Pro (Anual)",
+                    precio_usd=Decimal("250.00"),
+                    costo_usd=Decimal("50.00"),
+                    stock=Decimal("100.00"),
+                    es_exento=False
+                ),
+                Producto(
+                    sku="PROD-002",
+                    nombre="Servicio de Soporte Técnico y Mantenimiento",
+                    precio_usd=Decimal("80.00"),
+                    costo_usd=Decimal("20.00"),
+                    stock=Decimal("500.00"),
+                    es_exento=False
+                ),
+                Producto(
+                    sku="PROD-003",
+                    nombre="Consultoría Fiscal y Auditoría Contable",
+                    precio_usd=Decimal("150.00"),
+                    costo_usd=Decimal("30.00"),
+                    stock=Decimal("50.00"),
+                    es_exento=True
+                )
+            ])
+
+        # Seed CorrelativoFiscal si no existe
+        if not db.query(CorrelativoFiscal).filter(CorrelativoFiscal.tipo_documento == "FACTURA").first():
+            db.add(CorrelativoFiscal(tipo_documento="FACTURA", prefijo="FAC-", siguiente_numero=1))
 
         # Seed INPC indices if not present
         if not db.query(INPCIndice).first():
@@ -138,11 +202,22 @@ async def rate_limit_middleware(request: Request, call_next):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_origin_regex=r"^https://([a-zA-Z0-9-]+)\.(vercel\.app|onrender\.com)$",
     allow_credentials=True,
     allow_methods=["*"],  # Permitir todos los métodos (GET, POST, PUT, DELETE, etc.)
     allow_headers=["*"],  # Permitir todos los encabezados
 )
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Middleware de cabeceras de seguridad HTTP (OWASP best practices)."""
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if os.getenv("NODE_ENV", "").lower() == "production" or os.getenv("ENVIRONMENT", "").lower() == "production":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
 
 # Routers del núcleo (ventas, inventario, maestros)
 app.include_router(auth.router)

@@ -39,8 +39,11 @@ const JournalAudit = () => {
       setIsExporting(true);
       const token = localStorage.getItem('koda_token') || localStorage.getItem('sgd_token');
       const baseUrl = (window.location.hostname.includes('.ts.net') || window.location.hostname.includes('cloudflare')) ? '/api-facturacion' : '/api';
+      const headers: any = {};
+      if (token) headers['Authorization'] = 'Bearer ' + token;
       const response = await fetch(`${baseUrl}/contabilidad/auditoria-ia`, {
-        headers: { 'Authorization': 'Bearer ' + (token || '') },
+        headers,
+        credentials: 'include',
       });
       if (!response.ok) throw new Error('Error ' + response.status);
       const data = await response.json();

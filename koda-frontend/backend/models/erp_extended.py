@@ -727,6 +727,7 @@ class Vehiculo(Base):
     proximo_servicio_km = Column(Numeric(12, 2), nullable=True)
     ultimo_servicio = Column(DateTime, nullable=True)
     activo = Column(Boolean, default=True, nullable=False)
+    clasificacion_ambiente = Column(String(30), default="SECO", nullable=False)  # SECO, REFRIGERADO, CONGELADO, QUIMICO, OTRO
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     turnos = relationship("TurnoDespacho", back_populates="vehiculo")
@@ -774,6 +775,8 @@ class TurnoDespacho(Base):
     telegram_notificado = Column(Boolean, default=False)
     fecha_retorno = Column(DateTime, nullable=True)
     km_retorno = Column(Numeric(12, 2), nullable=True)  # Kilometraje de retorno registrado al liquidar
+    marca_cliente_principal = Column(String(150), nullable=True)  # Marca o nombre del cliente principal del despacho
+    crew_id = Column(Integer, ForeignKey("public.crews.id"), nullable=True)  # Tripulación Fase 4 (Gantt) vinculada al turno
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     vehiculo = relationship("Vehiculo", back_populates="turnos")
@@ -781,6 +784,7 @@ class TurnoDespacho(Base):
     venta = relationship("Venta")
     ventas_asociadas = relationship("TurnoVentaAsociacion", back_populates="turno", cascade="all, delete-orphan")
     gastos = relationship("TurnoGasto", back_populates="turno", cascade="all, delete-orphan")
+    crew = relationship("Crew", foreign_keys=[crew_id])
 
 
 class RegistroMantenimiento(Base):

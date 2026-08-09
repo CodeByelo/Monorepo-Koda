@@ -1,12 +1,15 @@
 import os
 import redis
 import jwt
+import logging
 from datetime import datetime, timezone
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend.core.database import get_db
 from backend.core.security import oauth2_scheme, SECRET_KEY, ALGORITHM
 from backend.models.core import Profile, Tenant
+
+logger = logging.getLogger("koda_auth")
 
 # Configurar Cliente Redis (Síncrono para compatibilidad rápida con auth, en prod usar redis.asyncio si la app es fully async)
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -37,7 +40,7 @@ def get_current_user_from_token(token: str = Depends(oauth2_scheme), db: Session
 
         # 1. Verificar Redis Blacklist (JTI, User Level, Tenant Level)
         if is_token_blacklisted(jti) or redis_client.exists(f"blacklist:user:{user_id}"):
-            print(f"[AUTH ERROR] Token is blacklisted. jti: {jti} | user_id: {user_id}", flush=True)
+            logger.warning("Token is blacklisted. jti: %s | user_id: %s", jti, user_id)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token revocado o sesión cerrada.",
@@ -50,19 +53,27 @@ def get_current_user_from_token(token: str = Depends(oauth2_scheme), db: Session
             )
 
         if not user_id:
-            print("[AUTH ERROR] Missing user_id in token payload", flush=True)
+            logger.warning("Missing user_id in token payload")
             raise credentials_exception
 
     except jwt.PyJWTError as e:
         safe_token = token[:20] if token else "None"
-        print(f"[AUTH ERROR] PyJWTError: {str(e)} | Token prefix: {safe_token}...", flush=True)
+        logger.warning("PyJWTError: %s | Token prefix: %s...", str(e), safe_token)
         raise credentials_exception
 
-    query = db.query(Profile).filter(Profile.id == user_id)
+    import uuid
+    user_id_query = user_id
+    if isinstance(user_id, str):
+        try:
+            user_id_query = uuid.UUID(user_id)
+        except Exception:
+            user_id_query = user_id
+
+    query = db.query(Profile).filter(Profile.id == user_id_query)
     user = query.first()
 
     if user is None:
-        print(f"[AUTH ERROR] User not found in DB. user_id: {user_id}", flush=True)
+        logger.warning("User not found in DB. user_id: %s", user_id)
         raise credentials_exception
 
     # Identificar si es un Desarrollador
@@ -79,14 +90,15 @@ def get_current_user_from_token(token: str = Depends(oauth2_scheme), db: Session
     elif getattr(user, "rol_id", None) == 4:
         is_developer = True
 
-    # Log Auth details for debugging
-    print(f"[AUTH CHECK] Email: {user.email} | ID: {user.id} | TokenRole: {token_role} | DBRoleID: {getattr(user, 'rol_id', None)} | is_developer: {is_developer}", flush=True)
+    # Log Auth details for debugging (debug level — not shown in production)
+    logger.debug("Auth check — Email: %s | ID: %s | TokenRole: %s | DBRoleID: %s | is_developer: %s",
+                 user.email, user.id, token_role, getattr(user, 'rol_id', None), is_developer)
 
     # 2. Control Multi-Tenant
     if not is_developer:
         # Los usuarios normales ESTÁN atados a su tenant.
         if str(user.tenant_id) != str(tenant_id):
-            print(f"[AUTH FORBIDDEN] Tenant mismatch. User: {user.tenant_id} | Token: {tenant_id}", flush=True)
+            logger.warning("Tenant mismatch. User: %s | Token: %s", user.tenant_id, tenant_id)
             raise credentials_exception
 
         # Verificar estado de la licencia del Tenant
@@ -94,7 +106,7 @@ def get_current_user_from_token(token: str = Depends(oauth2_scheme), db: Session
             tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
             if not tenant or tenant.estado_licencia != "ACTIVA":
                 estado = tenant.estado_licencia if tenant else 'NO REGISTRADA'
-                print(f"[AUTH FORBIDDEN] Inactive license for Tenant {user.tenant_id}: {estado}", flush=True)
+                logger.warning("Inactive license for Tenant %s: %s", user.tenant_id, estado)
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"La licencia de su empresa se encuentra: {estado}."

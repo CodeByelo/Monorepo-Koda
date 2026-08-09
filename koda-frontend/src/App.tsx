@@ -4,7 +4,6 @@ import MainLayout from '@/layouts/MainLayout';
 import { AuthProvider, useAuth } from '@/providers/AuthProvider';
 import { SecurityProtector } from '@/components/common/SecurityProtector';
 import Login from '@/pages/Auth/Login';
-import MainDashboard from '@/pages/Dashboard/MainDashboard';
 import {
   ArrowUpRight,
   ArrowDownRight,
@@ -22,6 +21,7 @@ import { Toast } from '@/components/common/Toast';
 import { SystemProvider, useSystem } from '@/providers/SystemProvider';
 
 // ── Lazy-loaded pages (code splitting: solo se cargan al navegar) ────────────
+const MainDashboard           = lazy(() => import('./pages/Dashboard/MainDashboard'));
 const PayrollDashboard        = lazy(() => import('./pages/Payroll/PayrollDashboard'));
 const AuditorLedger           = lazy(() => import('./pages/Auditor/AuditorLedger'));
 const SalesDashboard          = lazy(() => import('./pages/Sales/SalesDashboard'));
@@ -218,7 +218,11 @@ const DashboardHome = () => {
   if (activeSystem === 'fiscal') return <FiscalDashboard />;
   if (activeSystem === 'nomina') return <PayrollDashboard />;
 
-  return <MainDashboard />;
+  return (
+    <Suspense fallback={<PageLoader />}>
+      <MainDashboard />
+    </Suspense>
+  );
 };
 
 // --- VISTA: CENTRO DE ALERTAS ---
@@ -576,18 +580,11 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 };
 
 function App() {
-  const getBasename = () => {
-    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/facturacion')) {
-      return '/facturacion';
-    }
-    return undefined;
-  };
-
   return (
     <AuthProvider>
       <SecurityProtector>
         <SystemProvider>
-        <Router basename={getBasename()} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <Router basename="/facturacion" future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
           <Route path="/auditoria/ledger" element={
             <Suspense fallback={<PageLoader />}>
