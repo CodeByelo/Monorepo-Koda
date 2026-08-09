@@ -276,13 +276,17 @@ origins = [
     "http://10.0.2.15:3000",
     "http://10.0.2.15:8000",
     "https://koda-remaster.vercel.app",
-    "https://sistema-corpoelect-backend.onrender.com"
+    "https://monorepo-koda.vercel.app",
+    "https://koda-billing-front.vercel.app",
+    "https://sistema-corpoelect-backend.onrender.com",
+    "https://monorepo-koda.onrender.com",
+    "https://koda-backend-contable.onrender.com",
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_origin_regex=r"^https://(koda-remaster|sistema-corpoelect)(-[a-zA-Z0-9-]+)?\.vercel\.app$",
+    allow_origin_regex=r"^https://.*\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

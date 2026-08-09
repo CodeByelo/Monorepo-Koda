@@ -179,6 +179,11 @@ origins = [
     "http://localhost:5175",
     "http://127.0.0.1:5175",
     "http://localhost:8000",
+    "https://koda-billing-front.vercel.app",
+    "https://monorepo-koda.vercel.app",
+    "https://koda-remaster.vercel.app",
+    "https://monorepo-koda.onrender.com",
+    "https://koda-backend-contable.onrender.com",
 ]
 
 @app.middleware("http")
@@ -202,6 +207,7 @@ async def rate_limit_middleware(request: Request, call_next):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=r"^https://.*\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["*"],  # Permitir todos los métodos (GET, POST, PUT, DELETE, etc.)
     allow_headers=["*"],  # Permitir todos los encabezados
