@@ -20,9 +20,9 @@ const SalesDashboard = () => {
           api.get<any>('/ventas/reporte'),
           api.get<any[]>('/clientes')
         ]);
-        setInvoices(ventasData);
-        setReport(reporteData);
-        setClientes(clientesData);
+        setInvoices(Array.isArray(ventasData) ? ventasData : []);
+        setReport(reporteData && typeof reporteData === 'object' && !('detail' in reporteData) ? reporteData : null);
+        setClientes(Array.isArray(clientesData) ? clientesData : []);
       } catch (error) {
         console.error("Error cargando datos del dashboard:", error);
       } finally {

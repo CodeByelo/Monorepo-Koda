@@ -24,13 +24,12 @@ const PurchaseOrders = () => {
     const fetchOrders = async () => {
       try {
         const res: any = await api.get('/compras/ordenes');
-        setOrders(res || []);
+        setOrders(Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []));
       } catch (error) {
         console.error("Error fetching purchase orders", error);
-        // Fallback or generic fetch if /compras/ordenes fails
         try {
           const res2: any = await api.get('/compras');
-          setOrders(res2.data || res2 || []);
+          setOrders(Array.isArray(res2) ? res2 : (Array.isArray(res2?.data) ? res2.data : []));
         } catch (e2) {}
       } finally {
         setIsLoading(false);

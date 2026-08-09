@@ -22,6 +22,17 @@ class ErrorBoundary extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('Uncaught error:', error, errorInfo);
+    if (error?.message && (
+      error.message.includes('Failed to fetch dynamically imported module') ||
+      error.message.includes('Importing a module script failed') ||
+      error.message.includes('Expected a JavaScript-or-Wasm module script')
+    )) {
+      const hasReloaded = sessionStorage.getItem('chunk_reload_attempted');
+      if (!hasReloaded) {
+        sessionStorage.setItem('chunk_reload_attempted', 'true');
+        window.location.reload();
+      }
+    }
   }
 
   public render() {

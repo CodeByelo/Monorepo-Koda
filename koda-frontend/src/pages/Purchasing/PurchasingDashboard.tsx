@@ -36,9 +36,9 @@ const PurchasingDashboard = () => {
           api.get<any[]>('/compras/historial'),
           api.get<any>('/compras/dashboard')
         ]);
-        setProveedores(provRes || []);
-        setCompras(comprasRes || []);
-        setDashboard(dashboardRes || null);
+        setProveedores(Array.isArray(provRes) ? provRes : []);
+        setCompras(Array.isArray(comprasRes) ? comprasRes : []);
+        setDashboard(dashboardRes && typeof dashboardRes === 'object' && !('detail' in dashboardRes) ? dashboardRes : null);
       } catch (error) {
         console.error("Error fetching purchasing data", error);
       } finally {
@@ -48,14 +48,14 @@ const PurchasingDashboard = () => {
     fetchData();
   }, []);
 
-  const purchaseHistory = compras;
+  const purchaseHistory = Array.isArray(compras) ? compras : [];
 
-  const metrics = dashboard?.metricas || [];
+  const metrics = Array.isArray(dashboard?.metricas) ? dashboard.metricas : [];
   
   const pendingOrdersMetric = metrics.find((m: any) => m.t === 'Órdenes Pendientes' || m.desc === 'Por aprobar');
   const pendingOrdersCount = pendingOrdersMetric && !isNaN(Number(pendingOrdersMetric.v)) ? Number(pendingOrdersMetric.v) : 0;
 
-  const distribucionGastos = dashboard?.distribucion || [];
+  const distribucionGastos = Array.isArray(dashboard?.distribucion) ? dashboard.distribucion : [];
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-20">

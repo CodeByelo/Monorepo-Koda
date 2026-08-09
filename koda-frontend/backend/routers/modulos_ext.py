@@ -121,7 +121,7 @@ def compras_historial(db: Session = Depends(get_db), current_user = Depends(get_
     
     purchases_list = [
         {
-            "date": c.fecha.strftime("%d/%m/%Y"),
+            "date": c.fecha.strftime("%d/%m/%Y") if c.fecha else "",
             "id": c.numero_factura,
             "vendor": c.proveedor.nombre if c.proveedor else "",
             "amount": f"${to_float(c.total):,.2f}",
@@ -169,7 +169,7 @@ def facturas_proveedor(db: Session = Depends(get_db), current_user = Depends(get
             "id": c.id,
             "numero_factura": c.numero_factura,
             "numero_control": c.numero_control,
-            "fecha": c.fecha.strftime("%d/%m/%Y"),
+            "fecha": c.fecha.strftime("%d/%m/%Y") if c.fecha else "",
             "proveedor": c.proveedor.nombre if c.proveedor else "",
             "rif": c.proveedor.rif if c.proveedor else "",
             "total": float(c.total_usd),
@@ -254,7 +254,7 @@ def recepciones(db: Session = Depends(get_db), current_user = Depends(get_curren
         res.append({
             "id": r.id,
             "hoja_id": r.hoja_id,
-            "fecha": r.fecha.strftime("%Y-%m-%d"),
+            "fecha": r.fecha.strftime("%Y-%m-%d") if r.fecha else "",
             "cantidad": float(r.cantidad),
             "costo": float(r.costo_usd),
             "estado": r.estado,
@@ -332,7 +332,7 @@ def devoluciones(db: Session = Depends(get_db), current_user = Depends(get_curre
         res.append({
             "id": d.id,
             "numero_devolucion": d.numero_devolucion,
-            "fecha": d.fecha.strftime("%Y-%m-%d"),
+            "fecha": d.fecha.strftime("%Y-%m-%d") if d.fecha else "",
             "proveedor": prov.nombre if prov else "Desconocido",
             "monto": float(d.monto_usd),
             "estado": d.estado
@@ -510,7 +510,7 @@ def analisis_costos(db: Session = Depends(get_db), current_user = Depends(get_cu
 
     compras_por_mes = {}
     for compra in compras:
-        mes = compra.fecha.strftime("%Y-%m")
+        mes = compra.fecha.strftime("%Y-%m") if compra.fecha else "N/A"
         compras_por_mes[mes] = compras_por_mes.get(mes, 0) + to_float(compra.total)
 
     max_total = max(compras_por_mes.values(), default=0)
@@ -3882,6 +3882,13 @@ def reporte_vendedores(db: Session = Depends(get_db), current_user = Depends(get
     from backend.models.erp_extended import Vendedor, CuentaPorCobrar
     from backend.models.operations import Venta
     from datetime import datetime, timezone
+    
+    ventas = db.query(Venta).filter(Venta.tenant_id == current_user.tenant_id, Venta.estado == "ACTIVA").all()
+    cxc = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.tenant_id == current_user.tenant_id).all()
+    
+    total_facturado = sum(to_float(v.total_usd) for v in ventas)
+    total_cobrado = sum(to_float(c.monto_pagado_usd) for c in cxc)
+    sales_force = []
     
     vendedores = db.query(Vendedor).filter(
         Vendedor.tenant_id == current_user.tenant_id,

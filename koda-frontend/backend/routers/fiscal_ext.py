@@ -894,12 +894,14 @@ def exportar_retenciones_islr(periodo: str = Query(...), db: Session = Depends(g
     )
 
 @router.get("/declaracion-islr")
-def declaracion_islr_calc(periodo: str = Query(...), db: Session = Depends(get_db)):
+def declaracion_islr_calc(periodo: Optional[str] = None, anio: Optional[str] = None, db: Session = Depends(get_db)):
     # Proyección básica: sumar ventas y compras del año
-    from backend.models.operations import Venta, Compra
+    from backend.models.operations import Venta
+    from backend.models.erp_extended import Compra
     from sqlalchemy import extract
     
-    year = int(periodo)
+    val_periodo = anio or periodo or str(datetime.now().year)
+    year = int(val_periodo)
     
     decl = db.query(DeclaracionISLR).filter(DeclaracionISLR.ejercicio == str(year)).first()
     

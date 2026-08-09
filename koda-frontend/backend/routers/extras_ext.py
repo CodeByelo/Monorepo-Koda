@@ -900,6 +900,7 @@ def obtener_cuentas(db: Session = Depends(get_db), current_user = Depends(get_cu
     ]
 
 
+@router.get("/tesoreria/flujo")
 @router.get("/tesoreria/flujo-caja")
 def obtener_flujo_caja(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     from backend.models.erp_extended import CuentaPorCobrar, CuentaPorPagar
@@ -913,7 +914,7 @@ def obtener_flujo_caja(db: Session = Depends(get_db), current_user = Depends(get
         monto_pendiente = to_float(c.monto_total_usd) - to_float(c.monto_pagado_usd)
         if monto_pendiente > 0:
             proyecciones.append({
-                "date": c.fecha_vencimiento.strftime("%d/%m/%Y"),
+                "date": c.fecha_vencimiento.strftime("%d/%m/%Y") if c.fecha_vencimiento else "",
                 "concept": f"Cobro Factura {c.numero_documento}",
                 "sub": c.cliente.nombre if c.cliente else "Cliente General",
                 "area": "Cobranzas",
@@ -930,7 +931,7 @@ def obtener_flujo_caja(db: Session = Depends(get_db), current_user = Depends(get
         if monto_pendiente > 0:
             is_critical = monto_pendiente > 500.0
             proyecciones.append({
-                "date": p.fecha_vencimiento.strftime("%d/%m/%Y"),
+                "date": p.fecha_vencimiento.strftime("%d/%m/%Y") if p.fecha_vencimiento else "",
                 "concept": f"Pago Factura {p.numero_documento}",
                 "sub": p.proveedor.nombre if p.proveedor else "Proveedor General",
                 "area": "Compras",
@@ -1427,7 +1428,7 @@ def movimientos_caja(db: Session = Depends(get_db), current_user = Depends(get_c
         "movimientos": [
             {
                 "id": m.id,
-                "date": m.fecha.strftime("%d/%m/%Y"),
+                "date": m.fecha.strftime("%d/%m/%Y") if m.fecha else "",
                 "desc": m.concepto,
                 "amount": f"{'+' if m.tipo == 'INGRESO' else '-'}${to_float(m.monto_usd):,.2f}",
                 "support": "Factura" if m.referencia else "Sin Soporte",
@@ -2451,7 +2452,7 @@ def exportar_diario_txt(db: Session = Depends(get_db)):
     
     txt_content = "FECHA|REFERENCIA|CODIGO_CUENTA|NOMBRE_CUENTA|CONCEPTO|DEBE_USD|HABER_USD\r\n"
     for a in asientos:
-        fecha_str = a.fecha.strftime("%d/%m/%Y")
+        fecha_str = a.fecha.strftime("%d/%m/%Y") if a.fecha else ""
         for d in a.detalles:
             debe = f"{float(d.debe_usd):.2f}"
             haber = f"{float(d.haber_usd):.2f}"

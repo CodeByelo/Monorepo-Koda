@@ -13,7 +13,7 @@ const Requisitions = () => {
   useEffect(() => {
     setIsLoading(true);
     api.get<any[]>('/compras/requisiciones')
-      .then((data) => setRequisitions(data || []))
+      .then((data) => setRequisitions(Array.isArray(data) ? data : []))
       .catch((error) => console.error('Error fetching requisitions:', error))
       .finally(() => setIsLoading(false));
   }, []);
