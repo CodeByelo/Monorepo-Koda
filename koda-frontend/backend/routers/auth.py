@@ -68,11 +68,25 @@ def login(request: Request, user_in: UserLogin, db: Session = Depends(get_db)):
     client_ip = get_real_ip_str(request)
     
     # Verificar si el usuario está bloqueado por fuerza bruta (por IP + username)
-    lock_row = (
-        db.query(LoginLockout)
-        .filter(LoginLockout.username == identifier, LoginLockout.ip_address == client_ip)
-        .first()
-    )
+    lock_row = None
+    try:
+        lock_row = (
+            db.query(LoginLockout)
+            .filter(LoginLockout.username == identifier, LoginLockout.ip_address == client_ip)
+            .first()
+        )
+    except Exception:
+        db.rollback()
+        try:
+            lock_row = (
+                db.query(LoginLockout)
+                .filter(LoginLockout.username == identifier)
+                .first()
+            )
+        except Exception:
+            db.rollback()
+            lock_row = None
+
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     
     if lock_row and lock_row.locked_until and lock_row.locked_until > now_utc:
@@ -96,14 +110,16 @@ def login(request: Request, user_in: UserLogin, db: Session = Depends(get_db)):
         elif failed_count >= 3:
             locked_until = now_utc + timedelta(minutes=1)
         
-        if not lock_row:
-            lock_row = LoginLockout(username=identifier, ip_address=client_ip, failed_count=failed_count, locked_until=locked_until)
-            db.add(lock_row)
-        else:
-            lock_row.failed_count = failed_count
-            lock_row.locked_until = locked_until
-            
-        db.commit()
+        try:
+            if not lock_row:
+                lock_row = LoginLockout(username=identifier, ip_address=client_ip, failed_count=failed_count, locked_until=locked_until)
+                db.add(lock_row)
+            else:
+                lock_row.failed_count = failed_count
+                lock_row.locked_until = locked_until
+            db.commit()
+        except Exception:
+            db.rollback()
         
         if locked_until:
             raise HTTPException(

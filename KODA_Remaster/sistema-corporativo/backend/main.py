@@ -443,11 +443,17 @@ async def startup():
             """)
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS login_lockouts (
-                    username TEXT PRIMARY KEY,
+                    username TEXT NOT NULL,
+                    ip_address TEXT NOT NULL DEFAULT 'unknown',
                     failed_count INT NOT NULL DEFAULT 0,
-                    locked_until TIMESTAMPTZ
+                    locked_until TIMESTAMPTZ,
+                    PRIMARY KEY (username, ip_address)
                 )
             """)
+            try:
+                await conn.execute("ALTER TABLE login_lockouts ADD COLUMN IF NOT EXISTS ip_address TEXT NOT NULL DEFAULT 'unknown'")
+            except Exception:
+                pass
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS dashboard_announcement (
                     id INT PRIMARY KEY DEFAULT 1,
@@ -952,12 +958,29 @@ async def login_compat(
 
     client_ip = _extract_client_ip(request) or "unknown"
 
-    # Verificar lockout por IP + username (no solo username, para evitar DoS)
-    lock_row = await conn.fetchrow(
-        "SELECT failed_count, locked_until FROM login_lockouts WHERE username = $1 AND ip_address = $2",
-        username_norm,
-        client_ip,
-    )
+    # Intentar asegurar que la tabla tiene la columna ip_address
+    try:
+        await conn.execute("ALTER TABLE login_lockouts ADD COLUMN IF NOT EXISTS ip_address TEXT NOT NULL DEFAULT 'unknown'")
+    except Exception:
+        pass
+
+    # Verificar lockout por IP + username (con fallback resiliente si ip_address no existe)
+    lock_row = None
+    try:
+        lock_row = await conn.fetchrow(
+            "SELECT failed_count, locked_until FROM login_lockouts WHERE username = $1 AND ip_address = $2",
+            username_norm,
+            client_ip,
+        )
+    except Exception:
+        try:
+            lock_row = await conn.fetchrow(
+                "SELECT failed_count, locked_until FROM login_lockouts WHERE username = $1",
+                username_norm,
+            )
+        except Exception:
+            lock_row = None
+
     now_utc = datetime.now(timezone.utc)
     if lock_row and lock_row["locked_until"] and lock_row["locked_until"] > now_utc:
         remaining_seconds = int((lock_row["locked_until"] - now_utc).total_seconds())
@@ -1000,18 +1023,35 @@ async def login_compat(
         elif failed_count >= 3:
             locked_until = now_utc + timedelta(minutes=1)
 
-        await conn.execute(
-            """
-            INSERT INTO login_lockouts (username, ip_address, failed_count, locked_until)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (username, ip_address)
-            DO UPDATE SET failed_count = EXCLUDED.failed_count, locked_until = EXCLUDED.locked_until
-            """,
-            username_norm,
-            client_ip,
-            failed_count,
-            locked_until,
-        )
+        try:
+            await conn.execute(
+                """
+                INSERT INTO login_lockouts (username, ip_address, failed_count, locked_until)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (username, ip_address)
+                DO UPDATE SET failed_count = EXCLUDED.failed_count, locked_until = EXCLUDED.locked_until
+                """,
+                username_norm,
+                client_ip,
+                failed_count,
+                locked_until,
+            )
+        except Exception:
+            try:
+                await conn.execute(
+                    """
+                    INSERT INTO login_lockouts (username, failed_count, locked_until)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (username)
+                    DO UPDATE SET failed_count = EXCLUDED.failed_count, locked_until = EXCLUDED.locked_until
+                    """,
+                    username_norm,
+                    failed_count,
+                    locked_until,
+                )
+            except Exception:
+                pass
+
         try:
             await _ensure_security_events_table(conn)
             await conn.execute(
@@ -1030,6 +1070,7 @@ async def login_compat(
             )
         except Exception:
             pass
+
         if locked_until:
             remaining_seconds = int((locked_until - now_utc).total_seconds())
             raise HTTPException(
@@ -1052,8 +1093,14 @@ async def login_compat(
             },
         )
 
-    # Login exitoso — limpiar lockouts para esta IP+usuario
-    await conn.execute("DELETE FROM login_lockouts WHERE username = $1 AND ip_address = $2", username_norm, client_ip)
+    # Login exitoso — limpiar lockouts de forma segura
+    try:
+        await conn.execute("DELETE FROM login_lockouts WHERE username = $1 AND ip_address = $2", username_norm, client_ip)
+    except Exception:
+        try:
+            await conn.execute("DELETE FROM login_lockouts WHERE username = $1", username_norm)
+        except Exception:
+            pass
 
     role_norm = _normalize_text(user["nombre_rol"])
     is_dev = role_norm in {"desarrollador", "dev", "developer"}
