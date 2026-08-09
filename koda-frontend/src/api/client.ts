@@ -1,7 +1,15 @@
+const isProductionFrontend = typeof window !== 'undefined' && (
+  window.location.hostname.includes('vercel.app') ||
+  window.location.hostname.includes('onrender.com') ||
+  window.location.hostname.includes('cloudflare')
+);
+
 export let BASE_URL = (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_API_URL) || (
-  typeof window !== 'undefined' && (window.location.hostname.includes('cloudflare') || window.location.hostname.includes('.ts.net'))
+  isProductionFrontend
+    ? 'https://koda-backend-contable.onrender.com'
+    : (typeof window !== 'undefined' && window.location.hostname.includes('.ts.net'))
     ? '/api-facturacion'
-    : '/api'
+    : 'http://localhost:8000'
 );
 
 if (BASE_URL && !BASE_URL.startsWith('http://') && !BASE_URL.startsWith('https://') && !BASE_URL.startsWith('/')) {
@@ -17,10 +25,17 @@ export async function request<T>(endpoint: string, options: RequestInit = {}): P
     headers['Content-Type'] = 'application/json';
   }
 
-  // Fallback: si hay token en localStorage, enviarlo como Bearer header
-  // (compatibilidad con APIs externas o durante la migración a cookies)
+  // Fallback: si hay token en localStorage o en URL params, enviarlo como Bearer header
   if (!headers['Authorization']) {
-    const token = localStorage.getItem('koda_token') || localStorage.getItem('sgd_token');
+    let token = typeof window !== 'undefined' ? (localStorage.getItem('koda_token') || localStorage.getItem('sgd_token')) : null;
+    if (!token && typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      token = urlParams.get('token');
+      if (token) {
+        localStorage.setItem('koda_token', token);
+        localStorage.setItem('sgd_token', token);
+      }
+    }
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
@@ -42,9 +57,7 @@ export async function request<T>(endpoint: string, options: RequestInit = {}): P
     }
 
     if (response.status === 401) {
-      localStorage.removeItem('koda_token');
-      localStorage.removeItem('sgd_token');
-      window.location.href = '/';
+      console.warn(`[API] 401 Unauthorized en ${endpoint}`);
     }
 
     if (response.status === 403 && errorMessage.toLowerCase().includes('licencia')) {

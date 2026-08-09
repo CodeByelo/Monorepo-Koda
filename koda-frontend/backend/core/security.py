@@ -84,6 +84,11 @@ def get_token_from_request(request: Request) -> Optional[str]:
     if auth_header.lower().startswith("bearer "):
         return auth_header[7:].strip()
 
+    # 3. Query Parameter 'token' (?token=...)
+    token_param = request.query_params.get("token")
+    if token_param:
+        return token_param
+
     return None
 
 # Definición de dependencias con importación perezosa para romper la dependencia circular en tiempo de carga
