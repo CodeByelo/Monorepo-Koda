@@ -18,7 +18,7 @@ print("DATABASE_URL cargada: " + (os.getenv("SUPABASE_DB_URL") or "Vacio/None"))
 DEV_ROLE_MASTER_PASSWORD = os.getenv("DEV_ROLE_MASTER_PASSWORD", "")
 
 from fastapi import FastAPI, Depends, HTTPException, Request, Query, UploadFile, File as FastAPIFile, Form
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
@@ -242,12 +242,12 @@ async def add_observability_context(request: Request, call_next):
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
     response.headers.setdefault(
         "Content-Security-Policy",
-        "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com; frame-ancestors 'self';"
+        "frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com; frame-ancestors 'self' https://*.vercel.app https://monorepo-koda.vercel.app http://localhost:3000 http://localhost:5173 http://localhost:5174 https://*.ts.net;"
     )
     if os.getenv("NODE_ENV", "").lower() == "production":
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
@@ -372,9 +372,20 @@ uploads_dir = Path("uploads")
 uploads_dir.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
-facturacion_dist = Path(__file__).resolve().parent.parent.parent / "koda-frontend" / "dist"
-if facturacion_dist.exists():
+facturacion_dist_candidates = [
+    Path(__file__).resolve().parent.parent.parent / "koda-frontend" / "dist",
+    Path("koda-frontend/dist"),
+    Path("../koda-frontend/dist"),
+    Path("dist"),
+]
+facturacion_dist = next((p for p in facturacion_dist_candidates if p.exists() and p.is_dir()), None)
+if facturacion_dist:
     app.mount("/facturacion", StaticFiles(directory=str(facturacion_dist), html=True), name="facturacion")
+else:
+    @app.get("/facturacion", response_class=HTMLResponse)
+    @app.get("/facturacion/", response_class=HTMLResponse)
+    async def facturacion_fallback():
+        return HTMLResponse(content="<h2>Módulo de Facturación Koda ERP</h2><p>El frontend estático de facturación se está cargando.</p>")
 
 # INCLUSIÓN DE ROUTERS
 app.include_router(auth_router.router)
