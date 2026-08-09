@@ -515,10 +515,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
       <div className="flex items-center justify-center min-h-screen bg-[#f4f6f8]">
         <div className="text-center p-12 bg-white rounded-3xl shadow-sm border border-slate-200">
           <h2 className="text-2xl font-black text-slate-800 uppercase mb-2">Acceso Restringido</h2>
-          <p className="text-sm font-bold text-slate-500 uppercase mb-6">Esta aplicación debe ser accedida a través de KODA Remaster.</p>
-          <Link to="/login" className="px-6 py-2 bg-[#0b5156] text-white text-xs font-black uppercase rounded-xl hover:bg-[#083a3d] transition-colors">
-            Iniciar Sesión Manual
-          </Link>
+          <p className="text-sm font-bold text-slate-500 uppercase">Esta aplicación solo puede ser accedida a través del sistema KODA Remaster.</p>
         </div>
       </div>
     );
@@ -598,7 +595,7 @@ function App() {
               <AuditorLedger />
             </Suspense>
           } />
-          <Route path="/login" element={<Login />} />
+          <Route path="/login" element={<Navigate to="/" replace />} />
           <Route path="*" element={
             <ProtectedRoute>
             <MainLayout>

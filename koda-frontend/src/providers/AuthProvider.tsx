@@ -22,22 +22,44 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [token, setToken] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
-      // En desarrollo, usar un token hardcodeado para bypass
+      // 1. Extraer token recibido desde URL (?token=...)
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlToken = urlParams.get('token');
+      if (urlToken) {
+        localStorage.setItem('koda_token', urlToken);
+        localStorage.setItem('sgd_token', urlToken);
+        return urlToken;
+      }
+
+      // 2. Verificar si existe token previo en localStorage
+      const kodaToken = localStorage.getItem('koda_token');
+      const sgdToken = localStorage.getItem('sgd_token');
+      if (kodaToken || sgdToken) {
+        return kodaToken || sgdToken;
+      }
+
+      // 3. En modo desarrollo local, usar token dev fallback
       if ((import.meta as any).env && (import.meta as any).env.DEV) {
         const devToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZWY1MjY0MC0wOTZmLTQzNjctYjkxMy0wN2UyOTIzODc2MzgiLCJyb2xlIjoiRGVzYXJyb2xsYWRvciIsInVzZXJuYW1lIjoiSGVucnkgUm9kcmlndWV6IiwiZW1haWwiOiJoZW5yeWRkYW5pZWwxOTEwQGdtYWlsLmNvbSJ9.6--QCWH9gYF0y-6n0BMjLsyS4NHdoojLAQunJiP1WTM";
-        // Mantener en localStorage como fallback para dev
         localStorage.setItem('koda_token', devToken);
         localStorage.setItem('sgd_token', devToken);
         return devToken;
       }
-      
-      // Verificar si existe un token en localStorage (legacy / migración)
-      const kodaToken = localStorage.getItem('koda_token');
-      const sgdToken = localStorage.getItem('sgd_token');
-      return kodaToken || sgdToken || null;
     }
     return null;
   });
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlToken = urlParams.get('token');
+      if (urlToken && urlToken !== token) {
+        localStorage.setItem('koda_token', urlToken);
+        localStorage.setItem('sgd_token', urlToken);
+        setToken(urlToken);
+      }
+    }
+  }, [token]);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
