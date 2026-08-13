@@ -21,7 +21,10 @@ def procesar_nomina_quincenal(
     Genera el lote de nómina calculando el Sueldo Bruto, Deducciones de Ley (IVSS 4%, FAOV 1%)
     y el Sueldo Neto. Genera el Asiento Contable Automático valorizado a la tasa del día.
     """
-    empleados = db.query(Empleado).filter(Empleado.activo == 1).all()
+    empleados = db.query(Empleado).filter(
+        Empleado.activo == 1,
+        Empleado.tenant_id == current_user.tenant_id,
+    ).all()
     if not empleados:
         raise HTTPException(status_code=400, detail="No hay empleados activos para procesar.")
         
@@ -56,7 +59,8 @@ def procesar_nomina_quincenal(
     
     # 1. Crear el registro maestro de la Nómina
     nueva_nomina = Nomina(
-        periodo=periodo, 
+        tenant_id=current_user.tenant_id,
+        periodo=periodo,
         total_asignaciones_usd=total_asignaciones_usd,
         total_bonos_usd=total_bonos_usd,
         total_deducciones_usd=total_deducciones_usd,

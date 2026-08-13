@@ -37,8 +37,11 @@ def _require_tenant(current_user):
     return current_user.tenant_id
 
 
-def _get_period_or_404(db: Session, period_id: int) -> RHPayrollPeriod:
-    period = db.query(RHPayrollPeriod).filter(RHPayrollPeriod.id == period_id).first()
+def _get_period_or_404(db: Session, period_id: int, tenant_id) -> RHPayrollPeriod:
+    period = db.query(RHPayrollPeriod).filter(
+        RHPayrollPeriod.id == period_id,
+        RHPayrollPeriod.tenant_id == tenant_id,
+    ).first()
     if not period:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Período de nómina no encontrado.")
     return period
@@ -157,8 +160,13 @@ def list_concepts(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    _require_tenant(current_user)
-    return db.query(RHConcept).order_by(RHConcept.tipo.asc(), RHConcept.nombre.asc()).all()
+    tenant_id = _require_tenant(current_user)
+    return (
+        db.query(RHConcept)
+        .filter(RHConcept.tenant_id == tenant_id)
+        .order_by(RHConcept.tipo.asc(), RHConcept.nombre.asc())
+        .all()
+    )
 
 
 @router.post("/concepts", response_model=ConceptResponse, status_code=status.HTTP_201_CREATED)
@@ -167,12 +175,15 @@ def create_concept(
     db: Session = Depends(get_db),
     current_user=Depends(require_role(["Admin", "Gerente"])),
 ):
-    _require_tenant(current_user)
-    exists = db.query(RHConcept).filter(RHConcept.nombre == concept_in.nombre).first()
+    tenant_id = _require_tenant(current_user)
+    exists = db.query(RHConcept).filter(
+        RHConcept.nombre == concept_in.nombre,
+        RHConcept.tenant_id == tenant_id,
+    ).first()
     if exists:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ya existe un concepto con ese nombre.")
 
-    concept = RHConcept(**concept_in.model_dump())
+    concept = RHConcept(**concept_in.model_dump(), tenant_id=tenant_id)
     db.add(concept)
     db.commit()
     db.refresh(concept)
@@ -184,8 +195,13 @@ def list_periods(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    _require_tenant(current_user)
-    return db.query(RHPayrollPeriod).order_by(RHPayrollPeriod.fecha_inicio.desc()).all()
+    tenant_id = _require_tenant(current_user)
+    return (
+        db.query(RHPayrollPeriod)
+        .filter(RHPayrollPeriod.tenant_id == tenant_id)
+        .order_by(RHPayrollPeriod.fecha_inicio.desc())
+        .all()
+    )
 
 
 @router.post("/periods", response_model=PayrollPeriodResponse, status_code=status.HTTP_201_CREATED)
@@ -194,12 +210,15 @@ def create_period(
     db: Session = Depends(get_db),
     current_user=Depends(require_role(["Admin", "Gerente"])),
 ):
-    _require_tenant(current_user)
-    exists = db.query(RHPayrollPeriod).filter(RHPayrollPeriod.nombre_periodo == period_in.nombre_periodo).first()
+    tenant_id = _require_tenant(current_user)
+    exists = db.query(RHPayrollPeriod).filter(
+        RHPayrollPeriod.nombre_periodo == period_in.nombre_periodo,
+        RHPayrollPeriod.tenant_id == tenant_id,
+    ).first()
     if exists:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ya existe un período con ese nombre.")
 
-    period = RHPayrollPeriod(**period_in.model_dump())
+    period = RHPayrollPeriod(**period_in.model_dump(), tenant_id=tenant_id)
     db.add(period)
     db.commit()
     db.refresh(period)
@@ -212,16 +231,16 @@ def list_details(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    _require_tenant(current_user)
-    _get_period_or_404(db, period_id)
+    tenant_id = _require_tenant(current_user)
+    _get_period_or_404(db, period_id, tenant_id)
     return (
         db.query(RHPayrollDetail)
         .join(RHEmployee, RHPayrollDetail.employee_id == RHEmployee.id)
         .join(Profile, RHEmployee.id == Profile.id)
         .filter(
             RHPayrollDetail.period_id == period_id,
-            RHEmployee.tenant_id == _require_tenant(current_user),
-            Profile.tenant_id == _require_tenant(current_user),
+            RHEmployee.tenant_id == tenant_id,
+            Profile.tenant_id == tenant_id,
             Profile.estado.is_(True),
         )
         .all()
@@ -234,8 +253,8 @@ def bulk_save_details(
     db: Session = Depends(get_db),
     current_user=Depends(require_role(["Admin", "Gerente"])),
 ):
-    _require_tenant(current_user)
-    _get_period_or_404(db, payload.period_id)
+    tenant_id = _require_tenant(current_user)
+    _get_period_or_404(db, payload.period_id, tenant_id)
 
     saved_details: list[RHPayrollDetail] = []
     try:
@@ -248,14 +267,17 @@ def bulk_save_details(
                 .join(Profile, RHEmployee.id == Profile.id)
                 .filter(
                     RHEmployee.id == item.employee_id,
-                    RHEmployee.tenant_id == _require_tenant(current_user),
+                    RHEmployee.tenant_id == tenant_id,
                     RHEmployee.status == "activo",
-                    Profile.tenant_id == _require_tenant(current_user),
+                    Profile.tenant_id == tenant_id,
                     Profile.estado.is_(True),
                 )
                 .first()
             )
-            concept = db.query(RHConcept).filter(RHConcept.id == item.concept_id).first()
+            concept = db.query(RHConcept).filter(
+                RHConcept.id == item.concept_id,
+                RHConcept.tenant_id == tenant_id,
+            ).first()
             if not employee or not concept:
                 raise HTTPException(status_code=404, detail="Empleado o concepto no encontrado.")
 
@@ -295,16 +317,16 @@ def process_pre_payroll(
     db: Session = Depends(get_db),
     current_user=Depends(require_role(["Admin", "Gerente"])),
 ):
-    _require_tenant(current_user)
+    tenant_id = _require_tenant(current_user)
     _sync_profile_employees(db, current_user)
-    period = _get_period_or_404(db, period_id)
+    period = _get_period_or_404(db, period_id, tenant_id)
     employees = (
         db.query(RHEmployee)
         .join(Profile, RHEmployee.id == Profile.id)
         .filter(
-            RHEmployee.tenant_id == _require_tenant(current_user),
+            RHEmployee.tenant_id == tenant_id,
             RHEmployee.status == "activo",
-            Profile.tenant_id == _require_tenant(current_user),
+            Profile.tenant_id == tenant_id,
             Profile.estado.is_(True),
         )
         .order_by(RHEmployee.nombres.asc())
@@ -316,7 +338,10 @@ def process_pre_payroll(
     details = (
         db.query(RHPayrollDetail)
         .join(RHConcept, RHPayrollDetail.concept_id == RHConcept.id)
-        .filter(RHPayrollDetail.period_id == period.id)
+        .filter(
+            RHPayrollDetail.period_id == period.id,
+            RHPayrollDetail.tenant_id == tenant_id,
+        )
         .all()
     )
     details_by_employee = {}
@@ -388,7 +413,7 @@ def confirm_payroll(
     current_user=Depends(require_role(["Admin", "Gerente"])),
 ):
     tenant_id = _require_tenant(current_user)
-    period = _get_period_or_404(db, period_id)
+    period = _get_period_or_404(db, period_id, tenant_id)
     if period.status == "procesado":
         raise HTTPException(status_code=400, detail="Este período ya fue procesado y contabilizado.")
         
