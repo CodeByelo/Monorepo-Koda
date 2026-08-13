@@ -128,7 +128,10 @@ def eliminar_cuenta(id: int, db: Session = Depends(get_db), current_user = Depen
         raise HTTPException(status_code=404, detail="Cuenta contable no encontrada")
         
     from backend.models.accounting import AsientoDetalle
-    has_movs = db.query(AsientoDetalle).filter(AsientoDetalle.cuenta_codigo == cuenta.codigo).first()
+    has_movs = db.query(AsientoDetalle).join(AsientoContable).filter(
+        AsientoDetalle.cuenta_codigo == cuenta.codigo,
+        AsientoContable.tenant_id == current_user.tenant_id
+    ).first()
     if has_movs:
         raise HTTPException(status_code=400, detail="No se puede eliminar una cuenta que tiene asientos contables registrados.")
         
@@ -491,9 +494,15 @@ def monitor_forense(db: Session = Depends(get_db), current_user = Depends(get_cu
         "diferencia": float(header_detail_diff)
     })
     
-    # 3. Overdraft Control
-    caja_debe = db.query(func.sum(AsientoDetalle.debe_usd)).filter(AsientoDetalle.cuenta_codigo.like("1101%")).scalar() or Decimal("0.00")
-    caja_haber = db.query(func.sum(AsientoDetalle.haber_usd)).filter(AsientoDetalle.cuenta_codigo.like("1101%")).scalar() or Decimal("0.00")
+    # 3. Overdraft Control (filtrado por tenant)
+    caja_debe = db.query(func.sum(AsientoDetalle.debe_usd)).join(AsientoContable).filter(
+        AsientoDetalle.cuenta_codigo.like("1101%"),
+        AsientoContable.tenant_id == current_user.tenant_id
+    ).scalar() or Decimal("0.00")
+    caja_haber = db.query(func.sum(AsientoDetalle.haber_usd)).join(AsientoContable).filter(
+        AsientoDetalle.cuenta_codigo.like("1101%"),
+        AsientoContable.tenant_id == current_user.tenant_id
+    ).scalar() or Decimal("0.00")
     caja_saldo = caja_debe - caja_haber
     
     checks.append({
@@ -577,6 +586,7 @@ def crear_asiento(body: AsientoCreate, db: Session = Depends(get_db), current_us
             debe=l.debe,
             haber=l.haber,
             centro_costo=l.centro_costo,
+            tenant_id=current_user.tenant_id,
         ))
     db.commit()
     db.refresh(asiento)
