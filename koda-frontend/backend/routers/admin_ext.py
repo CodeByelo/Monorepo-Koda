@@ -210,11 +210,19 @@ def sesiones_activas(db: Session = Depends(get_db), current_user: Profile = Depe
 
 
 @router.get("/auditoria")
-def listar_auditoria(db: Session = Depends(get_db)):
+def listar_auditoria(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     _seed_admin_defaults(db)
-    logs = db.query(AuditoriaLog).order_by(AuditoriaLog.fecha.desc()).limit(100).all()
+    scoped = not _is_desarrollador(current_user)
+
+    q_logs = db.query(AuditoriaLog)
     hoy = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    eventos_hoy = db.query(func.count(AuditoriaLog.id)).filter(AuditoriaLog.fecha >= hoy).scalar() or 0
+    q_eventos_hoy = db.query(func.count(AuditoriaLog.id)).filter(AuditoriaLog.fecha >= hoy)
+    if scoped:
+        q_logs = q_logs.filter(AuditoriaLog.tenant_id == current_user.tenant_id)
+        q_eventos_hoy = q_eventos_hoy.filter(AuditoriaLog.tenant_id == current_user.tenant_id)
+
+    logs = q_logs.order_by(AuditoriaLog.fecha.desc()).limit(100).all()
+    eventos_hoy = q_eventos_hoy.scalar() or 0
     return {
         "kpis": {
             "eventosHoy": eventos_hoy,
@@ -515,9 +523,12 @@ def update_respaldos_config(
 
 
 @router.get("/notificaciones")
-def listar_notificaciones(db: Session = Depends(get_db)):
+def listar_notificaciones(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     _seed_admin_defaults(db)
-    reglas = db.query(NotificacionRegla).order_by(NotificacionRegla.id).all()
+    query = db.query(NotificacionRegla)
+    if not _is_desarrollador(current_user):
+        query = query.filter(NotificacionRegla.tenant_id == current_user.tenant_id)
+    reglas = query.order_by(NotificacionRegla.id).all()
     return [
         {
             "id": r.id,
@@ -532,9 +543,12 @@ def listar_notificaciones(db: Session = Depends(get_db)):
 
 
 @router.get("/numeracion")
-def listar_numeracion(db: Session = Depends(get_db)):
+def listar_numeracion(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     _seed_admin_defaults(db)
-    series = db.query(NumeracionSerie).order_by(NumeracionSerie.modulo).all()
+    query = db.query(NumeracionSerie)
+    if not _is_desarrollador(current_user):
+        query = query.filter(NumeracionSerie.tenant_id == current_user.tenant_id)
+    series = query.order_by(NumeracionSerie.modulo).all()
     resultado = []
     for s in series:
         siguiente = s.ultimo_numero + 1
@@ -691,9 +705,12 @@ def crear_importacion(
 
 
 @router.get("/importaciones")
-def listar_importaciones(db: Session = Depends(get_db)):
+def listar_importaciones(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     _seed_admin_defaults(db)
-    jobs = db.query(ImportacionJob).order_by(ImportacionJob.fecha.desc()).limit(50).all()
+    query = db.query(ImportacionJob)
+    if not _is_desarrollador(current_user):
+        query = query.filter(ImportacionJob.tenant_id == current_user.tenant_id)
+    jobs = query.order_by(ImportacionJob.fecha.desc()).limit(50).all()
     total = len(jobs)
     completados = sum(1 for j in jobs if j.estado == "COMPLETADO")
     revision = sum(1 for j in jobs if j.estado == "REVISION")
@@ -844,9 +861,12 @@ def limpiar_sistema(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/numeracion/diagnostico")
-def diagnostico_fiscal(db: Session = Depends(get_db)):
+def diagnostico_fiscal(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     """Diagnóstico fiscal: verifica integridad de series numéricas."""
-    series = db.query(NumeracionSerie).all()
+    query = db.query(NumeracionSerie)
+    if not _is_desarrollador(current_user):
+        query = query.filter(NumeracionSerie.tenant_id == current_user.tenant_id)
+    series = query.all()
     resultados = []
     for s in series:
         resultados.append({
@@ -860,10 +880,13 @@ def diagnostico_fiscal(db: Session = Depends(get_db)):
 
 
 @router.get("/auditoria/export")
-def exportar_auditoria_csv(db: Session = Depends(get_db)):
+def exportar_auditoria_csv(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     """Exporta el log completo de auditoría como JSON descargable."""
     from fastapi.responses import JSONResponse
-    logs = db.query(AuditoriaLog).order_by(AuditoriaLog.fecha.desc()).limit(500).all()
+    query = db.query(AuditoriaLog)
+    if not _is_desarrollador(current_user):
+        query = query.filter(AuditoriaLog.tenant_id == current_user.tenant_id)
+    logs = query.order_by(AuditoriaLog.fecha.desc()).limit(500).all()
     data = [
         {
             "id": l.id,
