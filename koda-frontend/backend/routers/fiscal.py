@@ -7,14 +7,15 @@ import hashlib
 from datetime import datetime
 
 from backend.core.database import get_db
+from backend.models.core import Profile
 from backend.models.fiscal import ReglaFiscal
 from backend.models.erp_extended import Empresa, RetencionISLR
 from backend.models.operations import Proveedor
 from backend.schemas.fiscal import ReglaFiscalCreate, ReglaFiscalResponse
 from backend.core.security import get_current_user, require_role
 
-def _obtener_empresa_emisor(db: Session) -> dict:
-    emp = db.query(Empresa).first()
+def _obtener_empresa_emisor(db: Session, tenant_id) -> dict:
+    emp = db.query(Empresa).filter(Empresa.tenant_id == tenant_id).first()
     if not emp:
         try:
             emp = Empresa(
@@ -25,14 +26,15 @@ def _obtener_empresa_emisor(db: Session) -> dict:
                 telefono="+58 212 000-0000",
                 direccion="Av. Principal, Torre Financiera, Piso 4.",
                 tipo_contribuyente="ORDINARIO",
+                tenant_id=tenant_id,
             )
             db.add(emp)
             db.commit()
             db.refresh(emp)
         except Exception:
             db.rollback()
-            emp = db.query(Empresa).first()
-    
+            emp = db.query(Empresa).filter(Empresa.tenant_id == tenant_id).first()
+
     return {
         "rif": emp.rif if emp else "J-40000000-0",
         "razon_social": emp.razon_social if emp else "KODA ERP SOLUTIONS, C.A.",
@@ -45,13 +47,13 @@ router = APIRouter(prefix="/fiscal", tags=["Configuración Fiscal"])
 def obtener_reglas_fiscales(
     activas_solo: bool = True,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user: Profile = Depends(get_current_user)
 ):
     """
-    Obtiene el historial de reglas fiscales (ej. IVA, IGTF).
+    Obtiene el historial de reglas fiscales (ej. IVA, IGTF) del tenant actual.
     Por defecto, retorna solo las que están activas actualmente para aplicar en ventas.
     """
-    query = db.query(ReglaFiscal)
+    query = db.query(ReglaFiscal).filter(ReglaFiscal.tenant_id == current_user.tenant_id)
     if activas_solo:
         query = query.filter(ReglaFiscal.activa == True)
     return query.order_by(ReglaFiscal.fecha_vigencia.desc()).all()
@@ -60,19 +62,28 @@ def obtener_reglas_fiscales(
 def crear_regla_fiscal(
     regla_in: ReglaFiscalCreate,
     db: Session = Depends(get_db),
-    current_user = Depends(require_role(["Admin", "Gerente"]))
+    current_user: Profile = Depends(require_role(["Admin", "Gerente"]))
 ):
     """
     Registra una nueva regla fiscal.
-    Implementa versionamiento inteligente: Si ya existe una regla activa con el mismo 
+    Implementa versionamiento inteligente: Si ya existe una regla activa con el mismo
     nombre (ej. "IVA"), la desactiva automáticamente para proteger la historia contable.
     """
-    regla_anterior = db.query(ReglaFiscal).filter(ReglaFiscal.nombre == regla_in.nombre, ReglaFiscal.activa == True).first()
+    regla_anterior = db.query(ReglaFiscal).filter(
+        ReglaFiscal.nombre == regla_in.nombre,
+        ReglaFiscal.activa == True,
+        ReglaFiscal.tenant_id == current_user.tenant_id,
+    ).first()
     if regla_anterior:
         regla_anterior.activa = False
         db.add(regla_anterior)
-    
-    nueva_regla = ReglaFiscal(nombre=regla_in.nombre, tasa=regla_in.tasa, activa=regla_in.activa)
+
+    nueva_regla = ReglaFiscal(
+        nombre=regla_in.nombre,
+        tasa=regla_in.tasa,
+        activa=regla_in.activa,
+        tenant_id=current_user.tenant_id,
+    )
     db.add(nueva_regla)
     db.commit()
     db.refresh(nueva_regla)
@@ -83,7 +94,7 @@ def generar_pdf_arc(
     proveedor_id: str = "J-30123456-7",
     anio: int = 2026,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user: Profile = Depends(get_current_user)
 ):
     """
     Genera un comprobante ARC (Retenciones de ISLR) en formato PDF inmutable.
@@ -96,31 +107,41 @@ def generar_pdf_arc(
         from reportlab.platypus import Table, TableStyle
     except ImportError:
         return {"error": "Librería reportlab no instalada. Ejecute: pip install reportlab"}
-        
+
     # Consultar datos reales de la Empresa emisora en la BD
-    empresa_info = _obtener_empresa_emisor(db)
+    empresa_info = _obtener_empresa_emisor(db, current_user.tenant_id)
     emisor_nombre = empresa_info["razon_social"]
     emisor_rif = empresa_info["rif"]
 
     # Consultar datos reales del Proveedor en la BD
-    proveedor = db.query(Proveedor).filter(Proveedor.rif == proveedor_id).first()
+    proveedor = db.query(Proveedor).filter(
+        Proveedor.rif == proveedor_id,
+        Proveedor.tenant_id == current_user.tenant_id,
+    ).first()
     if not proveedor:
         try:
-            ret_exists = db.query(RetencionISLR).filter(RetencionISLR.proveedor_rif == proveedor_id).first()
+            ret_exists = db.query(RetencionISLR).filter(
+                RetencionISLR.proveedor_rif == proveedor_id,
+                RetencionISLR.tenant_id == current_user.tenant_id,
+            ).first()
             p_name = ret_exists.proveedor_nombre if ret_exists else "CONSULTORES DELTA C.A."
             proveedor = Proveedor(
                 rif=proveedor_id,
                 nombre=p_name,
                 telefono="0212-0000000",
                 email="proveedor@example.com",
-                direccion="Dirección del Proveedor"
+                direccion="Dirección del Proveedor",
+                tenant_id=current_user.tenant_id,
             )
             db.add(proveedor)
             db.commit()
             db.refresh(proveedor)
         except Exception:
             db.rollback()
-            proveedor = db.query(Proveedor).filter(Proveedor.rif == proveedor_id).first()
+            proveedor = db.query(Proveedor).filter(
+                Proveedor.rif == proveedor_id,
+                Proveedor.tenant_id == current_user.tenant_id,
+            ).first()
             
     nombre_proveedor = proveedor.nombre if proveedor else "CONSULTORES DELTA C.A."
 
@@ -156,7 +177,8 @@ def generar_pdf_arc(
     # Consultar retenciones reales en la BD
     retenciones = db.query(RetencionISLR).filter(
         RetencionISLR.proveedor_rif == proveedor_id,
-        RetencionISLR.periodo.like(f"{anio}%")
+        RetencionISLR.periodo.like(f"{anio}%"),
+        RetencionISLR.tenant_id == current_user.tenant_id,
     ).all()
 
     meses_map = {
@@ -235,7 +257,7 @@ def generar_pdf_retencion_iva(
     periodo: str = "202605",  # Formato YYYYMM
     correlativo: str = "20260500000001",
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    current_user: Profile = Depends(get_current_user)
 ):
     """
     Genera un comprobante de Retención de IVA en formato PDF inmutable.
@@ -248,33 +270,43 @@ def generar_pdf_retencion_iva(
         from reportlab.platypus import Table, TableStyle
     except ImportError:
         return {"error": "Librería reportlab no instalada."}
-        
+
     # Consultar datos reales de la Empresa emisora en la BD
-    empresa_info = _obtener_empresa_emisor(db)
+    empresa_info = _obtener_empresa_emisor(db, current_user.tenant_id)
     emisor_nombre = empresa_info["razon_social"]
     emisor_rif = empresa_info["rif"]
     emisor_direccion = empresa_info["direccion"]
 
     # Consultar datos reales del Proveedor en la BD
-    proveedor = db.query(Proveedor).filter(Proveedor.rif == proveedor_id).first()
+    proveedor = db.query(Proveedor).filter(
+        Proveedor.rif == proveedor_id,
+        Proveedor.tenant_id == current_user.tenant_id,
+    ).first()
     if not proveedor:
         try:
             # Buscar en retenciones de ISLR para tener un fallback inteligente de nombre
-            ret_exists = db.query(RetencionISLR).filter(RetencionISLR.proveedor_rif == proveedor_id).first()
+            ret_exists = db.query(RetencionISLR).filter(
+                RetencionISLR.proveedor_rif == proveedor_id,
+                RetencionISLR.tenant_id == current_user.tenant_id,
+            ).first()
             p_name = ret_exists.proveedor_nombre if ret_exists else "CONSULTORES DELTA C.A."
             proveedor = Proveedor(
                 rif=proveedor_id,
                 nombre=p_name,
                 telefono="0212-0000000",
                 email="proveedor@example.com",
-                direccion="Dirección del Proveedor"
+                direccion="Dirección del Proveedor",
+                tenant_id=current_user.tenant_id,
             )
             db.add(proveedor)
             db.commit()
             db.refresh(proveedor)
         except Exception:
             db.rollback()
-            proveedor = db.query(Proveedor).filter(Proveedor.rif == proveedor_id).first()
+            proveedor = db.query(Proveedor).filter(
+                Proveedor.rif == proveedor_id,
+                Proveedor.tenant_id == current_user.tenant_id,
+            ).first()
             
     nombre_proveedor = proveedor.nombre if proveedor else "CONSULTORES DELTA C.A."
 
@@ -335,7 +367,8 @@ def generar_pdf_retencion_iva(
         Compra.proveedor_rif == proveedor_id,
         extract('year', Compra.fecha) == anio,
         extract('month', Compra.fecha) == mes,
-        Compra.estado != "ANULADA"
+        Compra.estado != "ANULADA",
+        Compra.tenant_id == current_user.tenant_id,
     ).all()
 
     # Cabeceras requeridas legalmente
