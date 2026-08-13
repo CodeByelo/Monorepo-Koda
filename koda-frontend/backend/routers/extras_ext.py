@@ -34,45 +34,64 @@ def _fmt_money(v: float, prefix: str = "$") -> str:
 
 
 @router.get("/principal/dashboard")
-def principal_dashboard(db: Session = Depends(get_db)):
-    liquidez = db.query(func.sum(CuentaBancaria.saldo_actual_usd)).scalar() or 0
-    cxc = db.query(func.sum(CuentaPorCobrar.monto_total_usd - CuentaPorCobrar.monto_pagado_usd)).filter(
-        CuentaPorCobrar.estado != "PAGADA"
+def principal_dashboard(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    liquidez = db.query(func.sum(CuentaBancaria.saldo_actual_usd)).filter(
+        CuentaBancaria.tenant_id == current_user.tenant_id
     ).scalar() or 0
-    valor_inv = db.query(func.sum(Producto.stock * Producto.costo_usd)).scalar() or 0
-    ventas_mes = ventas_periodo(db, datetime.now(timezone.utc).strftime("%Y-%m")).all()
+    cxc = db.query(func.sum(CuentaPorCobrar.monto_total_usd - CuentaPorCobrar.monto_pagado_usd)).filter(
+        CuentaPorCobrar.estado != "PAGADA",
+        CuentaPorCobrar.tenant_id == current_user.tenant_id
+    ).scalar() or 0
+    valor_inv = db.query(func.sum(Producto.stock * Producto.costo_usd)).filter(
+        Producto.tenant_id == current_user.tenant_id
+    ).scalar() or 0
+    ventas_mes = ventas_periodo(db, datetime.now(timezone.utc).strftime("%Y-%m")).filter(
+        Venta.tenant_id == current_user.tenant_id
+    ).all()
     utilidad = sum(to_float(v.subtotal) for v in ventas_mes) * 0.25
     tasa = tasa_actual(db)
 
     # ── Resumen 7 días reales ──────────────────────────────────────────────────
     desde_7d = datetime.now(timezone.utc) - timedelta(days=7)
-    ventas_7d = db.query(Venta).filter(Venta.fecha >= desde_7d, Venta.estado == "ACTIVA").all()
+    ventas_7d = db.query(Venta).filter(
+        Venta.fecha >= desde_7d, Venta.estado == "ACTIVA", Venta.tenant_id == current_user.tenant_id
+    ).all()
     ingresos_7d = sum(to_float(v.total) for v in ventas_7d)
     max_ingreso = max(ingresos_7d, 1)
 
     from backend.models.operations import AjusteInventario
     compras_7d = db.query(AjusteInventario).filter(
         AjusteInventario.fecha_solicitud >= desde_7d,
-        AjusteInventario.estado == "APROBADO"
+        AjusteInventario.estado == "APROBADO",
+        AjusteInventario.tenant_id == current_user.tenant_id
     ).all()
     egresos_7d = sum(to_float(getattr(aj, 'costo_total', None) or 0) for aj in compras_7d)
 
     # ── Alertas reales ────────────────────────────────────────────────────────
-    criticos = db.query(Producto).filter(Producto.stock <= Producto.stock_minimo).count() if hasattr(Producto, 'stock_minimo') else 0
-    mora_count = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.estado == "VENCIDA").count()
+    criticos = db.query(Producto).filter(
+        Producto.stock <= Producto.stock_minimo, Producto.tenant_id == current_user.tenant_id
+    ).count() if hasattr(Producto, 'stock_minimo') else 0
+    mora_count = db.query(CuentaPorCobrar).filter(
+        CuentaPorCobrar.estado == "VENCIDA", CuentaPorCobrar.tenant_id == current_user.tenant_id
+    ).count()
     mora_monto = db.query(func.sum(CuentaPorCobrar.monto_total_usd - CuentaPorCobrar.monto_pagado_usd)).filter(
-        CuentaPorCobrar.estado == "VENCIDA"
+        CuentaPorCobrar.estado == "VENCIDA",
+        CuentaPorCobrar.tenant_id == current_user.tenant_id
     ).scalar() or 0
 
     # ── Últimas transacciones reales ──────────────────────────────────────────
     from backend.models.erp_extended import CuentaPorCobrar as CPC
     from backend.models.operations import Cliente
-    ultimas_ventas = db.query(Venta).filter(Venta.estado == "ACTIVA").order_by(Venta.fecha.desc()).limit(3).all()
+    ultimas_ventas = db.query(Venta).filter(
+        Venta.estado == "ACTIVA", Venta.tenant_id == current_user.tenant_id
+    ).order_by(Venta.fecha.desc()).limit(3).all()
     ultimas_txs = []
     # Fix N+1: solo cargamos los clientes de esas 3 ventas, no toda la tabla
     venta_cliente_ids = [v.cliente_id for v in ultimas_ventas if v.cliente_id]
     if venta_cliente_ids:
-        clientes_map = {c.id: c.nombre for c in db.query(Cliente).filter(Cliente.id.in_(venta_cliente_ids)).all()}
+        clientes_map = {c.id: c.nombre for c in db.query(Cliente).filter(
+            Cliente.id.in_(venta_cliente_ids), Cliente.tenant_id == current_user.tenant_id
+        ).all()}
     else:
         clientes_map = {}
     for v in ultimas_ventas:
@@ -107,15 +126,20 @@ def principal_dashboard(db: Session = Depends(get_db)):
 
 
 @router.get("/ventas/pos/contexto")
-def pos_contexto(db: Session = Depends(get_db)):
-    productos = db.query(Producto).filter(Producto.stock > 0).limit(50).all()
-    ventas_recientes = db.query(Venta).filter(Venta.estado == "ACTIVA").order_by(Venta.fecha.desc()).limit(10).all()
+def pos_contexto(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    productos = db.query(Producto).filter(
+        Producto.stock > 0, Producto.tenant_id == current_user.tenant_id
+    ).limit(50).all()
+    ventas_recientes = db.query(Venta).filter(
+        Venta.estado == "ACTIVA", Venta.tenant_id == current_user.tenant_id
+    ).order_by(Venta.fecha.desc()).limit(10).all()
     tasa = tasa_actual(db)
-    
+
     # Calcular ventas de hoy
     hoy_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     ventas_hoy = db.query(Venta).filter(
         Venta.estado == "ACTIVA",
+        Venta.tenant_id == current_user.tenant_id,
         func.strftime("%Y-%m-%d", Venta.fecha) == hoy_str
     ).all()
     total_hoy = sum(to_float(v.total) for v in ventas_hoy)
@@ -144,10 +168,10 @@ def pos_contexto(db: Session = Depends(get_db)):
 
 
 @router.get("/ventas/notas-credito")
-def listar_notas_credito(db: Session = Depends(get_db)):
-    notas = db.query(NotaCredito).order_by(NotaCredito.fecha.desc()).all()
-    clientes = {c.id: c for c in db.query(Cliente).all()}
-    ventas = {v.id: v for v in db.query(Venta).all()}
+def listar_notas_credito(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    notas = db.query(NotaCredito).filter(NotaCredito.tenant_id == current_user.tenant_id).order_by(NotaCredito.fecha.desc()).all()
+    clientes = {c.id: c for c in db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).all()}
+    ventas = {v.id: v for v in db.query(Venta).filter(Venta.tenant_id == current_user.tenant_id).all()}
     return [
         {
             "id": n.numero,
@@ -244,18 +268,20 @@ def crear_nota_credito(payload: NotaCreditoCreate, db: Session = Depends(get_db)
 
 
 @router.get("/cobranzas/estado-cuenta")
-def estado_cuenta_cliente(cliente_id: int = Query(None), rif: str = Query(None), db: Session = Depends(get_db)):
+def estado_cuenta_cliente(cliente_id: int = Query(None), rif: str = Query(None), db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     cli = None
     if cliente_id:
-        cli = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+        cli = db.query(Cliente).filter(Cliente.id == cliente_id, Cliente.tenant_id == current_user.tenant_id).first()
     elif rif:
-        cli = db.query(Cliente).filter(Cliente.rif == rif).first()
+        cli = db.query(Cliente).filter(Cliente.rif == rif, Cliente.tenant_id == current_user.tenant_id).first()
     else:
-        cli = db.query(Cliente).first()
+        cli = db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).first()
     if not cli:
         return {"cliente": None, "kpis": [], "movimientos": []}
-    
-    cxc = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.cliente_id == cli.id).order_by(CuentaPorCobrar.fecha_emision).all()
+
+    cxc = db.query(CuentaPorCobrar).filter(
+        CuentaPorCobrar.cliente_id == cli.id, CuentaPorCobrar.tenant_id == current_user.tenant_id
+    ).order_by(CuentaPorCobrar.fecha_emision).all()
     tasa = tasa_actual(db)
     saldo = sum(to_float(r.monto_total - r.monto_pagado) for r in cxc if r.estado != "PAGADA")
     
@@ -296,9 +322,9 @@ def estado_cuenta_cliente(cliente_id: int = Query(None), rif: str = Query(None),
 
 
 @router.get("/cobranzas/anticipos")
-def anticipos_cliente(db: Session = Depends(get_db)):
-    rows = db.query(AnticipoCliente).order_by(AnticipoCliente.fecha.desc()).all()
-    clientes = {c.id: c for c in db.query(Cliente).all()}
+def anticipos_cliente(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    rows = db.query(AnticipoCliente).filter(AnticipoCliente.tenant_id == current_user.tenant_id).order_by(AnticipoCliente.fecha.desc()).all()
+    clientes = {c.id: c for c in db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).all()}
     return [
         {
             "cliente": clientes[r.cliente_id].nombre if r.cliente_id in clientes else "",
@@ -312,8 +338,10 @@ def anticipos_cliente(db: Session = Depends(get_db)):
 
 
 @router.get("/cobranzas/flujo-proyectado")
-def flujo_proyectado(dias: int = 30, db: Session = Depends(get_db)):
-    cxc = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.estado != "PAGADA").all()
+def flujo_proyectado(dias: int = 30, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    cxc = db.query(CuentaPorCobrar).filter(
+        CuentaPorCobrar.estado != "PAGADA", CuentaPorCobrar.tenant_id == current_user.tenant_id
+    ).all()
     proyeccion = []
     for i in range(dias // 7):
         fecha = datetime.now(timezone.utc) + timedelta(days=i * 7)
