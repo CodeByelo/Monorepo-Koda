@@ -273,9 +273,11 @@ def listar_ventas(
     current_user = Depends(get_current_user)
 ):
     """
-    Lista todas las facturas registradas.
+    Lista todas las facturas registradas del tenant actual.
     """
-    return db.query(Venta).options(joinedload(Venta.cliente)).order_by(Venta.fecha.desc()).all()
+    return db.query(Venta).options(joinedload(Venta.cliente)).filter(
+        Venta.tenant_id == current_user.tenant_id
+    ).order_by(Venta.fecha.desc()).all()
 
 
 RESERVED_VENTAS_SUBPATHS = {
@@ -288,7 +290,8 @@ RESERVED_VENTAS_SUBPATHS = {
 @router.get("/{numero_factura}", response_model=VentaResponse)
 def obtener_venta_por_numero(
     numero_factura: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
 ):
     """
     Busca una factura por su correlativo fiscal (ej: FAC-00000001).
@@ -298,7 +301,10 @@ def obtener_venta_por_numero(
             status_code=404,
             detail=f"La sub-ruta '{numero_factura}' no es un número de factura"
         )
-    venta = db.query(Venta).filter(Venta.numero_factura == numero_factura).first()
+    venta = db.query(Venta).filter(
+        Venta.numero_factura == numero_factura,
+        Venta.tenant_id == current_user.tenant_id,
+    ).first()
     if not venta:
         raise HTTPException(
             status_code=404,
@@ -317,8 +323,11 @@ def anular_venta(
     Devuelve el stock al almacén y deja un registro inmutable (positivo) en el Kardex.
     """
     # Bloqueamos la factura para evitar que dos gerentes la anulen al mismo tiempo
-    venta = db.query(Venta).filter(Venta.id == venta_id).with_for_update().first()
-    
+    venta = db.query(Venta).filter(
+        Venta.id == venta_id,
+        Venta.tenant_id == current_user.tenant_id,
+    ).with_for_update().first()
+
     if not venta:
         raise HTTPException(status_code=404, detail="Venta no encontrada.")
         
@@ -332,7 +341,10 @@ def anular_venta(
         # 2. Devolver el stock a cada producto y registrar en Kardex Inmutable
         producto_ids = [detalle.producto_id for detalle in venta.detalles]
         unique_producto_ids = list(set(producto_ids))
-        productos = db.query(Producto).filter(Producto.id.in_(unique_producto_ids)).with_for_update().all()
+        productos = db.query(Producto).filter(
+            Producto.id.in_(unique_producto_ids),
+            Producto.tenant_id == current_user.tenant_id,
+        ).with_for_update().all()
         productos_dict = {p.id: p for p in productos}
         
         movimientos_reversos = []
