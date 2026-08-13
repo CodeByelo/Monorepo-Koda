@@ -5353,8 +5353,8 @@ def segmentos_clientes():
 
 @clientes_ext_router.get("")
 @clientes_ext_router.get("/")
-def listar_clientes_ext(db: Session = Depends(get_db)):
-    clientes = db.query(Cliente).all()
+def listar_clientes_ext(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    clientes = db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).all()
     return [
         {
             "id": c.id,
