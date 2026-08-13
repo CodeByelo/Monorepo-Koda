@@ -1,6 +1,29 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { api } from '@/api/client';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Atajo de login para desarrollo local (SOLO DEV)
+// Nunca activo por defecto ni en un build de producción: requiere que el
+// desarrollador defina explícitamente VITE_ENABLE_DEV_LOGIN=true en su
+// .env.local. Construye un token con forma de JWT (header.payload.firma) para
+// que la lógica de decodificación de abajo funcione igual que con uno real,
+// pero la "firma" es un valor local arbitrario, no derivado de ningún secreto
+// real — por lo tanto no autenticará contra un backend real. Los datos del
+// usuario son claramente ficticios (no pertenecen a ninguna persona real).
+// ─────────────────────────────────────────────────────────────────────────────
+function buildDevMockToken(): string {
+  const base64 = (obj: Record<string, unknown>) => btoa(JSON.stringify(obj));
+  const header = { alg: 'none', typ: 'JWT' };
+  const payload = {
+    sub: 'dev-local-0000-0000-0000-000000000000',
+    username: 'dev.local',
+    email: 'dev@example.test',
+    role: 'Desarrollador',
+    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24,
+  };
+  return `${base64(header)}.${base64(payload)}.dev-local-unsigned`;
+}
+
 interface AuthContextType {
   token: string | null;
   userRole: string | null;
@@ -22,25 +45,17 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [token, setToken] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
-      // 1. Extraer token recibido desde URL (?token=...)
-      const urlParams = new URLSearchParams(window.location.search);
-      const urlToken = urlParams.get('token');
-      if (urlToken) {
-        localStorage.setItem('koda_token', urlToken);
-        localStorage.setItem('sgd_token', urlToken);
-        return urlToken;
-      }
-
-      // 2. Verificar si existe token previo en localStorage
+      // 1. Verificar si existe token previo en localStorage
       const kodaToken = localStorage.getItem('koda_token');
       const sgdToken = localStorage.getItem('sgd_token');
       if (kodaToken || sgdToken) {
         return kodaToken || sgdToken;
       }
 
-      // 3. En modo desarrollo local, usar token dev fallback
-      if ((import.meta as any).env && (import.meta as any).env.DEV) {
-        const devToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZWY1MjY0MC0wOTZmLTQzNjctYjkxMy0wN2UyOTIzODc2MzgiLCJyb2xlIjoiRGVzYXJyb2xsYWRvciIsInVzZXJuYW1lIjoiSGVucnkgUm9kcmlndWV6IiwiZW1haWwiOiJoZW5yeWRkYW5pZWwxOTEwQGdtYWlsLmNvbSJ9.6--QCWH9gYF0y-6n0BMjLsyS4NHdoojLAQunJiP1WTM";
+      // 2. Atajo de login para desarrollo local — solo si se activó explícitamente
+      const env = (import.meta as any).env;
+      if (env && env.DEV && env.VITE_ENABLE_DEV_LOGIN === 'true') {
+        const devToken = buildDevMockToken();
         localStorage.setItem('koda_token', devToken);
         localStorage.setItem('sgd_token', devToken);
         return devToken;
@@ -49,17 +64,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return null;
   });
 
+  // Intercambio de código de sesión (?exchange_code=...) al llegar desde otra
+  // superficie del monorepo. Reemplaza el antiguo esquema de ?token=... que
+  // exponía el JWT completo en la URL (historial del navegador, logs de acceso).
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const urlParams = new URLSearchParams(window.location.search);
-      const urlToken = urlParams.get('token');
-      if (urlToken && urlToken !== token) {
-        localStorage.setItem('koda_token', urlToken);
-        localStorage.setItem('sgd_token', urlToken);
-        setToken(urlToken);
+    if (typeof window === 'undefined') return;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const exchangeCode = urlParams.get('exchange_code');
+    if (!exchangeCode) return;
+
+    // Retirar el parámetro de la URL de inmediato: el código es de un solo uso
+    // y nunca debe permanecer en el historial del navegador tras consumirse.
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete('exchange_code');
+    window.history.replaceState({}, '', cleanUrl.pathname + cleanUrl.search + cleanUrl.hash);
+
+    (async () => {
+      try {
+        const res = await fetch('/api/auth/exchange', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ code: exchangeCode }),
+        });
+
+        if (!res.ok) {
+          // Código inválido/expirado/usado: no reintentar en silencio,
+          // dejar al usuario sin sesión iniciada.
+          return;
+        }
+
+        const data = await res.json();
+        if (data && data.access_token) {
+          login(data.access_token, data.user);
+        }
+      } catch (e) {
+        console.error('Error al intercambiar el código de sesión', e);
       }
-    }
-  }, [token]);
+    })();
+    // Se ejecuta una única vez al montar el provider.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
