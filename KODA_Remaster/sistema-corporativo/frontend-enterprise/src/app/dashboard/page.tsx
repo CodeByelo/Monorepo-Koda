@@ -5151,7 +5151,6 @@ export default function Dashboard() {
   useEffect(() => {
     setMounted(true);
     if (typeof window !== "undefined") {
-      const token = localStorage.getItem("sgd_token");
       const host = window.location.hostname;
       const isProduction = host.includes('vercel.app') || host.includes('onrender.com') || host.includes('cloudflare');
       const billingProdUrl = process.env.NEXT_PUBLIC_BILLING_URL || 'https://koda-billing-front.vercel.app';
@@ -5159,7 +5158,12 @@ export default function Dashboard() {
       if (host.includes('.ts.net')) {
         baseUrl = `https://${host}:8443`;
       }
-      setBillingUrl(token ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}token=${token}` : baseUrl);
+      // SEGURIDAD: ya no se anexa `?token=<jwt>`. Ver la nota detallada en
+      // BillingModule.tsx — koda-frontend ya no lee ese parámetro (usa
+      // `?exchange_code=` de un solo uso) y, de todos modos, el JWT de este backend
+      // no es válido para el backend de koda-frontend (secretos y esquemas de
+      // usuario distintos). Requiere decisión de arquitectura cross-team.
+      setBillingUrl(baseUrl);
     }
   }, []);
 
