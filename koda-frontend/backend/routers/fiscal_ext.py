@@ -3,8 +3,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
+from typing import Optional
 
 from backend.core.database import get_db
+from backend.models.core import Profile, TasaCambio
 from backend.models.operations import Venta, Cliente
 from backend.models.erp_extended import Compra, DeclaracionIVA, RetencionIVA, RetencionISLR, DeclaracionISLR
 from backend.models.fiscal import ReglaFiscal
@@ -19,16 +21,38 @@ from backend.core.security import get_current_user
 router = APIRouter(prefix="/fiscal", tags=["Fiscal SENIAT"], dependencies=[Depends(get_current_user)])
 
 
-def _tasa_iva(db: Session) -> Decimal:
-    regla = db.query(ReglaFiscal).filter(ReglaFiscal.nombre == "IVA", ReglaFiscal.activa == True).first()
+def _tasa_iva(db: Session, tenant_id) -> Decimal:
+    regla = db.query(ReglaFiscal).filter(
+        ReglaFiscal.nombre == "IVA",
+        ReglaFiscal.activa == True,
+        ReglaFiscal.tenant_id == tenant_id,
+    ).first()
     return Decimal(str(regla.tasa)) if regla else Decimal("0.16")
 
 
+def _tasa_actual_tenant(db: Session, tenant_id) -> float:
+    """Igual que utils.helpers.tasa_actual pero acotado al tenant actual."""
+    tasa = (
+        db.query(TasaCambio)
+        .filter(TasaCambio.tenant_id == tenant_id)
+        .order_by(TasaCambio.fecha.desc())
+        .first()
+    )
+    if tasa and getattr(tasa, "valor_ves", None):
+        return to_float(tasa.valor_ves) or 36.52
+    return 36.52
+
+
 @router.get("/dashboard")
-def fiscal_dashboard(periodo: str = Query(...), db: Session = Depends(get_db)):
-    ventas = ventas_periodo(db, periodo).all()
+def fiscal_dashboard(periodo: str = Query(...), db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    ventas = ventas_periodo(db, periodo).filter(Venta.tenant_id == current_user.tenant_id).all()
     inicio, fin = periodo_rango(periodo)
-    compras = db.query(Compra).filter(Compra.fecha >= inicio, Compra.fecha < fin, Compra.estado == "ACTIVA").all()
+    compras = db.query(Compra).filter(
+        Compra.fecha >= inicio,
+        Compra.fecha < fin,
+        Compra.estado == "ACTIVA",
+        Compra.tenant_id == current_user.tenant_id,
+    ).all()
 
     total_ventas = sum(to_float(v.total) for v in ventas)
     iva_ventas = sum(to_float(v.iva) for v in ventas)
@@ -37,7 +61,7 @@ def fiscal_dashboard(periodo: str = Query(...), db: Session = Depends(get_db)):
     iva_compras = sum(to_float(c.iva) for c in compras)
     base_compras = sum(to_float(c.subtotal) for c in compras)
 
-    tasa = tasa_actual(db)
+    tasa = _tasa_actual_tenant(db, current_user.tenant_id)
 
     # Convert to Bs
     debitos_fiscales = iva_ventas * tasa
@@ -49,7 +73,8 @@ def fiscal_dashboard(periodo: str = Query(...), db: Session = Depends(get_db)):
     # IVA Withheld by our clients (RECIBIDAS)
     retenciones = db.query(RetencionIVA).filter(
         RetencionIVA.periodo == periodo,
-        RetencionIVA.tipo == "RECIBIDA"
+        RetencionIVA.tipo == "RECIBIDA",
+        RetencionIVA.tenant_id == current_user.tenant_id,
     ).all()
     retenciones_soportadas = sum(to_float(r.monto_usd) for r in retenciones)
     # Lógica básica Calendario SENIAT (asumiendo dígito 0 por defecto)
@@ -105,9 +130,9 @@ def fiscal_dashboard(periodo: str = Query(...), db: Session = Depends(get_db)):
 
 
 @router.get("/libro-ventas")
-def libro_ventas(periodo: str = Query(...), db: Session = Depends(get_db)):
-    ventas = ventas_periodo(db, periodo).order_by(Venta.fecha).all()
-    clientes = {c.id: c for c in db.query(Cliente).all()}
+def libro_ventas(periodo: str = Query(...), db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    ventas = ventas_periodo(db, periodo).filter(Venta.tenant_id == current_user.tenant_id).order_by(Venta.fecha).all()
+    clientes = {c.id: c for c in db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).all()}
     movimientos = []
     for v in ventas:
         cli = clientes.get(getattr(v, "cliente_id", None)) if hasattr(v, "cliente_id") else None
@@ -140,10 +165,10 @@ def libro_ventas(periodo: str = Query(...), db: Session = Depends(get_db)):
 
 
 @router.get("/libro-ventas/auditar-rifs")
-def auditar_rifs_ventas(periodo: str = Query(...), db: Session = Depends(get_db)):
+def auditar_rifs_ventas(periodo: str = Query(...), db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     import re
-    ventas = ventas_periodo(db, periodo).all()
-    clientes = {c.id: c for c in db.query(Cliente).all()}
+    ventas = ventas_periodo(db, periodo).filter(Venta.tenant_id == current_user.tenant_id).all()
+    clientes = {c.id: c for c in db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).all()}
     
     invalidos = []
     rif_pattern = re.compile(r'^[VJGE]-\d{8}-\d$')
@@ -161,9 +186,9 @@ def auditar_rifs_ventas(periodo: str = Query(...), db: Session = Depends(get_db)
     return {"ok": True, "invalidos": invalidos, "total_revisados": len(ventas)}
 
 @router.get("/libro-ventas/exportar")
-def exportar_libro_ventas(periodo: str, formato: str = "pdf", db: Session = Depends(get_db)):
-    ventas = ventas_periodo(db, periodo).order_by(Venta.fecha).all()
-    clientes = {c.id: c for c in db.query(Cliente).all()}
+def exportar_libro_ventas(periodo: str, formato: str = "pdf", db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    ventas = ventas_periodo(db, periodo).filter(Venta.tenant_id == current_user.tenant_id).order_by(Venta.fecha).all()
+    clientes = {c.id: c for c in db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).all()}
     
     if formato == "txt":
         output = io.StringIO()
@@ -242,9 +267,14 @@ def exportar_libro_ventas(periodo: str, formato: str = "pdf", db: Session = Depe
 
 
 @router.get("/libro-compras")
-def libro_compras(periodo: str = Query(...), db: Session = Depends(get_db)):
+def libro_compras(periodo: str = Query(...), db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     inicio, fin = periodo_rango(periodo)
-    compras = db.query(Compra).filter(Compra.fecha >= inicio, Compra.fecha < fin, Compra.estado == "ACTIVA").all()
+    compras = db.query(Compra).filter(
+        Compra.fecha >= inicio,
+        Compra.fecha < fin,
+        Compra.estado == "ACTIVA",
+        Compra.tenant_id == current_user.tenant_id,
+    ).all()
     movimientos = []
     for c in compras:
         prov = c.proveedor
@@ -282,21 +312,26 @@ def libro_compras(periodo: str = Query(...), db: Session = Depends(get_db)):
 
 
 @router.get("/declaracion-iva")
-def declaracion_iva(periodo: str = Query(...), db: Session = Depends(get_db)):
-    ventas = ventas_periodo(db, periodo).all()
+def declaracion_iva(periodo: str = Query(...), db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    ventas = ventas_periodo(db, periodo).filter(Venta.tenant_id == current_user.tenant_id).all()
     inicio, fin = periodo_rango(periodo)
-    compras = db.query(Compra).filter(Compra.fecha >= inicio, Compra.fecha < fin).all()
+    compras = db.query(Compra).filter(
+        Compra.fecha >= inicio,
+        Compra.fecha < fin,
+        Compra.tenant_id == current_user.tenant_id,
+    ).all()
     debito = sum(to_float(v.iva) for v in ventas)
     credito = sum(to_float(c.iva) for c in compras)
     base_ventas = sum(to_float(v.subtotal) for v in ventas)
     base_compras = sum(to_float(c.subtotal) for c in compras)
-    tasa = tasa_actual(db)
-    
+    tasa = _tasa_actual_tenant(db, current_user.tenant_id)
+
     # Calcular retenciones soportadas
     from backend.models.erp_extended import RetencionIVA
     rets = db.query(RetencionIVA).filter(
         RetencionIVA.periodo == periodo,
-        RetencionIVA.tipo == 'SOPORTADA'
+        RetencionIVA.tipo == 'SOPORTADA',
+        RetencionIVA.tenant_id == current_user.tenant_id,
     ).all()
     retenciones_soportadas = sum(to_float(r.monto_usd) for r in rets)
 
