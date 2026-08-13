@@ -812,7 +812,9 @@ def balance_general(periodo: str, db: Session = Depends(get_db), current_user = 
     _seed_cuentas(db, current_user.tenant_id)
     
     from backend.models.core import TasaCambio
-    tasa_obj = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
+    tasa_obj = db.query(TasaCambio).filter(
+        TasaCambio.tenant_id == current_user.tenant_id
+    ).order_by(TasaCambio.fecha.desc()).first()
     tasa = Decimal(str(tasa_obj.valor_ves)) if tasa_obj else Decimal("36.52")
     tasa_f = float(tasa)
 
@@ -863,6 +865,7 @@ def balance_general(periodo: str, db: Session = Depends(get_db), current_user = 
         func.sum(AsientoDetalle.debe_usd).label("debe"),
         func.sum(AsientoDetalle.haber_usd).label("haber")
     ).join(AsientoContable).filter(
+        AsientoContable.tenant_id == current_user.tenant_id,
         AsientoContable.fecha < end_date
     ).group_by(
         AsientoDetalle.cuenta_codigo,
