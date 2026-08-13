@@ -846,20 +846,25 @@ def revocar_sesiones(request: Request, db: Session = Depends(get_db), current_us
 
 
 @router.post("/mantenimiento/limpiar")
-def limpiar_sistema(request: Request, db: Session = Depends(get_db)):
+def limpiar_sistema(request: Request, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     """Purga logs de auditoría con más de 1 año de antigüedad."""
-    from sqlalchemy import delete
+    from sqlalchemy import delete, and_
     real_ip = get_real_ip_str(request)
     cutoff = datetime.now(timezone.utc) - timedelta(days=365)
+    condicion = AuditoriaLog.fecha < cutoff
+    if not _is_desarrollador(current_user):
+        # Un Admin de tenant solo puede purgar los logs de su propia empresa.
+        condicion = and_(condicion, AuditoriaLog.tenant_id == current_user.tenant_id)
     result = db.execute(
-        delete(AuditoriaLog).where(AuditoriaLog.fecha < cutoff)
+        delete(AuditoriaLog).where(condicion)
     )
     deleted = result.rowcount
     db.add(AuditoriaLog(
-        usuario=f"admin (ip:{real_ip})",
+        tenant_id=current_user.tenant_id,
+        usuario=f"{current_user.email} (ip:{real_ip})",
         accion="MANTENIMIENTO",
         modulo="SISTEMA",
-        detalle=f"Limpieza global: {deleted} registros de auditoría purgados (>1 año)",
+        detalle=f"Limpieza de auditoría: {deleted} registros purgados (>1 año)",
         ip=real_ip,
     ))
     db.commit()
