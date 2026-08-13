@@ -887,8 +887,11 @@ def validar_rif(rif: str, db: Session = Depends(get_db), current_user: Profile =
 
 
 @router.get("/retenciones-islr")
-def retenciones_islr_list(periodo: str = Query(...), db: Session = Depends(get_db)):
-    rows = db.query(RetencionISLR).filter(RetencionISLR.periodo == periodo).all()
+def retenciones_islr_list(periodo: str = Query(...), db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    rows = db.query(RetencionISLR).filter(
+        RetencionISLR.periodo == periodo,
+        RetencionISLR.tenant_id == current_user.tenant_id,
+    ).all()
     
     retenciones = []
     honorarios_total = 0
@@ -937,8 +940,11 @@ def retenciones_islr_list(periodo: str = Query(...), db: Session = Depends(get_d
     }
 
 @router.get("/retenciones-islr/exportar")
-def exportar_retenciones_islr(periodo: str = Query(...), db: Session = Depends(get_db)):
-    rows = db.query(RetencionISLR).filter(RetencionISLR.periodo == periodo).all()
+def exportar_retenciones_islr(periodo: str = Query(...), db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    rows = db.query(RetencionISLR).filter(
+        RetencionISLR.periodo == periodo,
+        RetencionISLR.tenant_id == current_user.tenant_id,
+    ).all()
     
     root = ET.Element("RelacionRetencionesISLR", RifAgente="J000000000", Periodo=periodo.replace("-", ""))
     
@@ -963,20 +969,29 @@ def exportar_retenciones_islr(periodo: str = Query(...), db: Session = Depends(g
     )
 
 @router.get("/declaracion-islr")
-def declaracion_islr_calc(periodo: Optional[str] = None, anio: Optional[str] = None, db: Session = Depends(get_db)):
+def declaracion_islr_calc(periodo: Optional[str] = None, anio: Optional[str] = None, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     # Proyección básica: sumar ventas y compras del año
     from backend.models.operations import Venta
     from backend.models.erp_extended import Compra
     from sqlalchemy import extract
-    
+
     val_periodo = anio or periodo or str(datetime.now().year)
     year = int(val_periodo)
-    
-    decl = db.query(DeclaracionISLR).filter(DeclaracionISLR.ejercicio == str(year)).first()
-    
+
+    decl = db.query(DeclaracionISLR).filter(
+        DeclaracionISLR.ejercicio == str(year),
+        DeclaracionISLR.tenant_id == current_user.tenant_id,
+    ).first()
+
     if not decl:
-        ventas = db.query(Venta).filter(extract('year', Venta.fecha) == year).all()
-        compras = db.query(Compra).filter(extract('year', Compra.fecha) == year).all()
+        ventas = db.query(Venta).filter(
+            extract('year', Venta.fecha) == year,
+            Venta.tenant_id == current_user.tenant_id,
+        ).all()
+        compras = db.query(Compra).filter(
+            extract('year', Compra.fecha) == year,
+            Compra.tenant_id == current_user.tenant_id,
+        ).all()
         
         ingresos = sum(to_float(v.subtotal) for v in ventas)
         costos = sum(to_float(c.subtotal) for c in compras)
@@ -999,7 +1014,10 @@ def declaracion_islr_calc(periodo: Optional[str] = None, anio: Optional[str] = N
             "amount": d.islr_pagado,
             "status": "PAGADO" if d.estado == "FINALIZADA" else d.estado,
             "ref": f"ISLR-{d.ejercicio}"
-        } for d in db.query(DeclaracionISLR).filter(DeclaracionISLR.estado == "FINALIZADA").order_by(DeclaracionISLR.ejercicio.desc()).all()
+        } for d in db.query(DeclaracionISLR).filter(
+            DeclaracionISLR.estado == "FINALIZADA",
+            DeclaracionISLR.tenant_id == current_user.tenant_id,
+        ).order_by(DeclaracionISLR.ejercicio.desc()).all()
     ]
     
     return {
@@ -1021,12 +1039,15 @@ def declaracion_islr_calc(periodo: Optional[str] = None, anio: Optional[str] = N
     }
 
 @router.post("/declaracion-islr/registrar")
-async def registrar_declaracion_islr(request: Request, db: Session = Depends(get_db)):
+async def registrar_declaracion_islr(request: Request, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     body = await request.json()
     ejercicio = body.get("ejercicio")
-    decl = db.query(DeclaracionISLR).filter(DeclaracionISLR.ejercicio == ejercicio).first()
+    decl = db.query(DeclaracionISLR).filter(
+        DeclaracionISLR.ejercicio == ejercicio,
+        DeclaracionISLR.tenant_id == current_user.tenant_id,
+    ).first()
     if not decl:
-        decl = DeclaracionISLR(ejercicio=ejercicio)
+        decl = DeclaracionISLR(ejercicio=ejercicio, tenant_id=current_user.tenant_id)
         db.add(decl)
     
     decl.ingresos_brutos = body.get("ingresos_brutos", 0)
@@ -1043,10 +1064,10 @@ async def registrar_declaracion_islr(request: Request, db: Session = Depends(get
     return {"ok": True}
 
 @router.get("/calendario")
-def calendario_fiscal(db: Session = Depends(get_db)):
+def calendario_fiscal(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     from backend.models.erp_extended import Empresa
-    
-    perfil = db.query(Empresa).first()
+
+    perfil = db.query(Empresa).filter(Empresa.tenant_id == current_user.tenant_id).first()
     rif = perfil.rif if perfil and perfil.rif else "J-00000000-0"
     digito = int(rif[-1]) if rif[-1].isdigit() else 0
     # Empresa no tiene tipo_contribuyente, asumo False por defecto o si lo tiene lo leo
