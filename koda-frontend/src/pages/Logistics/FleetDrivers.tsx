@@ -20,6 +20,27 @@ const ESTADO_STYLE: Record<string, { bg: string; text: string; border: string }>
 
 const EMPTY: Partial<Chofer> = { estado: 'DISPONIBLE' };
 
+// Display-only PII masking for list views. Full values remain available
+// on the underlying `chofer` object for edit forms and API calls.
+function maskCedula(cedula?: string): string {
+  if (!cedula) return 'Sin cédula';
+  const m = cedula.match(/^([A-Za-z])[-\s]?(\d+)$/);
+  if (m) {
+    const [, letra, digitos] = m;
+    return `${letra}-***${digitos.slice(-4)}`;
+  }
+  const digitos = cedula.replace(/\D/g, '');
+  const last4 = (digitos.length >= 4 ? digitos : cedula).slice(-4);
+  return `***${last4}`;
+}
+
+function maskTelefono(telefono?: string): string {
+  if (!telefono) return 'Sin tel.';
+  const digitos = telefono.replace(/\D/g, '');
+  const last4 = (digitos || telefono).slice(-4);
+  return `***-${last4}`;
+}
+
 function ChoferModal({ chofer, onClose, onSaved }: { chofer: Partial<Chofer>; onClose: () => void; onSaved: () => void }) {
   const [form, setForm] = useState<Partial<Chofer>>(chofer);
   const [loading, setLoading] = useState(false);
@@ -233,7 +254,7 @@ const FleetDrivers = () => {
                         <span className="text-slate-800 font-black text-sm truncate uppercase">{c.nombre}</span>
                         {c.tiene_telegram && <span title="Telegram vinculado" className="text-blue-500 text-xs">📱</span>}
                       </div>
-                      <div className="text-slate-500 text-xs font-semibold">{c.cedula || 'Sin cédula'} · {c.telefono || 'Sin tel.'}</div>
+                      <div className="text-slate-500 text-xs font-semibold">{maskCedula(c.cedula)} · {maskTelefono(c.telefono)}</div>
                       {c.telegram_chat_id && (
                         <div className="text-blue-600 text-[10px] font-black uppercase tracking-wider mt-1 flex items-center gap-1">
                           <span>Chat ID:</span>
