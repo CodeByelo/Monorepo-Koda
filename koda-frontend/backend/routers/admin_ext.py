@@ -29,6 +29,13 @@ router = APIRouter(
 )
 
 
+def _is_desarrollador(user: Profile) -> bool:
+    """Bypass de aislamiento multi-tenant reservado al rol Desarrollador (Super-Admin
+    de plataforma), igual criterio que services/auth.get_current_user_from_token."""
+    rol = str(getattr(user, "rol", "") or "").strip().lower()
+    return rol in ("desarrollador", "dev", "developer")
+
+
 def _seed_admin_defaults(db: Session):
     """Datos iniciales para pantallas de administración cuando las tablas están vacías."""
     # 1. Numeracion
@@ -97,8 +104,11 @@ def admin_dashboard(db: Session = Depends(get_db)):
 
 
 @router.get("/usuarios")
-def listar_usuarios(db: Session = Depends(get_db)):
-    usuarios = db.query(Profile).order_by(Profile.id).all()
+def listar_usuarios(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    query = db.query(Profile)
+    if not _is_desarrollador(current_user):
+        query = query.filter(Profile.tenant_id == current_user.tenant_id)
+    usuarios = query.order_by(Profile.id).all()
     return [
         {
             "id": u.id,
