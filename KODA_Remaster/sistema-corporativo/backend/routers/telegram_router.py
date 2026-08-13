@@ -12,9 +12,8 @@ from database.async_db import get_db_connection
 from auth.supabase_auth import get_current_user
 from redis.asyncio import Redis
 
-# Inicializar cliente Redis para almacenamiento temporal
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379").strip()
-redis_client = Redis.from_url(REDIS_URL) if REDIS_URL else None
+# Almacenamiento temporal en memoria como fallback cuando Redis no esté disponible
+_TELEGRAM_LINK_TOKENS: dict = {}
 
 def generate_linking_code() -> str:
     chars = string.ascii_uppercase + string.digits
@@ -68,6 +67,61 @@ async def send_telegram_message(chat_id: int, text: str) -> None:
     except Exception as e:
         logger.error(f"[TELEGRAM] Error inesperado al enviar mensaje a Telegram: {e}")
 
+# Helper para guardar tokens de vinculación (Redis + Memoria)
+async def _save_link_token(code: str, payload: dict):
+    redis_key = f"telegram:link_token:{code}"
+    _TELEGRAM_LINK_TOKENS[code] = {
+        "payload": payload,
+        "exp": datetime.now(timezone.utc).timestamp() + 600
+    }
+    try:
+        redis_url = os.getenv("REDIS_URL", "").strip()
+        if redis_url:
+            from redis.asyncio import Redis
+            r = Redis.from_url(redis_url)
+            await r.set(redis_key, json.dumps(payload), ex=600)
+            await r.close()
+    except Exception as e:
+        logger.warning(f"[TELEGRAM] Redis no disponible para guardar token: {e}")
+
+# Helper para obtener token de vinculación (Redis + Memoria)
+async def _get_link_token(code: str) -> Optional[dict]:
+    redis_key = f"telegram:link_token:{code}"
+    try:
+        redis_url = os.getenv("REDIS_URL", "").strip()
+        if redis_url:
+            from redis.asyncio import Redis
+            r = Redis.from_url(redis_url)
+            val = await r.get(redis_key)
+            await r.close()
+            if val:
+                return json.loads(val)
+    except Exception as e:
+        logger.warning(f"[TELEGRAM] Redis no disponible para leer token: {e}")
+
+    # Fallback a memoria local
+    if code in _TELEGRAM_LINK_TOKENS:
+        entry = _TELEGRAM_LINK_TOKENS[code]
+        if datetime.now(timezone.utc).timestamp() < entry["exp"]:
+            return entry["payload"]
+        else:
+            del _TELEGRAM_LINK_TOKENS[code]
+
+    return None
+
+async def _delete_link_token(code: str):
+    if code in _TELEGRAM_LINK_TOKENS:
+        del _TELEGRAM_LINK_TOKENS[code]
+    try:
+        redis_url = os.getenv("REDIS_URL", "").strip()
+        if redis_url:
+            from redis.asyncio import Redis
+            r = Redis.from_url(redis_url)
+            await r.delete(f"telegram:link_token:{code}")
+            await r.close()
+    except Exception:
+        pass
+
 # =============================================================================
 # ENDPOINT: POST /webhook/telegram
 # =============================================================================
@@ -75,12 +129,6 @@ async def send_telegram_message(chat_id: int, text: str) -> None:
 async def generate_telegram_token(
     current_user: dict = Depends(get_current_user)
 ):
-    if not redis_client:
-        raise HTTPException(
-            status_code=500,
-            detail="Servicio de caché (Redis) no disponible para generar token de vinculación."
-        )
-    
     user_id = current_user.get("sub")
     tenant_id = current_user.get("tenant_id")
     
@@ -91,24 +139,13 @@ async def generate_telegram_token(
         )
         
     code = generate_linking_code()
-    redis_key = f"telegram:link_token:{code}"
-    
     payload = {
         "user_id": str(user_id),
         "tenant_id": str(tenant_id)
     }
     
-    try:
-        # Guardar en Redis con expiración de 10 minutos (600 segundos)
-        await redis_client.set(redis_key, json.dumps(payload), ex=600)
-        logger.info(f"[TELEGRAM] Token de vinculación generado: {code} para user_id {user_id}")
-    except Exception as e:
-        logger.error(f"[TELEGRAM] Error guardando token de vinculación en Redis: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Error al almacenar el código de vinculación temporal."
-        )
-        
+    await _save_link_token(code, payload)
+    logger.info(f"[TELEGRAM] Token de vinculación generado: {code} para user_id {user_id}")
     return {"code": code}
 
 @router.post("/telegram")
@@ -127,13 +164,13 @@ async def telegram_webhook(
         str(chat_id)
     )
     if driver_row:
-        import httpx
+        logistics_url = os.getenv("LOGISTICS_WEBHOOK_URL", "http://localhost:8000/api/logistica/telegram-webhook")
         try:
             async with httpx.AsyncClient() as client:
                 res = await client.post(
-                    "http://facturacion-backend:8000/api/logistica/telegram-webhook",
+                    logistics_url,
                     json=update.dict(),
-                    timeout=15.0
+                    timeout=8.0
                 )
                 return res.json()
         except Exception as e:
@@ -161,22 +198,10 @@ async def telegram_webhook(
             await send_telegram_message(chat_id, response_msg)
             return {"status": "invalid_command_format"}
             
-        token = parts[1].strip()
-        redis_key = f"telegram:link_token:{token}"
-        
-        try:
-            if not redis_client:
-                raise Exception("Redis client is not configured")
-            cached_data = await redis_client.get(redis_key)
-        except Exception as e:
-            logger.error(f"[TELEGRAM] Error de Redis al recuperar token: {e}")
-            await send_telegram_message(
-                chat_id,
-                "Lo sentimos, el servicio de vinculación temporal no está disponible en este momento."
-            )
-            return {"status": "redis_error"}
+        code = parts[1].strip()
+        link_info = await _get_link_token(code)
             
-        if not cached_data:
+        if not link_info:
             await send_telegram_message(
                 chat_id,
                 "El código de vinculación provisto es inválido o ha expirado. "
@@ -185,7 +210,6 @@ async def telegram_webhook(
             return {"status": "token_expired_or_invalid"}
             
         try:
-            link_info = json.loads(cached_data)
             user_id = link_info.get("user_id")
             tenant_id = link_info.get("tenant_id")
             
@@ -195,7 +219,7 @@ async def telegram_webhook(
             # Establecer RLS context localmente dentro de una transacción antes de insertar/actualizar
             async with conn.transaction():
                 await conn.execute(
-                    "SELECT set_config('app.current_tenant', $1, true)",
+                    "SELECT set_config('app.current_tenant_id', $1, true)",
                     str(tenant_id)
                 )
                 
@@ -211,7 +235,7 @@ async def telegram_webhook(
                 )
             
             # Limpiar token usado de la caché
-            await redis_client.delete(redis_key)
+            await _delete_link_token(code)
             
             # Confirmar vinculación exitosa al usuario en Telegram
             await send_telegram_message(

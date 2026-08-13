@@ -54,6 +54,92 @@ def _is_admin_general(role_name: Optional[str]) -> bool:
     role = str(role_name).strip().lower()
     return role in {"ceo", "administrador general", "admin general", "owner", "administrador"}
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ROLES — Gestión de alias (nombres personalizables)
+# nombre_rol = identificador interno del RBAC (NO modificar)
+# alias_display = nombre que ve el usuario en la UI (editable por CEO/Admin)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/roles")
+async def list_roles(
+    current_user: dict = Depends(get_current_user),
+    conn = Depends(get_db_connection)
+):
+    """Lista todos los roles con su nombre visible (alias_display si existe, nombre_rol si no)."""
+    try:
+        rows = await conn.fetch(
+            "SELECT id, nombre_rol, alias_display FROM roles ORDER BY id"
+        )
+        return [
+            {
+                "id": r["id"],
+                "nombre_rol": r["nombre_rol"],
+                "display_name": r["alias_display"] or r["nombre_rol"],
+                "alias_display": r["alias_display"],
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener roles: {str(e)}")
+
+
+class RolAliasPayload(BaseModel):
+    alias_display: str
+
+
+@router.put("/roles/{rol_id}/alias")
+async def update_role_alias(
+    rol_id: int,
+    payload: RolAliasPayload,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    conn = Depends(get_db_connection)
+):
+    """
+    Actualiza el nombre visible (alias_display) de un rol.
+    Solo CEO y Administrador pueden hacer este cambio.
+    El nombre interno (nombre_rol) NO se modifica — el RBAC no se ve afectado.
+    El rol Desarrollador (id=4) no puede ser renombrado.
+    """
+    actor_role = str(current_user.get("role") or "").strip().lower()
+    if actor_role not in {"ceo", "administrador", "desarrollador"}:
+        raise HTTPException(status_code=403, detail="No autorizado: se requiere rol CEO o Administrador")
+
+    alias = payload.alias_display.strip()
+    if not alias or len(alias) > 80:
+        raise HTTPException(status_code=400, detail="El alias debe tener entre 1 y 80 caracteres")
+
+    if rol_id == 4:
+        raise HTTPException(status_code=403, detail="El rol Desarrollador no puede ser renombrado")
+
+    try:
+        updated = await conn.fetchval(
+            "UPDATE roles SET alias_display = $1 WHERE id = $2 RETURNING id",
+            alias, rol_id
+        )
+        if not updated:
+            raise HTTPException(status_code=404, detail="Rol no encontrado")
+
+        await _log_security_event(
+            conn,
+            tenant_id=current_user.get("tenant_id"),
+            user_id=current_user.get("sub"),
+            username=current_user.get("username"),
+            evento="ROLE_ALIAS_UPDATED",
+            detalles=f"Alias del rol id={rol_id} actualizado a '{alias}'",
+            estado="info",
+            page=f"/users/roles/{rol_id}/alias",
+            ip_origen=request.client.host if request.client else None,
+        )
+        return {"message": "Alias actualizado correctamente", "rol_id": rol_id, "alias_display": alias}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al actualizar alias: {str(e)}")
+
+
 @router.get("/all", response_model=List[schemas.UsuarioListResponse])
 async def list_all_users(
     request: Request,

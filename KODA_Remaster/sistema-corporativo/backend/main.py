@@ -408,6 +408,10 @@ app.include_router(telegram_router.router)
 from routers import rates_router
 app.include_router(rates_router.router)
 
+# Módulo de Vendedores (Koda Remaster)
+from routers.vendedores_router import router as vendedores_router
+app.include_router(vendedores_router)
+
 print("\n📋 RUTAS REGISTRADAS EN FASTAPI:")
 for route in app.routes:
     if hasattr(route, 'methods'):
@@ -469,6 +473,13 @@ async def startup():
                 await conn.execute("ALTER TABLE login_lockouts ADD COLUMN IF NOT EXISTS ip_address TEXT NOT NULL DEFAULT 'unknown'")
             except Exception:
                 pass
+            # Índice para acelerar la búsqueda de bloqueos en el login
+            try:
+                await conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_login_lockouts_lookup ON login_lockouts (username, ip_address)"
+                )
+            except Exception:
+                pass
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS dashboard_announcement (
                     id INT PRIMARY KEY DEFAULT 1,
@@ -490,12 +501,32 @@ async def startup():
                     nombre_rol TEXT NOT NULL UNIQUE
                 )
             """)
+            # Agregar columna alias_display si no existe (para nombres personalizables por tenant)
+            # El sistema usa nombre_rol internamente para RBAC; alias_display es sólo para la UI.
+            try:
+                await conn.execute(
+                    "ALTER TABLE roles ADD COLUMN IF NOT EXISTS alias_display TEXT"
+                )
+            except Exception:
+                pass
+
+            # Roles canónicos — los únicos 5 válidos del sistema
             await conn.execute("""
                 INSERT INTO roles (id, nombre_rol) VALUES
                     (1, 'CEO'), (2, 'Administrador'), (3, 'Usuario'),
                     (4, 'Desarrollador'), (5, 'Gerente')
                 ON CONFLICT (id) DO UPDATE SET nombre_rol = EXCLUDED.nombre_rol
             """)
+            # Limpiar roles duplicados generados por el bug de idiomas
+            # (Administrator, Administrative Master → todos se eliminan si no tienen usuarios)
+            try:
+                await conn.execute("""
+                    DELETE FROM roles
+                    WHERE nombre_rol IN ('Administrator', 'Administrative Master', 'Admin')
+                      AND id NOT IN (SELECT DISTINCT rol_id FROM profiles WHERE rol_id IS NOT NULL)
+                """)
+            except Exception:
+                pass
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS organizations (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -696,6 +727,14 @@ async def startup():
         logger.info("✅ Tabla bcv_rates verificada/creada.")
     except Exception as bcv_table_err:
         logger.error(f"❌ Error al crear tabla bcv_rates: {bcv_table_err}")
+
+    # ── Tabla y columnas de vendedores (migración de Fase 1 — cliente de accesorios) ──
+    try:
+        from routers.vendedores_router import ensure_vendedores_schema
+        async with async_db.pool.acquire() as vnd_conn:
+            await ensure_vendedores_schema(vnd_conn)
+    except Exception as vnd_err:
+        logger.error(f"❌ Error al migrar tabla vendedores: {vnd_err}")
 
     # ── Iniciar el nuevo APScheduler (sincronización automática tasas_bcv) ──
     try:

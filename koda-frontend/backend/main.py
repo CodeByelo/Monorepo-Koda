@@ -53,6 +53,12 @@ try:
         if engine.name != "sqlite":
             connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS vendedor_id INTEGER;"))
             connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS retencion_iva_usd NUMERIC(15,2) DEFAULT 0.00;"))
+            connection.execute(text("ALTER TABLE public.productos ADD COLUMN IF NOT EXISTS imagen_url TEXT;"))
+        else:
+            try:
+                connection.execute(text("ALTER TABLE productos ADD COLUMN imagen_url TEXT;"))
+            except Exception:
+                pass
             connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS igtf_usd NUMERIC(15,2) DEFAULT 0.00;"))
             connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS creado_por UUID;"))
         else:

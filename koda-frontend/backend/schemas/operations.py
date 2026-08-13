@@ -35,6 +35,7 @@ class ProductoBase(BaseModel):
     costo_usd: Decimal = Field(..., ge=0, decimal_places=2)
     stock: int = Field(..., ge=0)
     es_exento: bool = Field(default=False)
+    imagen_url: Optional[str] = Field(default=None)
 
 class ProductoCreate(ProductoBase):
     pass
@@ -143,8 +144,6 @@ class KardexMovimientoResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-
-
 # ==========================================
 # ESQUEMAS PARA PROVEEDOR
 # ==========================================
@@ -163,7 +162,6 @@ class ProveedorResponse(ProveedorBase):
     id: int
 
     model_config = ConfigDict(from_attributes=True)
-
 
 # ==========================================
 # ESQUEMAS PARA COTIZACIÓN
@@ -185,7 +183,6 @@ class CotizacionCreate(BaseModel):
     subtotal: Decimal
     discountTotal: Decimal
     totalFinal: Decimal
-
 
 class CotizacionStatusUpdate(BaseModel):
     estado: str = Field(..., min_length=1)
@@ -223,7 +220,7 @@ class RecepcionStockResponse(BaseModel):
     costo_usd: Decimal
     estado: str
     fecha: datetime
-    
+
     class Config:
         orm_mode = True
 

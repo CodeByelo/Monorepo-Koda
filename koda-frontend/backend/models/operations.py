@@ -18,6 +18,7 @@ class Producto(Base):
     costo_usd = Column(Numeric(15, 2), nullable=False)
     stock = Column(Numeric(15, 2), default=0.00, nullable=False)
     es_exento = Column(Boolean, default=False, nullable=False)  # Indica si está exento de IVA (0%)
+    imagen_url = Column(String(500), nullable=True)
 
 class Venta(Base):
     __tablename__ = "ventas"

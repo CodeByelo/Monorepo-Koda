@@ -1614,6 +1614,10 @@ export default function LandingPage() {
         <div className="lp-hero-split" style={{ maxWidth:1380,margin:'0 auto',width:'100%',padding:'0 clamp(1.5rem,5vw,4rem)',display:'grid',gridTemplateColumns:'1.1fr 1fr',gap:'3rem',alignItems:'center',position:'relative',zIndex:10,flex:1 }}>
           <div style={{ animation:'lp-fadein 1s ease both' }}>
             <Label icon={Shield} text="Koda Enterprise Suite" />
+            <div style={{ display:'inline-flex',alignItems:'center',gap:'8px',padding:'6px 14px',borderRadius:'20px',background:'rgba(239,68,68,0.15)',border:'1px solid rgba(239,68,68,0.4)',color:'#ef4444',fontWeight:800,fontSize:'12px',letterSpacing:'.04em',marginTop:'.75rem',marginBottom:'1.25rem' }}>
+              <AlertTriangle size={15} color="#ef4444" />
+              Queremos homologar pero actualmente NO ESTAMOS HOMOLOGADOS
+            </div>
             <h1 style={{ fontSize:'clamp(2.6rem,5.5vw,4.8rem)',fontWeight:900,lineHeight:.96,letterSpacing:'-.035em',margin:'0 0 1.5rem',color:'#fff' }}>
               El software que<br/>
               <span style={{ display:'inline-block',background:'linear-gradient(135deg,#00ffb4 0%,#38bdf8 50%,#a78bfa 100%)',backgroundSize:'250%',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent',animation:'lp-shimmer 5s linear infinite' }}>

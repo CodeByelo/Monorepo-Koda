@@ -11,7 +11,8 @@ import {
   Edit2,
   Trash2,
   CheckCircle,
-  AlertTriangle
+  AlertTriangle,
+  Image as ImageIcon
 } from 'lucide-react';
 import { api } from '@/api/client';
 import { useNavigate } from 'react-router-dom';
@@ -25,6 +26,7 @@ interface Producto {
   costo_usd: number | string;
   stock: number;
   es_exento: boolean;
+  imagen_url?: string;
 }
 
 const Products = () => {
@@ -47,6 +49,7 @@ const Products = () => {
   const [costoUsd, setCostoUsd] = useState('');
   const [stock, setStock] = useState('0');
   const [esExento, setEsExento] = useState(false);
+  const [imagenUrl, setImagenUrl] = useState('');
 
   // Custom visual feedback states
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -82,6 +85,7 @@ const Products = () => {
     setCostoUsd('');
     setStock('0');
     setEsExento(false);
+    setImagenUrl('');
     setIsModalOpen(true);
   };
 
@@ -93,6 +97,7 @@ const Products = () => {
     setCostoUsd(String(p.costo_usd));
     setStock(String(p.stock));
     setEsExento(p.es_exento);
+    setImagenUrl(p.imagen_url || '');
     setIsModalOpen(true);
   };
 
@@ -105,8 +110,10 @@ const Products = () => {
         precio_usd: parseFloat(precioUsd),
         costo_usd: parseFloat(costoUsd),
         stock: parseInt(stock, 10),
-        es_exento: esExento
+        es_exento: esExento,
+        imagen_url: imagenUrl.trim() || undefined
       };
+
 
       if (editingProduct) {
         await api.put(`/productos/${editingProduct.id}`, payload);
@@ -258,9 +265,18 @@ const Products = () => {
                       return (
                         <tr key={i} className="group hover:bg-slate-50 transition-colors">
                            <td className="py-5 px-6">
-                              <div className="flex flex-col">
-                                 <span className="text-xs font-black text-slate-800 uppercase">{p.nombre}</span>
-                                 <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">SKU {p.sku}</span>
+                              <div className="flex items-center gap-3">
+                                 <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center overflow-hidden flex-shrink-0">
+                                   {p.imagen_url ? (
+                                     <img src={p.imagen_url} alt={p.nombre} className="w-full h-full object-cover" onError={(e) => { (e.target as any).style.display = 'none'; }} />
+                                   ) : (
+                                     <ImageIcon size={18} className="text-slate-400" />
+                                   )}
+                                 </div>
+                                 <div className="flex flex-col">
+                                    <span className="text-xs font-black text-slate-800 uppercase">{p.nombre}</span>
+                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">SKU {p.sku}</span>
+                                 </div>
                               </div>
                            </td>
                            <td className="py-5 px-4 text-center text-xs font-bold text-slate-500 uppercase">
@@ -393,6 +409,16 @@ const Products = () => {
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-[#0b5156]"
                   />
                 </div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">URL de Imagen (Opcional)</label>
+                <input 
+                  type="url" 
+                  value={imagenUrl}
+                  onChange={(e) => setImagenUrl(e.target.value)}
+                  placeholder="https://ejemplo.com/imagen.jpg"
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-[#0b5156]"
+                />
               </div>
               <div>
                 <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Stock Inicial</label>
