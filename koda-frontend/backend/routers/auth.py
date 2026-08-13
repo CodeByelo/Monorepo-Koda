@@ -2,14 +2,17 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from pydantic import BaseModel
 from backend.core.database import get_db
 from backend.models.core import Profile, LoginLockout
 from backend.models.erp_extended import AuditoriaLog
 from backend.schemas.core import UserCreate, UserLogin, UserResponse, Token
-from backend.core.security import get_password_hash, verify_password, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES
+from backend.core.security import get_password_hash, verify_password, create_access_token, get_current_user, ACCESS_TOKEN_EXPIRE_MINUTES
 from backend.utils.ip_utils import get_real_ip_str
 from datetime import datetime, timedelta, timezone
 import os
+import secrets
+import uuid
 
 router = APIRouter(prefix="/auth", tags=["Autenticación"])
 
@@ -31,6 +34,115 @@ def _set_auth_cookies(response: JSONResponse, access_token: str) -> None:
 def _clear_auth_cookies(response: JSONResponse) -> None:
     """Elimina las cookies de autenticación."""
     response.delete_cookie(key="sgd_token", path="/", httponly=True, samesite="lax")
+
+
+def _build_session_response(user: Profile) -> JSONResponse:
+    """Emite una sesión real (JWT + cookie httpOnly) para `user`.
+
+    Centraliza exactamente lo que hace /auth/login al autenticar con éxito,
+    para que /auth/exchange pueda reusar la misma lógica sin duplicarla.
+    """
+    access_token = create_access_token(data={
+        "sub": str(user.id),
+        "email": user.email,
+        "username": user.username,
+        "rol": user.rol,
+        "tenant_id": str(user.tenant_id) if user.tenant_id else None
+    })
+
+    response = JSONResponse(content={
+        "token_type": "bearer",
+        "user": {
+            "id": str(user.id),
+            "email": user.email,
+            "username": user.username,
+            "rol": user.rol,
+            "tenant_id": str(user.tenant_id) if user.tenant_id else None,
+        },
+        # Mantener access_token en el body para compatibilidad con clientes que aún usen Bearer header
+        "access_token": access_token,
+    })
+    _set_auth_cookies(response, access_token)
+    return response
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXCHANGE CODE — handoff seguro de sesión entre superficies del monorepo
+# (p. ej. portal ↔ facturación) sin propagar el JWT completo como query param
+# de URL, lo que lo dejaría expuesto en el historial del navegador y en logs
+# de acceso del servidor.
+#
+# NOTA DE ARQUITECTURA: el almacén de códigos vive en memoria de proceso.
+# Es adecuado para este uso (volumen bajo, vida útil de 30s), pero en un
+# despliegue multi-proceso/multi-worker se necesitaría un almacén compartido
+# (p. ej. Redis) para que el código sea visible entre procesos/instancias.
+# ─────────────────────────────────────────────────────────────────────────────
+_EXCHANGE_CODE_TTL_SECONDS = 30
+_exchange_codes: dict[str, dict] = {}
+
+
+class ExchangeCodeRequest(BaseModel):
+    code: str
+
+
+def _prune_expired_exchange_codes(now: datetime) -> None:
+    expired = [c for c, entry in _exchange_codes.items() if entry["expires_at"] < now or entry["used"]]
+    for c in expired:
+        _exchange_codes.pop(c, None)
+
+
+@router.post("/exchange-code")
+def create_exchange_code(current_user: Profile = Depends(get_current_user)):
+    """Genera un código de un solo uso, de corta duración (30s), que otra
+    superficie del monorepo puede intercambiar por una sesión real para el
+    mismo usuario autenticado, sin necesidad de propagar el JWT por la URL."""
+    now = datetime.now(timezone.utc)
+    _prune_expired_exchange_codes(now)
+
+    code = secrets.token_urlsafe(24)
+    _exchange_codes[code] = {
+        "user_id": str(current_user.id),
+        "expires_at": now + timedelta(seconds=_EXCHANGE_CODE_TTL_SECONDS),
+        "used": False,
+    }
+    return {"code": code}
+
+
+@router.post("/exchange")
+def exchange_code(payload: ExchangeCodeRequest, db: Session = Depends(get_db)):
+    """Intercambia un código de un solo uso (emitido por /auth/exchange-code)
+    por una sesión real: cookie httpOnly + JWT en el body, igual que /auth/login."""
+    invalid_exc = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Código de intercambio inválido, expirado o ya utilizado.",
+    )
+
+    entry = _exchange_codes.get(payload.code)
+    if entry is None:
+        raise invalid_exc
+
+    now = datetime.now(timezone.utc)
+    already_used = entry["used"]
+    expired = entry["expires_at"] < now
+
+    # Invalidar de inmediato — de un solo uso — se encuentre válido o no,
+    # para impedir reintentos (replay) sobre el mismo código.
+    entry["used"] = True
+
+    if already_used or expired:
+        raise invalid_exc
+
+    user_id = entry["user_id"]
+    try:
+        user_id = uuid.UUID(user_id)
+    except Exception:
+        pass
+
+    user = db.query(Profile).filter(Profile.id == user_id).first()
+    if user is None:
+        raise invalid_exc
+
+    return _build_session_response(user)
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -140,15 +252,6 @@ def login(request: Request, user_in: UserLogin, db: Session = Depends(get_db)):
         lock_row.locked_until = None
         db.commit()
     
-    # Generar el Token JWT con email, rol y tenant_id
-    access_token = create_access_token(data={
-        "sub": str(user.id), 
-        "email": user.email,
-        "username": user.username,
-        "rol": user.rol,
-        "tenant_id": str(user.tenant_id) if user.tenant_id else None
-    })
-
     # Registrar el login exitoso con la IP real en el Ledger de Auditoría
     real_ip = get_real_ip_str(request)
     try:
@@ -163,21 +266,8 @@ def login(request: Request, user_in: UserLogin, db: Session = Depends(get_db)):
     except Exception:
         db.rollback()  # El log no debe bloquear el login si falla
 
-    # Setear cookie httpOnly con el token y devolver datos del usuario en el body
-    response = JSONResponse(content={
-        "token_type": "bearer",
-        "user": {
-            "id": str(user.id),
-            "email": user.email,
-            "username": user.username,
-            "rol": user.rol,
-            "tenant_id": str(user.tenant_id) if user.tenant_id else None,
-        },
-        # Mantener access_token en el body para compatibilidad con clientes que aún usen Bearer header
-        "access_token": access_token,
-    })
-    _set_auth_cookies(response, access_token)
-    return response
+    # Generar el JWT, setear la cookie httpOnly y devolver los datos del usuario en el body
+    return _build_session_response(user)
 
 
 @router.post("/logout")
