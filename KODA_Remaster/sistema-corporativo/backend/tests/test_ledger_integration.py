@@ -15,7 +15,14 @@ from database.async_db import db_session
 from routers.ledger_router import event_buffer, KodaEventCreate, AggregateType, EventSeverity
 
 # JWT Auth config
-SECRET_KEY = os.getenv("JWT_SECRET", "tu_clave_secreta_muy_segura_cambiala_en_produccion")
+# Se importa `main` (línea de arriba) en el mismo proceso, así que este script debe
+# usar el mismo JWT_SECRET del entorno que valida main.py; sin fallback hardcodeado.
+SECRET_KEY = os.getenv("JWT_SECRET")
+if not SECRET_KEY:
+    raise RuntimeError(
+        "JWT_SECRET debe estar definido en el entorno antes de ejecutar este test "
+        "(main.py ya falla al importar si falta)."
+    )
 ALGORITHM = "HS256"
 
 def create_test_token(user_id: str, tenant_id: str):

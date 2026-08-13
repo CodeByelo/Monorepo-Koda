@@ -12,7 +12,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import database.async_db as async_db
 
-SECRET_KEY = os.getenv("JWT_SECRET", "9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8e")
+SECRET_KEY = os.getenv("JWT_SECRET")
+if not SECRET_KEY:
+    raise RuntimeError(
+        "JWT_SECRET debe estar definido en el entorno (el mismo valor usado por el "
+        "servidor contra el que corre este script) para generar tokens válidos."
+    )
 ALGORITHM = "HS256"
 
 def generate_mock_token(user_id: str, tenant_id: str, role: str, username: str) -> str:
