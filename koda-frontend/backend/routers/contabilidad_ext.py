@@ -620,7 +620,10 @@ def balance_comprobacion(periodo: str, db: Session = Depends(get_db), current_us
         AsientoDetalle.cuenta_nombre
     ).all()
 
-    cuentas = db.query(CuentaContable).filter(CuentaContable.activa == True).all()
+    cuentas = db.query(CuentaContable).filter(
+        CuentaContable.activa == True,
+        CuentaContable.tenant_id == current_user.tenant_id
+    ).all()
     lineas_dict = {
         c.codigo: {
             "codigo": c.codigo, 
@@ -678,8 +681,10 @@ def balance_comprobacion(periodo: str, db: Session = Depends(get_db), current_us
     from backend.models.operations import Producto, Venta
     from backend.models.core import TasaCambio
     
-    # Obtener tasa de cambio para los reportes
-    tasa_obj = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
+    # Obtener tasa de cambio para los reportes (del tenant actual)
+    tasa_obj = db.query(TasaCambio).filter(
+        TasaCambio.tenant_id == current_user.tenant_id
+    ).order_by(TasaCambio.fecha.desc()).first()
     tasa_bcv = Decimal(str(tasa_obj.valor_ves)) if tasa_obj else Decimal("36.52")
 
     diff_val = abs(total_debe - total_haber)
@@ -705,12 +710,13 @@ def balance_comprobacion(periodo: str, db: Session = Depends(get_db), current_us
         func.sum(AsientoDetalle.debe_usd - AsientoDetalle.haber_usd)
     ).join(AsientoContable).filter(
         AsientoDetalle.cuenta_codigo.like("1.1.01%"),
+        AsientoContable.tenant_id == current_user.tenant_id,
         AsientoContable.fecha < end_date
     ).scalar() or Decimal("0.00")
-    
+
     saldo_bancos_real = db.query(
         func.sum(CuentaBancaria.saldo_actual_usd)
-    ).scalar() or Decimal("0.00")
+    ).filter(CuentaBancaria.tenant_id == current_user.tenant_id).scalar() or Decimal("0.00")
     
     diff_bancos = abs(saldo_contable_bancos - saldo_bancos_real)
     if diff_bancos > Decimal("0.01"):
@@ -733,12 +739,13 @@ def balance_comprobacion(periodo: str, db: Session = Depends(get_db), current_us
         func.sum(AsientoDetalle.debe_usd - AsientoDetalle.haber_usd)
     ).join(AsientoContable).filter(
         AsientoDetalle.cuenta_codigo.like("1.1.03%"),
+        AsientoContable.tenant_id == current_user.tenant_id,
         AsientoContable.fecha < end_date
     ).scalar() or Decimal("0.00")
-    
+
     valoracion_fisica_inventario = db.query(
         func.sum(Producto.stock * Producto.costo_usd)
-    ).scalar() or Decimal("0.00")
+    ).filter(Producto.tenant_id == current_user.tenant_id).scalar() or Decimal("0.00")
     
     diff_inventario = abs(saldo_contable_inventario - valoracion_fisica_inventario)
     if diff_inventario > Decimal("0.01"):
@@ -761,13 +768,15 @@ def balance_comprobacion(periodo: str, db: Session = Depends(get_db), current_us
         func.sum(AsientoDetalle.haber_usd - AsientoDetalle.debe_usd)
     ).join(AsientoContable).filter(
         AsientoDetalle.cuenta_codigo.like("2.1.02%"),
+        AsientoContable.tenant_id == current_user.tenant_id,
         AsientoContable.fecha >= start_date,
         AsientoContable.fecha < end_date
     ).scalar() or Decimal("0.00")
-    
+
     iva_facturas = db.query(
         func.sum(Venta.iva_usd)
     ).filter(
+        Venta.tenant_id == current_user.tenant_id,
         Venta.fecha >= start_date,
         Venta.fecha < end_date
     ).scalar() or Decimal("0.00")
