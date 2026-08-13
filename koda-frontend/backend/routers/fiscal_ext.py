@@ -356,13 +356,16 @@ def declaracion_iva(periodo: str = Query(...), db: Session = Depends(get_db), cu
     }
 
 @router.patch("/libro-compras/{compra_id}/control")
-async def actualizar_control_compra(compra_id: int, request: Request, db: Session = Depends(get_db)):
-    compra = db.query(Compra).filter(Compra.id == compra_id).first()
+async def actualizar_control_compra(compra_id: int, request: Request, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    compra = db.query(Compra).filter(
+        Compra.id == compra_id,
+        Compra.tenant_id == current_user.tenant_id,
+    ).first()
     if not compra:
         raise HTTPException(status_code=404, detail="Compra no encontrada")
     body = await request.json()
     ret = RetencionIVA()
-    ret.tenant_id = db.query(RetencionIVA).first().tenant_id if db.query(RetencionIVA).first() else None
+    ret.tenant_id = current_user.tenant_id
     ret.tipo = body.get("tipo", "RECIBIDA")
     ret.agente_rif = body.get("agente_rif", "")
     ret.agente_nombre = body.get("agente_nombre", "")
@@ -385,16 +388,26 @@ async def actualizar_control_compra(compra_id: int, request: Request, db: Sessio
 
 
 @router.get("/declaraciones-iva/historial")
-def historial_declaraciones_iva(db: Session = Depends(get_db)):
-    return db.query(DeclaracionIVA).order_by(DeclaracionIVA.periodo.desc()).limit(12).all()
+def historial_declaraciones_iva(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    return db.query(DeclaracionIVA).filter(
+        DeclaracionIVA.tenant_id == current_user.tenant_id
+    ).order_by(DeclaracionIVA.periodo.desc()).limit(12).all()
 
 
 @router.post("/declaracion-iva/borrador")
-def guardar_borrador_iva(body: dict, db: Session = Depends(get_db)):
+def guardar_borrador_iva(body: dict, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     periodo = body.get("periodo")
-    decl = db.query(DeclaracionIVA).filter(DeclaracionIVA.periodo == periodo).first()
+    decl = db.query(DeclaracionIVA).filter(
+        DeclaracionIVA.periodo == periodo,
+        DeclaracionIVA.tenant_id == current_user.tenant_id,
+    ).first()
     if not decl:
-        decl = DeclaracionIVA(periodo=periodo, estado="BORRADOR", tasa_cambio_bs=tasa_actual(db))
+        decl = DeclaracionIVA(
+            periodo=periodo,
+            estado="BORRADOR",
+            tasa_cambio_bs=_tasa_actual_tenant(db, current_user.tenant_id),
+            tenant_id=current_user.tenant_id,
+        )
         db.add(decl)
     decl.retenciones = body.get("retenciones", 0)
     decl.estado = "BORRADOR"
@@ -403,12 +416,19 @@ def guardar_borrador_iva(body: dict, db: Session = Depends(get_db)):
 
 
 @router.post("/declaracion-iva/finalizar")
-def finalizar_iva(body: dict, db: Session = Depends(get_db)):
+def finalizar_iva(body: dict, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     periodo = body.get("periodo")
-    data = declaracion_iva(periodo, db)
-    decl = db.query(DeclaracionIVA).filter(DeclaracionIVA.periodo == periodo).first()
+    data = declaracion_iva(periodo, db, current_user)
+    decl = db.query(DeclaracionIVA).filter(
+        DeclaracionIVA.periodo == periodo,
+        DeclaracionIVA.tenant_id == current_user.tenant_id,
+    ).first()
     if not decl:
-        decl = DeclaracionIVA(periodo=periodo, tasa_cambio_bs=tasa_actual(db))
+        decl = DeclaracionIVA(
+            periodo=periodo,
+            tasa_cambio_bs=_tasa_actual_tenant(db, current_user.tenant_id),
+            tenant_id=current_user.tenant_id,
+        )
         db.add(decl)
     decl.debito_fiscal = data["debito_fiscal"]
     decl.credito_fiscal_mes = data["credito_fiscal_mes"]
@@ -422,8 +442,11 @@ def finalizar_iva(body: dict, db: Session = Depends(get_db)):
 
 
 @router.get("/retenciones-iva")
-def retenciones_iva(periodo: str = Query(...), db: Session = Depends(get_db)):
-    rows = db.query(RetencionIVA).filter(RetencionIVA.periodo == periodo).all()
+def retenciones_iva(periodo: str = Query(...), db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    rows = db.query(RetencionIVA).filter(
+        RetencionIVA.periodo == periodo,
+        RetencionIVA.tenant_id == current_user.tenant_id,
+    ).all()
     
     recibidas = []
     practicadas = []
@@ -460,18 +483,21 @@ def retenciones_iva(periodo: str = Query(...), db: Session = Depends(get_db)):
 
 
 @router.get("/retenciones-iva/exportar")
-def exportar_retenciones(periodo: str, db: Session = Depends(get_db)):
+def exportar_retenciones(periodo: str, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     from backend.models.erp_extended import Empresa
     import re
     # Obtener el RIF de la empresa (agente de retención)
-    empresa = db.query(Empresa).first()
+    empresa = db.query(Empresa).filter(Empresa.tenant_id == current_user.tenant_id).first()
     rif_agente = re.sub(r'[\s\-]', '', empresa.rif.upper()) if empresa else "J300000000"
-    
+
     # Formatear el periodo para el SENIAT: YYYYMM (por ejemplo, "202605" para "2026-05")
     periodo_fiscal = periodo.replace("-", "")
-    
+
     # Obtener retenciones de IVA para el periodo
-    rows = db.query(RetencionIVA).filter(RetencionIVA.periodo == periodo).all()
+    rows = db.query(RetencionIVA).filter(
+        RetencionIVA.periodo == periodo,
+        RetencionIVA.tenant_id == current_user.tenant_id,
+    ).all()
     
     lines = []
     for r in rows:
