@@ -1520,7 +1520,9 @@ def flujo_caja(periodo: str, db: Session = Depends(get_db), current_user = Depen
 
     # Si la base de datos está vacía de asientos, hacemos un fallback para mostrar actividad
     if operativo_in == 0.0 and operativo_out == 0.0 and inversion == 0.0 and financiamiento == 0.0:
-        ventas = ventas_periodo(db, periodo).all()
+        from backend.models.operations import Venta
+        # ventas_periodo() no filtra por tenant; se acota aquí al tenant actual.
+        ventas = ventas_periodo(db, periodo).filter(Venta.tenant_id == current_user.tenant_id).all()
         operativo_in = sum(to_float(v.total) for v in ventas)
         operativo_out = -operativo_in * 0.65
 
@@ -1542,6 +1544,7 @@ def flujo_caja(periodo: str, db: Session = Depends(get_db), current_user = Depen
         AsientoContable
     ).filter(
         AsientoDetalle.cuenta_codigo.like("1.1.01%") | AsientoDetalle.cuenta_codigo.like("1101%"),
+        AsientoContable.tenant_id == current_user.tenant_id,
         AsientoContable.fecha < start_date
     ).scalar() or 0.0
 
@@ -1552,7 +1555,9 @@ def flujo_caja(periodo: str, db: Session = Depends(get_db), current_user = Depen
 
     # Composición real de saldos de bancos contra caja
     from backend.models.erp_extended import CuentaBancaria
-    saldo_bancos_real = db.query(func.sum(CuentaBancaria.saldo_actual_usd)).scalar() or Decimal("0.00")
+    saldo_bancos_real = db.query(func.sum(CuentaBancaria.saldo_actual_usd)).filter(
+        CuentaBancaria.tenant_id == current_user.tenant_id
+    ).scalar() or Decimal("0.00")
     bancos_val = float(saldo_bancos_real)
 
     if bancos_val > efectivo_final:
@@ -1725,7 +1730,9 @@ def exportar_flujo(periodo: str, formato: str, db: Session = Depends(get_db), cu
 
 @router.get("/cierre/checklist")
 def cierre_checklist(periodo: str, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    ventas_count = ventas_periodo(db, periodo).count()
+    from backend.models.operations import Venta
+    # ventas_periodo() no filtra por tenant; se acota aquí al tenant actual.
+    ventas_count = ventas_periodo(db, periodo).filter(Venta.tenant_id == current_user.tenant_id).count()
     
     y, m = map(int, periodo.split("-"))
     start_date = datetime(y, m, 1, 0, 0, 0, tzinfo=timezone.utc)
@@ -1749,6 +1756,7 @@ def cierre_checklist(periodo: str, db: Session = Depends(get_db), current_user =
 
     from backend.models.operations import AjusteInventario
     pending_adjustments = db.query(AjusteInventario).filter(
+        AjusteInventario.tenant_id == current_user.tenant_id,
         AjusteInventario.fecha_solicitud >= start_date,
         AjusteInventario.fecha_solicitud < end_date,
         AjusteInventario.estado == "PENDIENTE"
