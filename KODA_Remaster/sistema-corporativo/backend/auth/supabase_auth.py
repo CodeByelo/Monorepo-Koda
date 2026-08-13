@@ -5,7 +5,13 @@ from jose import JWTError, jwt
 from typing import Optional
 
 # CONFIGURACIÓN JWT (Heredada del main)
-SECRET_KEY = os.getenv("JWT_SECRET", "tu_clave_secreta_muy_segura_cambiala_en_produccion")
+# JWT_SECRET es obligatorio: sin fallback hardcodeado. Falla al importar si falta o es débil.
+SECRET_KEY = os.getenv("JWT_SECRET", "")
+if not SECRET_KEY or len(SECRET_KEY) < 32:
+    raise RuntimeError(
+        "JWT_SECRET no configurado o inseguro: debe definirse como variable de entorno "
+        "con un valor de al menos 32 caracteres. No existe valor por defecto."
+    )
 ALGORITHM = "HS256"
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login", auto_error=False)

@@ -6,6 +6,14 @@ import logging
 
 logger = logging.getLogger("sistema_corporativo")
 
+# JWT_SECRET es obligatorio: sin fallback hardcodeado. Falla al importar si falta o es débil.
+_JWT_SECRET = os.getenv("JWT_SECRET", "")
+if not _JWT_SECRET or len(_JWT_SECRET) < 32:
+    raise RuntimeError(
+        "JWT_SECRET no configurado o inseguro: debe definirse como variable de entorno "
+        "con un valor de al menos 32 caracteres. No existe valor por defecto."
+    )
+
 # Contextvars
 tenant_id_var: ContextVar[str] = ContextVar("tenant_id", default=None)
 user_id_var: ContextVar[str] = ContextVar("user_id", default=None)
@@ -35,10 +43,9 @@ async def extract_user_from_token(request: Request):
     
     token = auth_header.split(" ")[1]
     # Sincronizado con auth/security.py
-    secret_key = os.getenv("JWT_SECRET", "tu_clave_secreta_muy_segura_cambiala_en_produccion")
-    
+
     try:
-        payload = jwt.decode(token, secret_key, algorithms=["HS256"])
+        payload = jwt.decode(token, _JWT_SECRET, algorithms=["HS256"])
         user_id = payload.get("sub")
         role = payload.get("role") or payload.get("rol")
         logger.info(f"🔑 user_id extraído: {user_id}, role: {role}")

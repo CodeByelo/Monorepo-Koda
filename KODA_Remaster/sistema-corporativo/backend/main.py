@@ -17,6 +17,14 @@ load_dotenv(dotenv_path=env_path)
 print("DATABASE_URL cargada: " + (os.getenv("SUPABASE_DB_URL") or "Vacio/None"))
 DEV_ROLE_MASTER_PASSWORD = os.getenv("DEV_ROLE_MASTER_PASSWORD", "")
 
+# JWT_SECRET es obligatorio: sin fallback hardcodeado. La app se niega a arrancar sin él.
+JWT_SECRET = os.getenv("JWT_SECRET", "")
+if not JWT_SECRET or len(JWT_SECRET) < 32:
+    raise RuntimeError(
+        "JWT_SECRET no configurado o inseguro: debe definirse como variable de entorno "
+        "con un valor de al menos 32 caracteres. No existe valor por defecto."
+    )
+
 from fastapi import FastAPI, Depends, HTTPException, Request, Query, UploadFile, File as FastAPIFile, Form
 from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -81,7 +89,6 @@ from pydantic import BaseModel
 
 import json
 DEBUG_MODE = os.getenv("DEBUG", "false").lower() == "true"
-DEFAULT_JWT_SECRET = "tu_clave_secreta_muy_segura_cambiala_en_produccion"
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))  # 10MB por archivo
 MAX_UPLOAD_FILES = int(os.getenv("MAX_UPLOAD_FILES", "5"))
 ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".png", ".jpg", ".jpeg", ".webp"}
@@ -317,7 +324,7 @@ async def audit_access_middleware(request: Request, call_next):
 
         token = auth_header.split(" ", 1)[1]
         try:
-            payload = jwt.decode(token, os.getenv("JWT_SECRET", DEFAULT_JWT_SECRET), algorithms=["HS256"])
+            payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
         except Exception:
             return response
 
@@ -420,9 +427,7 @@ print()
 
 @app.on_event("startup")
 async def startup():
-    jwt_secret = os.getenv("JWT_SECRET", DEFAULT_JWT_SECRET)
-    if (not jwt_secret) or (jwt_secret == DEFAULT_JWT_SECRET) or (len(jwt_secret) < 32):
-        raise RuntimeError("JWT_SECRET inseguro o no configurado correctamente (minimo 32 caracteres y no default)")
+    # JWT_SECRET ya se valida (fail-closed) al importar el módulo, arriba.
     if (not DEV_ROLE_MASTER_PASSWORD) or (DEV_ROLE_MASTER_PASSWORD == "JJDKoda**") or (len(DEV_ROLE_MASTER_PASSWORD) < 12):
         raise RuntimeError("DEV_ROLE_MASTER_PASSWORD inseguro o no configurado (minimo 12 caracteres y no default)")
 
@@ -2289,10 +2294,9 @@ async def create_documento(
             raise HTTPException(status_code=401, detail="Token no proporcionado")
 
         token = auth_header.split(" ")[1]
-        secret_key = os.getenv("JWT_SECRET", "tu_clave_secreta_muy_segura_cambiala_en_produccion")
 
         try:
-            payload = jwt.decode(token, secret_key, algorithms=["HS256"])
+            payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
         except Exception as e:
             raise HTTPException(status_code=401, detail=f"Token inválido: {str(e)}")
 
@@ -5092,7 +5096,7 @@ async def verify_mfa_login(
     conn = Depends(get_db_connection)
 ):
     try:
-        token_payload = jwt.decode(payload.mfa_token, os.getenv("JWT_SECRET", DEFAULT_JWT_SECRET), algorithms=["HS256"])
+        token_payload = jwt.decode(payload.mfa_token, JWT_SECRET, algorithms=["HS256"])
     except Exception:
         raise HTTPException(status_code=401, detail="Token MFA inválido o expirado")
 

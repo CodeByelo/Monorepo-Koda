@@ -22,10 +22,13 @@ load_dotenv()
 _sec_logger = _logging.getLogger("koda_security")
 
 # Configuraciones de Seguridad desde Variables de Entorno
-# CRÍTICO: El sistema NO debe arrancar sin claves secretas reales.
-SECRET_KEY = os.getenv("SECRET_KEY", "koda-jwt-secret-key-production-bimonetario-2026-fallback-secure").strip()
-if not SECRET_KEY:
-    SECRET_KEY = "koda-jwt-secret-key-production-bimonetario-2026-fallback-secure"
+# CRÍTICO: El sistema NO debe arrancar sin claves secretas reales. Sin fallback hardcodeado.
+SECRET_KEY = os.getenv("SECRET_KEY", "").strip()
+if not SECRET_KEY or len(SECRET_KEY) < 32:
+    raise RuntimeError(
+        "SECRET_KEY no configurado o inseguro: debe definirse como variable de entorno "
+        "con un valor de al menos 32 caracteres. No existe valor por defecto."
+    )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))  # 24 horas por defecto
 
@@ -103,9 +106,13 @@ def require_role(roles_permitidos: list[str]):
 # ==========================================
 
 # Clave secreta dedicada a los logs para evitar colisiones si se compromete el SECRET_KEY principal
-AUDIT_LOG_SECRET = os.getenv("AUDIT_LOG_SECRET", "koda-audit-log-secret-key-production-2026-fallback-secure").strip()
-if not AUDIT_LOG_SECRET:
-    AUDIT_LOG_SECRET = "koda-audit-log-secret-key-production-2026-fallback-secure"
+# Sin fallback hardcodeado: falla al importar si falta o es débil.
+AUDIT_LOG_SECRET = os.getenv("AUDIT_LOG_SECRET", "").strip()
+if not AUDIT_LOG_SECRET or len(AUDIT_LOG_SECRET) < 32:
+    raise RuntimeError(
+        "AUDIT_LOG_SECRET no configurado o inseguro: debe definirse como variable de entorno "
+        "con un valor de al menos 32 caracteres. No existe valor por defecto."
+    )
 
 def generate_log_signature(session_id: int, endpoint: str, timestamp: datetime, ip_address: str) -> str:
     """Genera una firma SHA-256 para garantizar la inmutabilidad de los logs."""
