@@ -47,13 +47,17 @@ const UsersPermissions = () => {
     ]).then(([dash, users, sesionesRes]) => {
       const m = dash?.metricas || [];
       const sessList = sesionesRes?.sesiones || [];
+      // El rol "Desarrollador" es la cuenta global del proveedor SaaS (super-admin
+      // de plataforma), no un usuario corporativo del tenant. Se excluye de este
+      // directorio para no exponer su correo personal junto al staff de la empresa.
+      const usuariosCorporativos = (users || []).filter((u: any) => u.rol !== 'Desarrollador');
       setKpis([
         { label: 'Sesiones Activas', value: String(sessList.length || 0), color: 'text-[#0b5156]', bg: 'bg-green-50', border: 'border-green-200', icon: <Activity size={16} className="text-green-600" /> },
-        { label: 'Usuarios Registrados', value: String(users?.length || 0), color: 'text-slate-800', bg: 'bg-slate-50', border: 'border-slate-200', icon: <Users size={16} className="text-slate-500" /> },
+        { label: 'Usuarios Registrados', value: String(usuariosCorporativos.length || 0), color: 'text-slate-800', bg: 'bg-slate-50', border: 'border-slate-200', icon: <Users size={16} className="text-slate-500" /> },
         { label: 'Eventos Hoy', value: m[1]?.v || '0', color: 'text-slate-800', bg: 'bg-slate-50', border: 'border-slate-200', icon: <AlertTriangle size={16} className="text-amber-500" /> },
         { label: 'Nivel de Riesgo', value: 'ÓPTIMO', color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-200', icon: <ShieldCheck size={16} className="text-green-600" />, isText: true },
       ]);
-      setUsuarios(users || []);
+      setUsuarios(usuariosCorporativos);
       setSesiones(sessList);
     }).catch(console.error);
   };

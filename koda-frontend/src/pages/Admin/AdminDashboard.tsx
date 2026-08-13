@@ -54,7 +54,10 @@ const AdminDashboard = ({ defaultTab = 'compania' }: AdminDashboardProps) => {
         setSucursales(sucursalesRes || []);
       } else if (activeTab === 'usuarios') {
         const usuariosRes = await api.get<any[]>('/admin/usuarios');
-        setUsuarios(usuariosRes || []);
+        // El rol "Desarrollador" es la cuenta global del proveedor SaaS
+        // (super-admin de plataforma) y usa un correo personal, no corporativo.
+        // Se excluye de este directorio, que representa el staff del tenant.
+        setUsuarios((usuariosRes || []).filter((u: any) => u.rol !== 'Desarrollador'));
       }
     } catch (error) {
       console.error(`Error fetching data for ${activeTab}:`, error);
