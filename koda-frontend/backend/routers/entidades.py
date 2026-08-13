@@ -4,6 +4,8 @@ from pydantic import BaseModel
 from typing import Optional, List
 
 from backend.core.database import get_db
+from backend.core.security import get_current_user
+from backend.models.core import Profile
 from backend.models.operations import Cliente
 from backend.models.erp_extended import Empresa, Sucursal
 from backend.schemas.operations import ClienteCreate, ClienteResponse
@@ -17,38 +19,53 @@ router = APIRouter(prefix="/entidades", tags=["Entidades"], dependencies=[Depend
 
 @router.get("/clientes", response_model=List[ClienteResponse])
 @router.get("/clientes/", response_model=List[ClienteResponse], include_in_schema=False)
-def listar_clientes(db: Session = Depends(get_db)):
-    return db.query(Cliente).all()
+def listar_clientes(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    return db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).all()
 
 @router.post("/clientes", response_model=ClienteResponse, status_code=status.HTTP_201_CREATED)
 @router.post("/clientes/", response_model=ClienteResponse, status_code=status.HTTP_201_CREATED, include_in_schema=False)
-def crear_cliente(cliente: ClienteCreate, db: Session = Depends(get_db)):
-    db_cliente = db.query(Cliente).filter(Cliente.rif == cliente.rif).first()
+def crear_cliente(cliente: ClienteCreate, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    # RIF es único por tenant (ver UniqueConstraint('tenant_id', 'rif') en el modelo Cliente),
+    # por lo que la validación de duplicados también debe estar acotada al tenant.
+    db_cliente = db.query(Cliente).filter(
+        Cliente.rif == cliente.rif,
+        Cliente.tenant_id == current_user.tenant_id,
+    ).first()
     if db_cliente:
         raise HTTPException(status_code=400, detail="El RIF/Cédula ya existe")
-    nuevo_cliente = Cliente(**cliente.model_dump())
+    nuevo_cliente = Cliente(**cliente.model_dump(), tenant_id=current_user.tenant_id)
     db.add(nuevo_cliente)
     db.commit()
     db.refresh(nuevo_cliente)
     return nuevo_cliente
 
 @router.get("/clientes/{cliente_id}", response_model=ClienteResponse)
-def obtener_cliente(cliente_id: int, db: Session = Depends(get_db)):
-    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+def obtener_cliente(cliente_id: int, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    cliente = db.query(Cliente).filter(
+        Cliente.id == cliente_id,
+        Cliente.tenant_id == current_user.tenant_id,
+    ).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     return cliente
 
 @router.put("/clientes/{cliente_id}", response_model=ClienteResponse)
-def actualizar_cliente(cliente_id: int, cliente_update: ClienteCreate, db: Session = Depends(get_db)):
-    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+def actualizar_cliente(cliente_id: int, cliente_update: ClienteCreate, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    cliente = db.query(Cliente).filter(
+        Cliente.id == cliente_id,
+        Cliente.tenant_id == current_user.tenant_id,
+    ).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
-    
-    duplicado = db.query(Cliente).filter(Cliente.rif == cliente_update.rif, Cliente.id != cliente_id).first()
+
+    duplicado = db.query(Cliente).filter(
+        Cliente.rif == cliente_update.rif,
+        Cliente.id != cliente_id,
+        Cliente.tenant_id == current_user.tenant_id,
+    ).first()
     if duplicado:
         raise HTTPException(status_code=400, detail="El RIF/Cédula ya está en uso por otro cliente")
-        
+
     for key, value in cliente_update.model_dump().items():
         setattr(cliente, key, value)
     db.commit()
@@ -56,8 +73,11 @@ def actualizar_cliente(cliente_id: int, cliente_update: ClienteCreate, db: Sessi
     return cliente
 
 @router.delete("/clientes/{cliente_id}")
-def eliminar_cliente(cliente_id: int, db: Session = Depends(get_db)):
-    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+def eliminar_cliente(cliente_id: int, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    cliente = db.query(Cliente).filter(
+        Cliente.id == cliente_id,
+        Cliente.tenant_id == current_user.tenant_id,
+    ).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     db.delete(cliente)
