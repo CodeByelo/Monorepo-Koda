@@ -541,14 +541,16 @@ class CentroCostoUpdate(BaseModel):
     activo: Optional[bool] = None
 
 @router.get("/contabilidad/centros-costo/exportar")
-def exportar_centros_costo(db: Session = Depends(get_db)):
+def exportar_centros_costo(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     """Exporta los centros de costo en formato CSV compatible con Excel."""
     import io
     import csv
     from fastapi.responses import StreamingResponse
     from backend.models.erp_extended import CentroCosto
 
-    centros = db.query(CentroCosto).order_by(CentroCosto.codigo).all()
+    centros = db.query(CentroCosto).filter(
+        CentroCosto.tenant_id == current_user.tenant_id
+    ).order_by(CentroCosto.codigo).all()
 
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';')
@@ -799,10 +801,12 @@ def ejecutar_ajuste_inflacion(body: dict, db: Session = Depends(get_db), current
 
 
 @router.get("/rrhh/dashboard")
-def rrhh_dashboard(db: Session = Depends(get_db)):
-    empleados = db.query(Empleado).filter(Empleado.activo == 1).count()
-    nominas = db.query(Nomina).count()
-    masa = db.query(func.sum(Empleado.salario_base_usd)).filter(Empleado.activo == 1).scalar() or 0
+def rrhh_dashboard(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    empleados = db.query(Empleado).filter(Empleado.activo == 1, Empleado.tenant_id == current_user.tenant_id).count()
+    nominas = db.query(Nomina).filter(Nomina.tenant_id == current_user.tenant_id).count()
+    masa = db.query(func.sum(Empleado.salario_base_usd)).filter(
+        Empleado.activo == 1, Empleado.tenant_id == current_user.tenant_id
+    ).scalar() or 0
     return {
         "empleados_activos": empleados,
         "nominas_emitidas": nominas,
@@ -818,13 +822,16 @@ def rrhh_dashboard(db: Session = Depends(get_db)):
 def listar_empleados(
     limit: int = 50,
     offset: int = 0,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Profile = Depends(get_current_user)
 ):
     limit = min(max(1, limit), 100)
     offset = max(0, offset)
 
-    total_records = db.query(Empleado).count()
-    empleados = db.query(Empleado).offset(offset).limit(limit).all()
+    total_records = db.query(Empleado).filter(Empleado.tenant_id == current_user.tenant_id).count()
+    empleados = db.query(Empleado).filter(
+        Empleado.tenant_id == current_user.tenant_id
+    ).offset(offset).limit(limit).all()
 
     return {
         "total_records": total_records,
@@ -835,11 +842,11 @@ def listar_empleados(
 
 
 @router.get("/fiscal/obligaciones")
-def obligaciones_fiscales(db: Session = Depends(get_db)):
+def obligaciones_fiscales(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     from backend.models.erp_extended import DeclaracionIVA, DeclaracionISLR, Empresa
     from datetime import datetime
-    
-    perfil = db.query(Empresa).first()
+
+    perfil = db.query(Empresa).filter(Empresa.tenant_id == current_user.tenant_id).first()
     rif = perfil.rif if perfil and perfil.rif else "J-00000000-0"
     digito = int(rif[-1]) if rif[-1].isdigit() else 0
     especial = False
@@ -854,12 +861,16 @@ def obligaciones_fiscales(db: Session = Depends(get_db)):
     
     # Check if IVA is finalized
     periodo_iva = f"{y}-{m-1:02d}"
-    iva_dec = db.query(DeclaracionIVA).filter(DeclaracionIVA.periodo == periodo_iva).first()
+    iva_dec = db.query(DeclaracionIVA).filter(
+        DeclaracionIVA.periodo == periodo_iva, DeclaracionIVA.tenant_id == current_user.tenant_id
+    ).first()
     iva_status = "AL DÍA" if (iva_dec and iva_dec.estado == "FINALIZADA") else "PENDIENTE"
-    
+
     # Check if ISLR is finalized
     periodo_islr = f"{y}"
-    islr_dec = db.query(DeclaracionISLR).filter(DeclaracionISLR.ejercicio == periodo_islr).first()
+    islr_dec = db.query(DeclaracionISLR).filter(
+        DeclaracionISLR.ejercicio == periodo_islr, DeclaracionISLR.tenant_id == current_user.tenant_id
+    ).first()
     islr_status = "AL DÍA" if (islr_dec and islr_dec.estado == "FINALIZADA") else "PENDIENTE"
     
     # obligations list
@@ -2260,8 +2271,10 @@ def guardar_tasa_manual(payload: dict, db: Session = Depends(get_db)):
 # ---- G. COBRANZAS ----
 
 @router.get("/cobranzas/cuentas")
-def cuentas_por_cobrar_list(db: Session = Depends(get_db)):
-    cxc = db.query(CuentaPorCobrar).order_by(CuentaPorCobrar.fecha_vencimiento.asc()).all()
+def cuentas_por_cobrar_list(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    cxc = db.query(CuentaPorCobrar).filter(
+        CuentaPorCobrar.tenant_id == current_user.tenant_id
+    ).order_by(CuentaPorCobrar.fecha_vencimiento.asc()).all()
     today = datetime.now(timezone.utc).date()
     result = []
     for c in cxc:
@@ -2289,8 +2302,8 @@ def cuentas_por_cobrar_list(db: Session = Depends(get_db)):
 
 
 @router.get("/cobranzas/kpis")
-def kpis_cobranzas(db: Session = Depends(get_db)):
-    cxc = db.query(CuentaPorCobrar).all()
+def kpis_cobranzas(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    cxc = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.tenant_id == current_user.tenant_id).all()
     today = datetime.now(timezone.utc).date()
     
     total = sum(to_float(c.monto_total_usd) - to_float(c.monto_pagado_usd) for c in cxc)
@@ -2488,9 +2501,11 @@ def exportar_inversiones_excel(db: Session = Depends(get_db), current_user = Dep
 
 
 @router.get("/contabilidad/libro-diario/exportar-txt")
-def exportar_diario_txt(db: Session = Depends(get_db)):
+def exportar_diario_txt(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     import io
-    asientos = db.query(AsientoContable).order_by(AsientoContable.fecha.asc()).all()
+    asientos = db.query(AsientoContable).filter(
+        AsientoContable.tenant_id == current_user.tenant_id
+    ).order_by(AsientoContable.fecha.asc()).all()
     
     txt_content = "FECHA|REFERENCIA|CODIGO_CUENTA|NOMBRE_CUENTA|CONCEPTO|DEBE_USD|HABER_USD\r\n"
     for a in asientos:
