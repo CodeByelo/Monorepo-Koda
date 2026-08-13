@@ -362,8 +362,8 @@ class AlmacenCreate(BaseModel):
 
 
 @router.get("/inventario/almacenes")
-def listar_almacenes(db: Session = Depends(get_db)):
-    items = db.query(Almacen).filter(Almacen.activo == True).all()
+def listar_almacenes(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    items = db.query(Almacen).filter(Almacen.activo == True, Almacen.tenant_id == current_user.tenant_id).all()
     return [
         {
             "id": a.id,
@@ -378,17 +378,20 @@ def listar_almacenes(db: Session = Depends(get_db)):
 
 
 @router.post("/inventario/almacenes")
-def crear_almacen(payload: AlmacenCreate, db: Session = Depends(get_db)):
-    existing = db.query(Almacen).filter(Almacen.codigo == payload.codigo.upper()).first()
+def crear_almacen(payload: AlmacenCreate, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    existing = db.query(Almacen).filter(
+        Almacen.codigo == payload.codigo.upper(), Almacen.tenant_id == current_user.tenant_id
+    ).first()
     if existing:
         raise HTTPException(status_code=400, detail="El código de almacén ya está registrado.")
-    
+
     nuevo = Almacen(
         codigo=payload.codigo.upper(),
         nombre=payload.nombre,
         responsable=payload.responsable,
         direccion=payload.direccion,
-        activo=True
+        activo=True,
+        tenant_id=current_user.tenant_id
     )
     db.add(nuevo)
     db.commit()
@@ -397,8 +400,8 @@ def crear_almacen(payload: AlmacenCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/inventario/almacenes/{almacen_id}")
-def actualizar_almacen(almacen_id: int, payload: AlmacenCreate, db: Session = Depends(get_db)):
-    a = db.query(Almacen).filter(Almacen.id == almacen_id).first()
+def actualizar_almacen(almacen_id: int, payload: AlmacenCreate, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    a = db.query(Almacen).filter(Almacen.id == almacen_id, Almacen.tenant_id == current_user.tenant_id).first()
     if not a:
         raise HTTPException(status_code=404, detail="Almacén no encontrado.")
     a.codigo = payload.codigo.upper()
@@ -410,8 +413,10 @@ def actualizar_almacen(almacen_id: int, payload: AlmacenCreate, db: Session = De
 
 
 @router.get("/inventario/criticos")
-def inventario_criticos(db: Session = Depends(get_db)):
-    prods = db.query(Producto).filter(Producto.stock <= 5).order_by(Producto.stock).all()
+def inventario_criticos(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    prods = db.query(Producto).filter(
+        Producto.stock <= 5, Producto.tenant_id == current_user.tenant_id
+    ).order_by(Producto.stock).all()
     return [
         {"sku": p.sku, "nombre": p.nombre, "stock": p.stock, "minimo": 10, "estado": "AGOTADO" if p.stock <= 0 else "BAJO"}
         for p in prods
@@ -419,15 +424,15 @@ def inventario_criticos(db: Session = Depends(get_db)):
 
 
 @router.get("/inventario/existencias")
-def inventario_existencias(db: Session = Depends(get_db)):
-    prods = db.query(Producto).all()
+def inventario_existencias(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    prods = db.query(Producto).filter(Producto.tenant_id == current_user.tenant_id).all()
     return [{"sku": p.sku, "nombre": p.nombre, "stock": p.stock, "valor": to_float(p.stock * p.costo_usd)} for p in prods]
 
 
 @router.get("/inventario/lotes")
-def inventario_lotes(db: Session = Depends(get_db)):
-    lotes = db.query(LoteProducto).order_by(LoteProducto.fecha_vencimiento).all()
-    prods = {p.id: p for p in db.query(Producto).all()}
+def inventario_lotes(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    lotes = db.query(LoteProducto).filter(LoteProducto.tenant_id == current_user.tenant_id).order_by(LoteProducto.fecha_vencimiento).all()
+    prods = {p.id: p for p in db.query(Producto).filter(Producto.tenant_id == current_user.tenant_id).all()}
     return [
         {
             "lote": l.lote,
@@ -445,12 +450,14 @@ class ConteoCreate(BaseModel):
     cantidad_fisica: float
 
 @router.get("/inventario/conteos")
-def inventario_conteos(db: Session = Depends(get_db)):
-    conteos = db.query(ConteoFisico).order_by(ConteoFisico.fecha.desc()).limit(50).all()
+def inventario_conteos(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    conteos = db.query(ConteoFisico).filter(
+        ConteoFisico.tenant_id == current_user.tenant_id
+    ).order_by(ConteoFisico.fecha.desc()).limit(50).all()
     res = []
     for c in conteos:
-        almacen = db.query(Almacen).filter(Almacen.id == c.almacen_id).first()
-        producto = db.query(Producto).filter(Producto.id == c.producto_id).first()
+        almacen = db.query(Almacen).filter(Almacen.id == c.almacen_id, Almacen.tenant_id == current_user.tenant_id).first()
+        producto = db.query(Producto).filter(Producto.id == c.producto_id, Producto.tenant_id == current_user.tenant_id).first()
         res.append({
             "id": c.id,
             "almacen_id": c.almacen_id,
@@ -467,21 +474,26 @@ def inventario_conteos(db: Session = Depends(get_db)):
     return res
 
 @router.post("/inventario/conteos")
-def crear_conteo(body: ConteoCreate, db: Session = Depends(get_db)):
-    producto = db.query(Producto).filter(Producto.id == body.producto_id).first()
+def crear_conteo(body: ConteoCreate, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    producto = db.query(Producto).filter(Producto.id == body.producto_id, Producto.tenant_id == current_user.tenant_id).first()
     if not producto:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
-    
+
+    almacen = db.query(Almacen).filter(Almacen.id == body.almacen_id, Almacen.tenant_id == current_user.tenant_id).first()
+    if not almacen:
+        raise HTTPException(status_code=404, detail="Almacén no encontrado")
+
     cantidad_sistema = float(producto.stock)
     diferencia = body.cantidad_fisica - cantidad_sistema
-    
+
     nuevo_conteo = ConteoFisico(
         almacen_id=body.almacen_id,
         producto_id=body.producto_id,
         cantidad_sistema=Decimal(str(cantidad_sistema)),
         cantidad_fisica=Decimal(str(body.cantidad_fisica)),
         diferencia=Decimal(str(diferencia)),
-        estado="PENDIENTE"
+        estado="PENDIENTE",
+        tenant_id=current_user.tenant_id
     )
     db.add(nuevo_conteo)
     db.commit()
@@ -498,14 +510,16 @@ def crear_conteo(body: ConteoCreate, db: Session = Depends(get_db)):
     }
 
 @router.post("/inventario/conteos/{conteo_id}/cerrar")
-def cerrar_conteo(conteo_id: int, db: Session = Depends(get_db)):
-    conteo = db.query(ConteoFisico).filter(ConteoFisico.id == conteo_id).first()
+def cerrar_conteo(conteo_id: int, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    conteo = db.query(ConteoFisico).filter(
+        ConteoFisico.id == conteo_id, ConteoFisico.tenant_id == current_user.tenant_id
+    ).first()
     if not conteo:
         raise HTTPException(status_code=404, detail="Conteo no encontrado")
     if conteo.estado == "CERRADO":
         raise HTTPException(status_code=400, detail="El conteo ya está cerrado")
-    
-    producto = db.query(Producto).filter(Producto.id == conteo.producto_id).first()
+
+    producto = db.query(Producto).filter(Producto.id == conteo.producto_id, Producto.tenant_id == current_user.tenant_id).first()
     if producto:
         producto.stock = conteo.cantidad_fisica
     
