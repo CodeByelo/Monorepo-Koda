@@ -1528,16 +1528,16 @@ def get_crews(db: Session = Depends(get_db), current_user = Depends(get_current_
         ).all()
         ayudantes = []
         for m in members:
-            p = db.query(Profile).filter(Profile.id == m.profile_id).first()
+            p = db.query(Profile).filter(Profile.id == m.profile_id, Profile.tenant_id == current_user.tenant_id).first()
             if p:
                 ayudantes.append({
                     "id": str(p.id),
                     "nombre": f"{p.nombre or ''} {p.apellido or ''}".strip() or p.username,
                     "email": p.email
                 })
-        
-        driver = db.query(Profile).filter(Profile.id == c.chofer_id).first()
-        veh = db.query(Vehiculo).filter(Vehiculo.id == c.vehiculo_id).first()
+
+        driver = db.query(Profile).filter(Profile.id == c.chofer_id, Profile.tenant_id == current_user.tenant_id).first()
+        veh = db.query(Vehiculo).filter(Vehiculo.id == c.vehiculo_id, Vehiculo.tenant_id == current_user.tenant_id).first()
         
         result.append({
             "id": c.id,
@@ -1620,7 +1620,7 @@ def get_plans(db: Session = Depends(get_db), current_user = Depends(get_current_
         
         disp_list = []
         for d in dispatches:
-            crew = db.query(NewCrew).filter(NewCrew.id == d.crew_id).first()
+            crew = db.query(NewCrew).filter(NewCrew.id == d.crew_id, NewCrew.tenant_id == current_user.tenant_id).first()
             disp_list.append({
                 "id": d.id,
                 "crew": {
@@ -1743,7 +1743,7 @@ def aprobar_plan_logistico(plan_id: int, db: Session = Depends(get_db), current_
             
             crew = db.query(NewCrew).filter(NewCrew.id == d.crew_id, NewCrew.tenant_id == current_user.tenant_id).first()
             if crew:
-                driver = db.query(Profile).filter(Profile.id == crew.chofer_id).first()
+                driver = db.query(Profile).filter(Profile.id == crew.chofer_id, Profile.tenant_id == current_user.tenant_id).first()
                 if driver and getattr(driver, 'telegram_chat_id', None):
                     msg = f"🚚 *Ruta Asignada: {d.ruta}*\nHola {driver.nombre}, tienes una nueva hoja de ruta aprobada. Detalles: {d.detalles or 'Ninguno'}."
                     job = NewNotificationJob(
@@ -1758,7 +1758,7 @@ def aprobar_plan_logistico(plan_id: int, db: Session = Depends(get_db), current_
                 
                 members = db.query(NewCrewMember).filter(NewCrewMember.crew_id == crew.id, NewCrewMember.tenant_id == current_user.tenant_id).all()
                 for m in members:
-                    helper = db.query(Profile).filter(Profile.id == m.profile_id).first()
+                    helper = db.query(Profile).filter(Profile.id == m.profile_id, Profile.tenant_id == current_user.tenant_id).first()
                     if helper and getattr(helper, 'telegram_chat_id', None):
                         msg = f"👷 *Asignación de Ruta: {d.ruta}*\nHola {helper.nombre}, has sido asignado como Ayudante para la tripulación *{crew.nombre}* hoy."
                         job = NewNotificationJob(
@@ -1797,7 +1797,7 @@ def get_personal_engine(db: Session = Depends(get_db), current_user = Depends(ge
         completados = 0
         
         if cm:
-            crew = db.query(NewCrew).filter(NewCrew.id == cm.crew_id).first()
+            crew = db.query(NewCrew).filter(NewCrew.id == cm.crew_id, NewCrew.tenant_id == current_user.tenant_id).first()
             if crew:
                 crew_name = crew.nombre
                 role_label = cm.rol
