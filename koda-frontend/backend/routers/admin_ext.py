@@ -75,17 +75,32 @@ def _seed_admin_defaults(db: Session):
 
 
 @router.get("/dashboard")
-def admin_dashboard(db: Session = Depends(get_db)):
+def admin_dashboard(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     _seed_admin_defaults(db)
-    total_usuarios = db.query(func.count(Profile.id)).scalar() or 0
-    eventos_hoy = db.query(func.count(AuditoriaLog.id)).filter(
+    scoped = not _is_desarrollador(current_user)
+
+    q_usuarios = db.query(func.count(Profile.id))
+    q_eventos_hoy = db.query(func.count(AuditoriaLog.id)).filter(
         AuditoriaLog.fecha >= datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    ).scalar() or 0
-    total_logs = db.query(func.count(AuditoriaLog.id)).scalar() or 0
-    importaciones_pend = db.query(func.count(ImportacionJob.id)).filter(
+    )
+    q_total_logs = db.query(func.count(AuditoriaLog.id))
+    q_importaciones_pend = db.query(func.count(ImportacionJob.id)).filter(
         ImportacionJob.estado.in_(["PENDIENTE", "REVISION"])
-    ).scalar() or 0
-    series_activas = db.query(func.count(NumeracionSerie.id)).filter(NumeracionSerie.activo.is_(True)).scalar() or 0
+    )
+    q_series_activas = db.query(func.count(NumeracionSerie.id)).filter(NumeracionSerie.activo.is_(True))
+
+    if scoped:
+        q_usuarios = q_usuarios.filter(Profile.tenant_id == current_user.tenant_id)
+        q_eventos_hoy = q_eventos_hoy.filter(AuditoriaLog.tenant_id == current_user.tenant_id)
+        q_total_logs = q_total_logs.filter(AuditoriaLog.tenant_id == current_user.tenant_id)
+        q_importaciones_pend = q_importaciones_pend.filter(ImportacionJob.tenant_id == current_user.tenant_id)
+        q_series_activas = q_series_activas.filter(NumeracionSerie.tenant_id == current_user.tenant_id)
+
+    total_usuarios = q_usuarios.scalar() or 0
+    eventos_hoy = q_eventos_hoy.scalar() or 0
+    total_logs = q_total_logs.scalar() or 0
+    importaciones_pend = q_importaciones_pend.scalar() or 0
+    series_activas = q_series_activas.scalar() or 0
 
     return {
         "metricas": [
@@ -158,13 +173,18 @@ def crear_usuario(request: Request, user_in: UserCreate, db: Session = Depends(g
 
 
 @router.get("/sesiones")
-def sesiones_activas(db: Session = Depends(get_db)):
+def sesiones_activas(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     """
     Lista de usuarios del sistema. La IP real sólo puede capturarse en el momento
     del login de cada usuario; aquí se muestra como 'No disponible' para no
     mostrar IPs ficticias que confundirían a auditores.
     """
-    usuarios = db.query(Profile).all()
+    query_usuarios = db.query(Profile)
+    query_count = db.query(func.count(Profile.id))
+    if not _is_desarrollador(current_user):
+        query_usuarios = query_usuarios.filter(Profile.tenant_id == current_user.tenant_id)
+        query_count = query_count.filter(Profile.tenant_id == current_user.tenant_id)
+    usuarios = query_usuarios.all()
     sesiones = []
     for idx, u in enumerate(usuarios, 1):
         sesiones.append({
@@ -181,7 +201,7 @@ def sesiones_activas(db: Session = Depends(get_db)):
     return {
         "kpis": {
             "sesionesActivas": len(sesiones),
-            "usuariosRegistrados": db.query(func.count(Profile.id)).scalar() or 0,
+            "usuariosRegistrados": query_count.scalar() or 0,
             "fallosAcceso24h": 0,
             "nivelRiesgo": "ÓPTIMO",
         },
