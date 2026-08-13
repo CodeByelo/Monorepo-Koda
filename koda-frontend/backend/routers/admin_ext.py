@@ -569,7 +569,10 @@ def listar_numeracion(db: Session = Depends(get_db), current_user: Profile = Dep
 
 @router.put("/numeracion/{serie_id}")
 def actualizar_numeracion(request: Request, serie_id: int, body: dict, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
-    serie = db.query(NumeracionSerie).filter(NumeracionSerie.id == serie_id).first()
+    query = db.query(NumeracionSerie).filter(NumeracionSerie.id == serie_id)
+    if not _is_desarrollador(current_user):
+        query = query.filter(NumeracionSerie.tenant_id == current_user.tenant_id)
+    serie = query.first()
     if not serie:
         raise HTTPException(status_code=404, detail="Serie de numeración no encontrada")
     
@@ -761,7 +764,10 @@ def _estado_tipo(estado: str) -> str:
 
 @router.put("/notificaciones/{regla_id}")
 def actualizar_notificacion(request: Request, regla_id: int, body: dict, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
-    regla = db.query(NotificacionRegla).filter(NotificacionRegla.id == regla_id).first()
+    query = db.query(NotificacionRegla).filter(NotificacionRegla.id == regla_id)
+    if not _is_desarrollador(current_user):
+        query = query.filter(NotificacionRegla.tenant_id == current_user.tenant_id)
+    regla = query.first()
     if not regla:
         raise HTTPException(status_code=404, detail="Regla de notificación no encontrada")
     
