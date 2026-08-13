@@ -1,5 +1,7 @@
 import asyncpg
 import asyncio
+import argparse
+import getpass
 import os
 import sys
 from dotenv import load_dotenv
@@ -9,14 +11,30 @@ from pathlib import Path
 sys.path.append("/app")
 from auth.security import get_password_hash
 
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Reset a user's password hash directly in the database.")
+    parser.add_argument("username", help="Username (login) of the profile to reset")
+    parser.add_argument(
+        "--password",
+        help="New password. If omitted, reads NEW_PASSWORD env var, then prompts interactively (not echoed).",
+    )
+    return parser.parse_args()
+
+
 async def main():
     env_path = Path("/app/.env")
     load_dotenv(dotenv_path=env_path)
     db_url = os.getenv("SUPABASE_DB_URL") or os.getenv("DATABASE_URL")
-    
-    new_password = "Daniel1910**"
-    username_norm = "ceo_final01"
-    
+    if not db_url:
+        raise RuntimeError("SUPABASE_DB_URL o DATABASE_URL debe estar definido en el entorno.")
+
+    args = parse_args()
+    new_password = args.password or os.getenv("NEW_PASSWORD") or getpass.getpass("New password: ")
+    if not new_password:
+        raise RuntimeError("No password provided via --password, NEW_PASSWORD env var, or prompt.")
+    username_norm = args.username
+
     print(f"Hashing new password...")
     hashed_pw = get_password_hash(new_password)
     
