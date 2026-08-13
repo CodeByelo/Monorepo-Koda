@@ -541,17 +541,17 @@ def detalle_retencion(id: int = Query(...)):
 
 
 @router.get("/igtf")
-def igtf(periodo: str, quincena: str = "1", db: Session = Depends(get_db)):
+def igtf(periodo: str, quincena: str = "1", db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     from sqlalchemy import extract
     from backend.utils.helpers import to_float
     import calendar
-    
+
     try:
         y, m = map(int, periodo.split("-"))
     except:
         y, m = 2026, 7
-        
-    query = ventas_periodo(db, periodo).filter(Venta.estado == "ACTIVA")
+
+    query = ventas_periodo(db, periodo).filter(Venta.estado == "ACTIVA", Venta.tenant_id == current_user.tenant_id)
     
     if quincena == "1":
         query = query.filter(extract('day', Venta.fecha) <= 15)
@@ -609,16 +609,16 @@ def igtf(periodo: str, quincena: str = "1", db: Session = Depends(get_db)):
 
 
 @router.get("/igtf/exportar")
-def exportar_igtf(formato: str, periodo: str, quincena: str, db: Session = Depends(get_db)):
+def exportar_igtf(formato: str, periodo: str, quincena: str, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     from sqlalchemy import extract
     from backend.utils.helpers import to_float
-    
+
     try:
         y, m = map(int, periodo.split("-"))
     except:
         y, m = 2026, 7
-        
-    query = ventas_periodo(db, periodo).filter(Venta.estado == "ACTIVA")
+
+    query = ventas_periodo(db, periodo).filter(Venta.estado == "ACTIVA", Venta.tenant_id == current_user.tenant_id)
     if quincena == "1":
         query = query.filter(extract('day', Venta.fecha) <= 15)
     else:
@@ -647,22 +647,24 @@ def exportar_igtf(formato: str, periodo: str, quincena: str, db: Session = Depen
 
 
 @router.get("/arc/sujetos")
-def arc_sujetos(anio: int, db: Session = Depends(get_db)):
+def arc_sujetos(anio: int, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     # Retornar los sujetos con retenciones ISLR registradas en ese año
     retenciones = db.query(RetencionISLR.proveedor_rif, RetencionISLR.proveedor_nombre).filter(
-        RetencionISLR.periodo.like(f"{anio}-%")
+        RetencionISLR.periodo.like(f"{anio}-%"),
+        RetencionISLR.tenant_id == current_user.tenant_id,
     ).distinct(RetencionISLR.proveedor_rif).all()
-    
+
     return [{"rif": r[0], "nombre": r[1]} for r in retenciones]
 
 
 @router.get("/arc")
-def arc(anio: int, sujeto: str, db: Session = Depends(get_db)):
+def arc(anio: int, sujeto: str, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     from backend.utils.helpers import to_float
-    
+
     retenciones = db.query(RetencionISLR).filter(
         RetencionISLR.proveedor_rif == sujeto,
-        RetencionISLR.periodo.like(f"{anio}-%")
+        RetencionISLR.periodo.like(f"{anio}-%"),
+        RetencionISLR.tenant_id == current_user.tenant_id,
     ).order_by(RetencionISLR.periodo).all()
     
     meses = {
@@ -722,11 +724,11 @@ def arc(anio: int, sujeto: str, db: Session = Depends(get_db)):
 
 
 @router.get("/arc/exportar")
-def exportar_arc(formato: str, anio: int, sujeto: str, db: Session = Depends(get_db)):
+def exportar_arc(formato: str, anio: int, sujeto: str, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     from backend.utils.helpers import to_float
     import io
-    
-    res = arc(anio, sujeto, db)
+
+    res = arc(anio, sujeto, db, current_user)
     
     if formato == "pdf":
         buffer = io.BytesIO()
@@ -812,7 +814,7 @@ def exportar_ret_practicadas(formato: str, periodo: str):
 import re
 
 @router.get("/validar-rif")
-def validar_rif(rif: str, db: Session = Depends(get_db)):
+def validar_rif(rif: str, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     # Normalizar RIF: mayúsculas, quitar espacios y guiones para reformatear
     clean_rif = re.sub(r'[\s\-]', '', rif.upper())
     
@@ -825,7 +827,10 @@ def validar_rif(rif: str, db: Session = Depends(get_db)):
     
     # Buscar en base de datos local (clientes o proveedores)
     from backend.models.operations import Cliente, Proveedor
-    existing_client = db.query(Cliente).filter(Cliente.rif == formatted_rif).first()
+    existing_client = db.query(Cliente).filter(
+        Cliente.rif == formatted_rif,
+        Cliente.tenant_id == current_user.tenant_id,
+    ).first()
     if existing_client:
         return {
             "rif": formatted_rif,
@@ -835,7 +840,10 @@ def validar_rif(rif: str, db: Session = Depends(get_db)):
             "origen": "Base de Datos Interna (Cliente)"
         }
         
-    existing_supplier = db.query(Proveedor).filter(Proveedor.rif == formatted_rif).first()
+    existing_supplier = db.query(Proveedor).filter(
+        Proveedor.rif == formatted_rif,
+        Proveedor.tenant_id == current_user.tenant_id,
+    ).first()
     if existing_supplier:
         return {
             "rif": formatted_rif,
