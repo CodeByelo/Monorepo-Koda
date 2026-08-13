@@ -1,6 +1,16 @@
+import os
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
-engine = create_engine('postgresql://postgres.ssyvprumeqfnxttlcjmg:SistemaKodaBy3lo_1910@aws-1-us-west-2.pooler.supabase.com:6543/postgres?sslmode=require')
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL")
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL (o SUPABASE_DB_URL) debe estar definido en el entorno. "
+        "No existe una cadena de conexión por defecto."
+    )
+engine = create_engine(DATABASE_URL)
 
 with engine.connect() as conn:
     # 1. Asegurar campos en turnos_despacho

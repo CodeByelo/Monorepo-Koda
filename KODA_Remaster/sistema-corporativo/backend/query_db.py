@@ -1,8 +1,17 @@
 import asyncio
+import os
 import asyncpg
+from dotenv import load_dotenv
+
+load_dotenv()
 
 async def main():
-    db_url = "postgresql://postgres.ssyvprumeqfnxttlcjmg:SistemaKodaBy3lo_1910@aws-1-us-west-2.pooler.supabase.com:6543/postgres?pgbouncer=true"
+    db_url = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL")
+    if not db_url:
+        raise RuntimeError(
+            "DATABASE_URL (o SUPABASE_DB_URL) debe estar definido en el entorno. "
+            "No existe una cadena de conexión por defecto."
+        )
     conn = await asyncpg.connect(db_url, statement_cache_size=0)
     
     print("=== GERENCIAS ===")
