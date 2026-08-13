@@ -51,18 +51,14 @@ try:
         sql_profiles = "ALTER TABLE profiles ADD COLUMN telegram_chat_id VARCHAR(50)" if engine.name == "sqlite" else "ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS telegram_chat_id VARCHAR(50)"
         connection.execute(text(sql_profiles))
         if engine.name != "sqlite":
+            connection.execute(text("ALTER TABLE public.productos ADD COLUMN IF NOT EXISTS imagen_url TEXT;"))
             connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS vendedor_id INTEGER;"))
             connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS retencion_iva_usd NUMERIC(15,2) DEFAULT 0.00;"))
-            connection.execute(text("ALTER TABLE public.productos ADD COLUMN IF NOT EXISTS imagen_url TEXT;"))
-        else:
-            try:
-                connection.execute(text("ALTER TABLE productos ADD COLUMN imagen_url TEXT;"))
-            except Exception:
-                pass
             connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS igtf_usd NUMERIC(15,2) DEFAULT 0.00;"))
             connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS creado_por UUID;"))
         else:
             for col_sql in [
+                "ALTER TABLE productos ADD COLUMN imagen_url TEXT",
                 "ALTER TABLE ventas ADD COLUMN vendedor_id INTEGER",
                 "ALTER TABLE ventas ADD COLUMN retencion_iva_usd NUMERIC(15,2) DEFAULT 0.00",
                 "ALTER TABLE ventas ADD COLUMN igtf_usd NUMERIC(15,2) DEFAULT 0.00",
@@ -73,7 +69,7 @@ try:
                 except Exception:
                     pass
 except Exception as e:
-    logger.warning(f"Error in auto-migration for ventas columns: {e}")
+    print(f"[SYSTEM] Error in auto-migration for ventas columns: {e}")
 
 from backend.core.database import SessionLocal
 from backend.models.core import TasaCambio
