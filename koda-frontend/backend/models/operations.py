@@ -15,6 +15,16 @@ class Producto(Base):
     sku = Column(String(50), unique=True, index=True, nullable=False)
     nombre = Column(String(150), nullable=False)
     precio_usd = Column(Numeric(15, 2), nullable=False)
+    # Precios por tarifa fija (3 tiers de negocio: Mayor / Detal / Gran Mayor).
+    # Nullable a propósito: un producto puede no tener todavía configurada una
+    # tarifa mayorista, en cuyo caso la facturación/POS deben caer de vuelta a
+    # `precio_usd` (ver NuevaFactura.tsx/POS.tsx). `precio_detal` es la única
+    # excepción práctica: se puebla siempre (migración + endpoints de
+    # productos) con el valor de `precio_usd` cuando no se especifica, para
+    # que el tier "Detal" nunca quede vacío en productos nuevos.
+    precio_detal = Column(Numeric(15, 2), nullable=True)
+    precio_mayor = Column(Numeric(15, 2), nullable=True)
+    precio_gran_mayor = Column(Numeric(15, 2), nullable=True)
     costo_usd = Column(Numeric(15, 2), nullable=False)
     # Total global de stock. Legacy: sigue siendo la fuente de verdad para
     # ventas/facturación/valorización (routers/sales.py, facturacion.py,

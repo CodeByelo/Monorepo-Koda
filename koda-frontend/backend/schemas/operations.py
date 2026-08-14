@@ -32,6 +32,14 @@ class ProductoBase(BaseModel):
     sku: str = Field(..., min_length=3, max_length=50)
     nombre: str = Field(..., min_length=3, max_length=150)
     precio_usd: Decimal = Field(..., gt=0, decimal_places=2)
+    # Precios de las 3 tarifas fijas de negocio (Mayor / Detal / Gran Mayor).
+    # Opcionales: si no se envían, el router de productos aplica el fallback
+    # (ver routers/productos.py) para `precio_detal`; `precio_mayor` y
+    # `precio_gran_mayor` pueden quedar sin configurar (facturación cae de
+    # vuelta a `precio_usd` para esos tiers).
+    precio_detal: Optional[Decimal] = Field(default=None, ge=0, decimal_places=2)
+    precio_mayor: Optional[Decimal] = Field(default=None, ge=0, decimal_places=2)
+    precio_gran_mayor: Optional[Decimal] = Field(default=None, ge=0, decimal_places=2)
     costo_usd: Decimal = Field(..., ge=0, decimal_places=2)
     stock: int = Field(..., ge=0)
     stock_minimo: int = Field(default=10, ge=0)
