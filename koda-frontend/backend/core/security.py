@@ -4,7 +4,7 @@ from typing import Optional
 import jwt
 import hmac
 import hashlib
-from fastapi import Depends, HTTPException, status, Request
+from fastapi import Depends, Header, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
@@ -128,6 +128,45 @@ def verify_log_signature(session_id: int, endpoint: str, timestamp: datetime, ip
     """Verifica si la firma de un log coincide con los datos (para auditorías de integridad)."""
     calculated = generate_log_signature(session_id, endpoint, timestamp, ip_address)
     return hmac.compare_digest(calculated, expected_signature)
+
+# ==========================================
+# CLAVE DE SERVICIO (BOT DE TELEGRAM — service-to-service)
+# ==========================================
+# El bot de Telegram vive en un backend COMPLETAMENTE SEPARADO
+# (KODA_Remaster/sistema-corporativo/backend), con su propio JWT y su propia
+# sesión de usuario (tabla `telegram_sessions` de ESE backend). No comparte
+# sesión de usuario con este ERP: en vez de federar login, este backend
+# expone un pequeño conjunto de endpoints de servicio (`routers/bot_api.py`)
+# protegidos por una clave compartida fija, nunca por un JWT de usuario.
+#
+# CRÍTICO: sin fallback hardcodeado, igual que SECRET_KEY/AUDIT_LOG_SECRET.
+BOT_INTERNAL_API_KEY = os.getenv("BOT_INTERNAL_API_KEY", "").strip()
+if not BOT_INTERNAL_API_KEY or len(BOT_INTERNAL_API_KEY) < 32:
+    raise RuntimeError(
+        "BOT_INTERNAL_API_KEY no configurado o inseguro: debe definirse como variable de entorno "
+        "con un valor de al menos 32 caracteres. No existe valor por defecto."
+    )
+
+
+def verify_bot_api_key(x_bot_api_key: Optional[str] = Header(default=None, alias="X-Bot-Api-Key")) -> bool:
+    """
+    Dependencia de FastAPI para los endpoints de servicio del bot de
+    Telegram (`routers/bot_api.py`). Deliberadamente NUNCA se combina con
+    `get_current_user`/JWT: es un límite de confianza distinto (llamada
+    servidor-a-servidor con una clave compartida, no una sesión de usuario).
+
+    No deriva ningún tenant: cada endpoint que dependa de esta función debe
+    exigir explícitamente un `tenant_id` en la petición y aplicarlo a todas
+    sus consultas, ya que aquí no existe sesión de usuario de la cual
+    inferirlo.
+    """
+    if not x_bot_api_key or not hmac.compare_digest(x_bot_api_key, BOT_INTERNAL_API_KEY):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="API key de servicio inválida o ausente.",
+        )
+    return True
+
 
 def get_current_auditor(request: Request, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> AuditorSession:
     """
