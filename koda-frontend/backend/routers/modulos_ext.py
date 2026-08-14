@@ -3646,70 +3646,29 @@ def reporte_eficiencia(db: Session = Depends(get_db), current_user = Depends(get
 
 @reportes_router.get("/matriz-abc")
 def matriz_abc(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    from backend.models.operations import Venta, VentaDetalle, Producto
-    from datetime import datetime, timezone, timedelta
-    
-    hace_30_dias = datetime.now(timezone.utc) - timedelta(days=30)
-    ventas_query = db.query(
-        VentaDetalle.producto_id,
-        func.sum(VentaDetalle.cantidad).label('total_vendido')
-    ).select_from(VentaDetalle).join(Venta, VentaDetalle.venta_id == Venta.id).filter(
-        Venta.tenant_id == current_user.tenant_id,
-        Venta.fecha >= hace_30_dias,
-        Venta.estado != 'ANULADA'
-    ).group_by(VentaDetalle.producto_id).all()
-    
-    sales_map = {prod_id: float(qty) for prod_id, qty in ventas_query}
-    
-    productos = db.query(Producto).filter(Producto.tenant_id == current_user.tenant_id).all()
-    products_data = []
-    for p in productos:
-        rotacion = sales_map.get(p.id, 0.0)
-        p_precio = float(p.precio_usd or 0)
-        p_costo = float(p.costo_usd or 0)
-        rentabilidad = ((p_precio - p_costo) / p_precio * 100.0) if p_precio > 0 else 0.0
-        
-        products_data.append({
-            "producto": p,
-            "rotacion": rotacion,
-            "rentabilidad": rentabilidad
-        })
-        
-    margins = [p_data['rentabilidad'] for p_data in products_data]
-    rotations = [p_data['rotacion'] for p_data in products_data]
-    
-    avg_margin = sum(margins) / len(margins) if margins else 30.0
-    avg_rot = sum(rotations) / len(rotations) if rotations else 1.0
-    
-    margin_threshold = max(10.0, avg_margin)
-    rot_threshold = max(1.0, avg_rot)
-    
+    from backend.services.analitica_inventario import calcular_matriz_abc
+
+    clasificados = calcular_matriz_abc(db, current_user.tenant_id)
+
     stars_items = []
     questions_items = []
     cows_items = []
     dogs_items = []
-    
-    for p_data in products_data:
-        p = p_data["producto"]
-        rot = p_data["rotacion"]
-        rent = p_data["rentabilidad"]
-        
+
+    buckets = {"stars": stars_items, "questions": questions_items, "cows": cows_items, "dogs": dogs_items}
+
+    for c in clasificados:
+        p = c.producto
         item_formatted = {
             "name": p.nombre,
             "nombre": p.nombre,
-            "value": f"Margen: {rent:.1f}% ({int(rot)} u. vendidas)",
-            "valor": f"Margen: {rent:.1f}% ({int(rot)} u. vendidas)"
+            "value": f"Margen: {c.rentabilidad:.1f}% ({int(c.rotacion)} u. vendidas)",
+            "valor": f"Margen: {c.rentabilidad:.1f}% ({int(c.rotacion)} u. vendidas)"
         }
-        
-        if rot >= rot_threshold and rent >= margin_threshold:
-            stars_items.append(item_formatted)
-        elif rot < rot_threshold and rent >= margin_threshold:
-            questions_items.append(item_formatted)
-        elif rot >= rot_threshold and rent < margin_threshold:
-            cows_items.append(item_formatted)
-        else:
-            dogs_items.append(item_formatted)
-            
+        buckets[c.cuadrante].append(item_formatted)
+
+    products_data = clasificados  # usado más abajo solo para el conteo del insight
+
     stars_items = stars_items[:10]
     questions_items = questions_items[:10]
     cows_items = cows_items[:10]
@@ -3769,57 +3728,39 @@ def matriz_abc(db: Session = Depends(get_db), current_user = Depends(get_current
 
 @reportes_router.get("/rentabilidad")
 def rentabilidad_productos(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    from backend.models.operations import Producto
-    from backend.models.erp_extended import CuentaPorPagar
-    from sqlalchemy import func
-    from datetime import datetime, timezone
-    
-    productos = db.query(Producto).filter(Producto.tenant_id == current_user.tenant_id).all()
-    
-    gastos_totales = db.query(func.sum(CuentaPorPagar.monto_total_usd)).filter(
-        CuentaPorPagar.tenant_id == current_user.tenant_id
-    ).scalar() or 0.0
-    gastos_totales = float(gastos_totales)
-    
-    total_stock_value = sum(float(p.costo_usd or 0.0) * float(p.stock or 0.0) for p in productos)
-    
+    from backend.services.analitica_inventario import calcular_rentabilidad
+
+    calculados = calcular_rentabilidad(db, current_user.tenant_id)
+
     total_rentabilidad = 0.0
     items_count = 0
     prod_rentables = 0
     prod_perdida = 0
     total_valor_riesgo = 0.0
-    
+
     products_list = []
-    
-    for p in productos:
+
+    for c in calculados:
+        p = c.producto
         p_precio = float(p.precio_usd or 0.0)
         p_costo = float(p.costo_usd or 0.0)
-        
-        p_stock = float(p.stock or 0.0)
-        
-        if total_stock_value > 0 and p_stock > 0:
-            porcentaje_gasto = (p_costo * p_stock) / total_stock_value
-            gasto_operativo_total = gastos_totales * porcentaje_gasto
-            gasto_operativo = gasto_operativo_total / p_stock
-        else:
-            gasto_operativo = 0.0
-            
-        margen_neto = p_precio - p_costo - gasto_operativo
-        margen_neto_pct = (margen_neto / p_precio * 100.0) if p_precio > 0 else 0.0
-        
-        is_loss = margen_neto < 0
+        gasto_operativo = c.gasto_operativo
+        margen_neto = c.margen_neto
+        margen_neto_pct = c.margen_neto_pct
+        is_loss = c.is_loss
+
         if is_loss:
             prod_perdida += 1
             total_valor_riesgo += float(p.stock) * abs(margen_neto)
         else:
             prod_rentables += 1
-            
+
         total_rentabilidad += margen_neto_pct
         items_count += 1
-        
+
         status = "Rentable" if margen_neto > 0 else "Crítico"
         status_color = "bg-green-50 text-green-700 border-green-200" if margen_neto > 0 else "bg-red-50 text-red-700 border-red-200"
-        
+
         products_list.append({
             "name": p.nombre,
             "price": f"${p_precio:,.2f}",
@@ -3831,7 +3772,7 @@ def rentabilidad_productos(db: Session = Depends(get_db), current_user = Depends
             "statusColor": status_color,
             "isLoss": is_loss
         })
-        
+
     avg_margen = (total_rentabilidad / items_count) if items_count > 0 else 0.0
     
     metrics = [

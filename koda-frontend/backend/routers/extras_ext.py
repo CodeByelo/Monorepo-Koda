@@ -464,34 +464,27 @@ def inventario_criticos(db: Session = Depends(get_db), current_user: Profile = D
     comparado contra la existencia sumada de todos sus almacenes
     (StockPorAlmacen), no contra el umbral fijo de 10 unidades ni el total
     global de Producto.stock.
+
+    El cálculo vive en `backend.services.analitica_inventario.calcular_stock_critico`,
+    compartido con la API de servicio del bot de Telegram (`routers/bot_api.py`),
+    para que ambos consumidores nunca diverjan en la definición de "stock crítico".
     """
-    totales_rows = db.query(
-        StockPorAlmacen.producto_id,
-        func.sum(StockPorAlmacen.cantidad).label("total")
-    ).filter(
-        StockPorAlmacen.tenant_id == current_user.tenant_id
-    ).group_by(StockPorAlmacen.producto_id).all()
-    stock_totals = {r.producto_id: r.total for r in totales_rows}
+    from backend.services.analitica_inventario import calcular_stock_critico
 
-    productos = db.query(Producto).filter(Producto.tenant_id == current_user.tenant_id).all()
+    criticos = calcular_stock_critico(db, current_user.tenant_id)
 
-    resultado = []
-    for p in productos:
-        disponible = to_float(stock_totals.get(p.id, Decimal("0.00")))
-        minimo = to_float(p.stock_minimo)
-        if disponible > minimo:
-            continue
-        resultado.append({
-            "sku": p.sku,
-            "nombre": p.nombre,
-            "stock": disponible,
-            "minimo": minimo,
-            "sugerido": max(0.0, minimo - disponible),
-            "costo_usd": to_float(p.costo_usd),
-            "estado": "AGOTADO" if disponible <= 0 else "BAJO",
-        })
-
-    return sorted(resultado, key=lambda item: item["stock"])
+    return [
+        {
+            "sku": item.producto.sku,
+            "nombre": item.producto.nombre,
+            "stock": item.disponible,
+            "minimo": item.minimo,
+            "sugerido": max(0.0, item.minimo - item.disponible),
+            "costo_usd": to_float(item.producto.costo_usd),
+            "estado": "AGOTADO" if item.disponible <= 0 else "BAJO",
+        }
+        for item in criticos
+    ]
 
 
 @router.get("/inventario/existencias")
