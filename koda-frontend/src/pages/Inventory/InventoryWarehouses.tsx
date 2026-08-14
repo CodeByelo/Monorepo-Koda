@@ -38,14 +38,14 @@ const InventoryWarehouses = () => {
 
   const fetchAllData = () => {
     Promise.all([
-      api.get<any[]>('/inventario/almacenes'),
+      api.get<any[]>('/inventario/almacenes/resumen'),
       api.get<any>('/inventario/dashboard'),
       api.get<any[]>('/inventario/transferencias'),
     ]).then(([almacenes, invDash, trans]) => {
       const pendingTransfers = (trans || []).filter((t: any) => t.estado === 'PENDIENTE' || t.estado === 'En Tránsito');
       const rejectedTransfers = (trans || []).filter((t: any) => t.estado === 'RECHAZADA' || t.estado === 'ERROR');
       const centerTransfers = pendingTransfers.filter((t: any) => t.destino === 'Sucursal Centro' || t.destino === 'ALM-VALENCIA');
-      
+
       const transStats = {
         pendientes: pendingTransfers.length,
         pendientesUds: pendingTransfers.reduce((acc: number, t: any) => acc + (t.cantidad || 0), 0),
@@ -55,19 +55,8 @@ const InventoryWarehouses = () => {
       };
 
       setDash({ ...invDash, trans: transStats });
-      
-      const totalVal = invDash?.valor_inventario_usd || 0;
-      const totalProds = invDash?.total_productos || 0;
 
       setWarehouses((almacenes || []).map((a: any) => {
-        // Distribuir el total de productos y valor proporcionalmente para realismo
-        let pct = 0.15;
-        if (a.codigo === 'ALM-CENTRAL') pct = 0.60;
-        else if (a.codigo === 'ALM-VALENCIA') pct = 0.25;
-        
-        const productsCount = Math.round(totalProds * pct);
-        const valueAmount = totalVal * pct;
-        
         const transitCount = pendingTransfers.filter(
           (t: any) => t.destino === a.nombre || t.destino === a.codigo
         ).length;
@@ -77,8 +66,8 @@ const InventoryWarehouses = () => {
           location: a.codigo,
           address: a.direccion,
           manager: a.responsable || 'Sin asignar',
-          products: productsCount,
-          value: `$${Number(valueAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          products: a.productos || 0,
+          value: `$${Number(a.valor_usd || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
           transit: transitCount,
           status: a.activo ? 'Operativo' : 'Inactivo',
           color: 'bg-green-100 text-green-700',

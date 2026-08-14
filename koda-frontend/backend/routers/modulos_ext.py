@@ -14,7 +14,7 @@ from backend.models.erp_extended import (
     Compra, CuentaPorCobrar, CuentaPorPagar, CuentaBancaria, MovimientoBancario,
     Cotizacion, CotizacionItem, OrdenVenta, RequisicionCompra, TransferenciaInventario,
     RetencionIVA, RetencionISLR, Vendedor, Almacen, RecepcionStock, DevolucionProveedor, LoteProducto,
-    NotaCredito, AnticipoCliente, Cheque, FondoCajaChica, GastoCajaChica
+    NotaCredito, AnticipoCliente, Cheque, FondoCajaChica, GastoCajaChica, StockPorAlmacen
 )
 from backend.schemas.operations import CotizacionCreate, CotizacionStatusUpdate, CompraCreate, RecepcionStockCreate, RecepcionStockResponse, DevolucionProveedorCreate
 from backend.core.security import get_current_user
@@ -5309,12 +5309,46 @@ def recibir_transferencia(transfer_id: int, db: Session = Depends(get_db), curre
     t = db.query(TransferenciaInventario).filter(
         TransferenciaInventario.id == transfer_id,
         TransferenciaInventario.tenant_id == current_user.tenant_id
-    ).first()
+    ).with_for_update().first()
     if not t:
         raise HTTPException(status_code=404, detail="Transferencia no encontrada.")
     if t.estado in ["COMPLETADA", "RECIBIDA"]:
         raise HTTPException(status_code=400, detail="Esta transferencia ya ha sido completada.")
-    
+
+    # Bloqueamos la fila de stock de origen para evitar condiciones de carrera
+    # entre recepciones concurrentes de la misma transferencia/producto.
+    origen_stock = db.query(StockPorAlmacen).filter(
+        StockPorAlmacen.producto_id == t.producto_id,
+        StockPorAlmacen.almacen_id == t.origen_almacen_id,
+        StockPorAlmacen.tenant_id == current_user.tenant_id
+    ).with_for_update().first()
+
+    disponible = origen_stock.cantidad if origen_stock else Decimal("0.00")
+    if disponible < t.cantidad:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Stock insuficiente en el almacén de origen para completar la transferencia. Disponible: {disponible}, Requerido: {t.cantidad}"
+        )
+
+    origen_stock.cantidad -= t.cantidad
+
+    destino_stock = db.query(StockPorAlmacen).filter(
+        StockPorAlmacen.producto_id == t.producto_id,
+        StockPorAlmacen.almacen_id == t.destino_almacen_id,
+        StockPorAlmacen.tenant_id == current_user.tenant_id
+    ).with_for_update().first()
+
+    if destino_stock:
+        destino_stock.cantidad += t.cantidad
+    else:
+        destino_stock = StockPorAlmacen(
+            producto_id=t.producto_id,
+            almacen_id=t.destino_almacen_id,
+            cantidad=t.cantidad,
+            tenant_id=current_user.tenant_id
+        )
+        db.add(destino_stock)
+
     t.estado = "COMPLETADA"
     db.commit()
     return {"ok": True, "mensaje": "Transferencia recibida e ingresada al almacén destino."}

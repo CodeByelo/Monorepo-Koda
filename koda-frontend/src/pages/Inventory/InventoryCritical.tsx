@@ -27,13 +27,17 @@ const InventoryCritical = () => {
   };
 
   useEffect(() => {
-    api.get<any[]>('/productos')
+    // Antes esto leía TODOS los productos y calculaba el mínimo (10, fijo
+    // para todos) en el cliente. Ahora consume /inventario/criticos, que ya
+    // filtra por stock_minimo real (configurable por producto) sumando el
+    // stock real de todos los almacenes (StockPorAlmacen).
+    api.get<any[]>('/inventario/criticos')
       .then(data => {
         setProductos(data);
         setLoading(false);
       })
       .catch(err => {
-        console.error('Error fetching productos:', err);
+        console.error('Error fetching productos críticos:', err);
         setLoading(false);
       });
   }, []);
@@ -43,31 +47,30 @@ const InventoryCritical = () => {
   const criticalItems = productos
     .map(p => {
       const stock = p.stock;
-      const minStock = 10; // Criterio por defecto
-      const isCritical = stock < minStock;
-      const isOutOfStock = stock <= 0;
-      
-      const status = isOutOfStock ? 'Agotado' : (isCritical ? 'Bajo Mínimo' : 'Reposición');
-      const color = isOutOfStock ? 'border-red-500' : (isCritical ? 'border-amber-500' : 'border-blue-500');
-      const badge = isOutOfStock ? 'bg-red-100 text-red-700' : (isCritical ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700');
+      const minStock = p.minimo;
+      const isOutOfStock = p.estado === 'AGOTADO';
+      const isCritical = !isOutOfStock;
+
+      const status = isOutOfStock ? 'Agotado' : 'Bajo Mínimo';
+      const color = isOutOfStock ? 'border-red-500' : 'border-amber-500';
+      const badge = isOutOfStock ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700';
 
       return {
         name: p.nombre,
         id: p.sku,
-        warehouse: 'Almacén Principal',
+        warehouse: 'Todos los almacenes',
         available: stock,
         min: minStock,
         reserved: 0,
-        suggested: Math.max(0, minStock - stock),
-        cost: parseFloat(p.costo_usd || 10),
+        suggested: p.sugerido,
+        cost: parseFloat(p.costo_usd || 0),
         status,
         color,
         badge,
         isCritical,
         isOutOfStock
       };
-    })
-    .filter(item => item.isCritical || item.isOutOfStock);
+    });
 
   const agotadosCount = criticalItems.filter(i => i.isOutOfStock).length;
   const bajoMinimoCount = criticalItems.filter(i => i.isCritical && !i.isOutOfStock).length;

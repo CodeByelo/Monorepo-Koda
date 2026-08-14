@@ -21,7 +21,7 @@ from backend.models.erp_extended import (
     Almacen, TransferenciaInventario, RequisicionCompra, LoteProducto, ConteoFisico,
     CentroCosto, Vendedor, TransferenciaTesoreria, PrestamoUVC, PresupuestoPartida,
     RetencionIVA, FondoCajaChica, GastoCajaChica, ColocacionInversion, AuditoriaLog,
-    MovimientoBancario,
+    MovimientoBancario, StockPorAlmacen,
 )
 from backend.utils.helpers import to_float, tasa_actual, ventas_periodo, margen_bruto_pct
 from backend.core.security import get_current_user
@@ -412,15 +412,77 @@ def actualizar_almacen(almacen_id: int, payload: AlmacenCreate, db: Session = De
     return {"ok": True}
 
 
+@router.get("/inventario/almacenes/resumen")
+def resumen_almacenes(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    """
+    Resumen REAL por almacén (productos distintos con existencia y valor a
+    costo), agregado desde StockPorAlmacen. Reemplaza el reparto porcentual
+    fabricado (60/25/15) que antes vivía en el frontend.
+    """
+    items = db.query(Almacen).filter(Almacen.activo == True, Almacen.tenant_id == current_user.tenant_id).all()
+
+    agregados = db.query(
+        StockPorAlmacen.almacen_id,
+        func.count(func.distinct(StockPorAlmacen.producto_id)).label("productos"),
+        func.sum(StockPorAlmacen.cantidad * Producto.costo_usd).label("valor")
+    ).join(
+        Producto, Producto.id == StockPorAlmacen.producto_id
+    ).filter(
+        StockPorAlmacen.cantidad > 0,
+        StockPorAlmacen.tenant_id == current_user.tenant_id
+    ).group_by(StockPorAlmacen.almacen_id).all()
+    resumen_map = {a.almacen_id: a for a in agregados}
+
+    return [
+        {
+            "id": a.id,
+            "codigo": a.codigo,
+            "nombre": a.nombre,
+            "responsable": a.responsable or "Sin asignar",
+            "direccion": a.direccion or "Dirección no especificada",
+            "activo": a.activo,
+            "productos": int(resumen_map[a.id].productos) if a.id in resumen_map else 0,
+            "valor_usd": to_float(resumen_map[a.id].valor) if a.id in resumen_map else 0.0,
+        }
+        for a in items
+    ]
+
+
 @router.get("/inventario/criticos")
 def inventario_criticos(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
-    prods = db.query(Producto).filter(
-        Producto.stock <= 5, Producto.tenant_id == current_user.tenant_id
-    ).order_by(Producto.stock).all()
-    return [
-        {"sku": p.sku, "nombre": p.nombre, "stock": p.stock, "minimo": 10, "estado": "AGOTADO" if p.stock <= 0 else "BAJO"}
-        for p in prods
-    ]
+    """
+    Productos en o bajo su stock_minimo REAL (configurable por producto),
+    comparado contra la existencia sumada de todos sus almacenes
+    (StockPorAlmacen), no contra el umbral fijo de 10 unidades ni el total
+    global de Producto.stock.
+    """
+    totales_rows = db.query(
+        StockPorAlmacen.producto_id,
+        func.sum(StockPorAlmacen.cantidad).label("total")
+    ).filter(
+        StockPorAlmacen.tenant_id == current_user.tenant_id
+    ).group_by(StockPorAlmacen.producto_id).all()
+    stock_totals = {r.producto_id: r.total for r in totales_rows}
+
+    productos = db.query(Producto).filter(Producto.tenant_id == current_user.tenant_id).all()
+
+    resultado = []
+    for p in productos:
+        disponible = to_float(stock_totals.get(p.id, Decimal("0.00")))
+        minimo = to_float(p.stock_minimo)
+        if disponible > minimo:
+            continue
+        resultado.append({
+            "sku": p.sku,
+            "nombre": p.nombre,
+            "stock": disponible,
+            "minimo": minimo,
+            "sugerido": max(0.0, minimo - disponible),
+            "costo_usd": to_float(p.costo_usd),
+            "estado": "AGOTADO" if disponible <= 0 else "BAJO",
+        })
+
+    return sorted(resultado, key=lambda item: item["stock"])
 
 
 @router.get("/inventario/existencias")
