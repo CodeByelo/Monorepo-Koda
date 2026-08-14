@@ -3896,16 +3896,39 @@ def reporte_vendedores(db: Session = Depends(get_db), current_user = Depends(get
         Vendedor.activo == True
     ).all()
 
+    # --- Comisión: usar el valor REAL calculado y persistido en cada venta
+    # (Venta.comision_usd, congelado a la tasa vigente del vendedor en el
+    # momento de la emisión de la factura) en vez de recalcular un 5% plano
+    # para todas las ventas.
+    #
+    # FALLBACK EXPLÍCITO (no silencioso): las ventas emitidas ANTES de la
+    # migración que agregó esta columna tienen `comision_usd IS NULL` (su
+    # comisión real nunca se calculó ni se guardó). Para esas, y SOLO para
+    # esas, se mantiene la estimación histórica de 5% sobre el monto
+    # efectivamente cobrado — igual que hacía este reporte antes de que
+    # existiera `comision_usd` — para no mostrar $0 de comisión sobre el
+    # histórico pre-migración.
+    def _comision_con_fallback(ventas_grupo, cxc_grupo):
+        ventas_con_dato = [v for v in ventas_grupo if v.comision_usd is not None]
+        ventas_sin_dato_ids = {v.id for v in ventas_grupo if v.comision_usd is None}
+        comision_real = sum(to_float(v.comision_usd) for v in ventas_con_dato)
+        cobrado_sin_dato = sum(
+            to_float(c.monto_pagado_usd) for c in cxc_grupo
+            if c.venta_id in ventas_sin_dato_ids
+        )
+        comision_estimada_legacy = cobrado_sin_dato * 0.05
+        return comision_real + comision_estimada_legacy
+
     if not vendedores:
         v_billed = total_facturado
         v_collected = total_cobrado
         v_efficiency = (v_collected / v_billed * 100.0) if v_billed > 0 else 100.0
-        v_commission = v_collected * 0.05
+        v_commission = _comision_con_fallback(ventas, cxc)
         total_comision = v_commission
         v_overdue_pct = max(0.0, 100.0 - v_efficiency)
         status = "ACTIVO" if v_efficiency >= 75 else "REVISIÓN"
         status_color = "bg-green-50 text-green-700 border-green-200" if v_efficiency >= 75 else "bg-red-50 text-red-700 border-red-200"
-        
+
         sales_force.append({
             "name": "Vendedor Interno",
             "billed": f"${v_billed:,.2f}",
@@ -3923,19 +3946,20 @@ def reporte_vendedores(db: Session = Depends(get_db), current_user = Depends(get
         for v in vendedores:
             ventas_v = [venta for venta in ventas if getattr(venta, 'vendedor_id', None) == v.id]
             v_billed = sum(float(venta.total_usd) for venta in ventas_v)
-            
+
             cxc_v = [c for c in cxc if c.venta and getattr(c.venta, 'vendedor_id', None) == v.id]
             v_collected = sum(float(c.monto_pagado_usd) for c in cxc_v)
-            
+
             v_efficiency = (v_collected / v_billed * 100.0) if v_billed > 0 else (100.0 if v_collected == 0 and v_billed == 0 else 0.0)
-            v_commission = v_collected * 0.05
+            v_commission = _comision_con_fallback(ventas_v, cxc_v)
             total_comision += v_commission
             v_overdue_pct = max(0.0, 100.0 - v_efficiency)
-            
+
             status = "ACTIVO" if v_efficiency >= 75 else "REVISIÓN"
             status_color = "bg-green-50 text-green-700 border-green-200" if v_efficiency >= 75 else "bg-red-50 text-red-700 border-red-200"
-    
+
             sales_force.append({
+                "id": v.id,
                 "name": v.nombre,
                 "billed": f"${v_billed:,.2f}",
                 "collected": f"${v_collected:,.2f}",
@@ -3943,6 +3967,7 @@ def reporte_vendedores(db: Session = Depends(get_db), current_user = Depends(get
                 "dso": "30 días",
                 "overdue": f"{v_overdue_pct:.1f}%",
                 "commission": f"${v_commission:,.2f}",
+                "porcentaje_comision": to_float(v.porcentaje_comision),
                 "status": status,
                 "statusColor": status_color,
                 "isCritical": v_efficiency < 75
@@ -3967,7 +3992,7 @@ def reporte_vendedores(db: Session = Depends(get_db), current_user = Depends(get
         {
             "label": "Comisiones Liquidadas",
             "value": f"${total_comision:,.2f}",
-            "desc": "5% sobre cobro efectivo",
+            "desc": "Tasa real por vendedor (5% hist. si no hay dato)",
             "color": "text-[#0b5156]",
             "type": "clock"
         },
@@ -3982,7 +4007,8 @@ def reporte_vendedores(db: Session = Depends(get_db), current_user = Depends(get
 
     insight = (
         f"El porcentaje de cobrabilidad promedio de la fuerza comercial del tenant es del {cobrabilidad_global:.1f}%. "
-        f"Las comisiones de los vendedores son calculadas estrictamente sobre el cobro liquidado, no sobre la facturación."
+        f"Las comisiones se calculan con la tasa real configurada por vendedor sobre cada venta emitida "
+        f"(congelada al momento de la factura); para ventas históricas sin ese dato se estima 5% sobre el cobro efectivo."
     )
 
     return {
@@ -4230,7 +4256,7 @@ def exportar_reporte(reporte: str, periodo: str = None, formato: str = "csv", db
             writer.writerow([m["label"], m["value"], m.get("desc", m.get("trend", ""))])
         writer.writerow([])
         writer.writerow(["Ranking de Efectividad"])
-        writer.writerow(["Vendedor", "Facturado ($)", "Cobrado ($)", "% Cobrabilidad", "DSO (Dias)", "% Vencido", "Comision (5%)", "Estado"])
+        writer.writerow(["Vendedor", "Facturado ($)", "Cobrado ($)", "% Cobrabilidad", "DSO (Dias)", "% Vencido", "Comision", "Estado"])
         for s in data_vend["salesForce"]:
             writer.writerow([s["name"], s["billed"], s["collected"], s["efficiency"], s["dso"], s["overdue"], s["commission"], s["status"]])
 

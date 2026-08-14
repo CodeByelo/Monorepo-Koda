@@ -6,7 +6,7 @@ from sqlalchemy import func
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.core.database import get_db
 from backend.models.operations import Venta, Cliente, Producto, Proveedor
@@ -714,6 +714,46 @@ def eliminar_centro_costo(id: int, db: Session = Depends(get_db), current_user =
     db.delete(centro)
     db.commit()
     return {"ok": True}
+
+
+# ==========================================
+# VENDEDORES (selector de facturación/POS + configuración de comisión)
+# ==========================================
+
+class VendedorComisionUpdate(BaseModel):
+    porcentaje_comision: Decimal = Field(..., ge=0, le=100)
+
+
+@router.get("/vendedores")
+def listar_vendedores(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """Lista los vendedores activos del tenant actual, para los selectores
+    opcionales de vendedor en Facturación Fiscal y POS."""
+    return db.query(Vendedor).filter(
+        Vendedor.tenant_id == current_user.tenant_id,
+        Vendedor.activo == True
+    ).order_by(Vendedor.nombre).all()
+
+
+@router.patch("/vendedores/{vendedor_id}")
+def actualizar_comision_vendedor(
+    vendedor_id: int,
+    body: VendedorComisionUpdate,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    """Actualiza el porcentaje de comisión de un vendedor (tenant-scoped).
+    Usado por el botón "Configurar Comisiones" del reporte de Fuerza de Ventas."""
+    vendedor = db.query(Vendedor).filter(
+        Vendedor.id == vendedor_id,
+        Vendedor.tenant_id == current_user.tenant_id,
+    ).first()
+    if not vendedor:
+        raise HTTPException(404, detail="Vendedor no encontrado.")
+
+    vendedor.porcentaje_comision = body.porcentaje_comision
+    db.commit()
+    db.refresh(vendedor)
+    return vendedor
 
 
 @router.get("/contabilidad/libro-diario", response_model=PaginatedLibroDiarioResponse)
