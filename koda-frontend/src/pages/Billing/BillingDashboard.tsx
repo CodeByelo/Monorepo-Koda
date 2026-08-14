@@ -10,7 +10,7 @@ import {
   Minimize2
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { api, BASE_URL } from '@/api/client';
+import { api } from '@/api/client';
 
 interface VentaRow {
   id: number;
@@ -106,17 +106,11 @@ const BillingDashboard = () => {
 
   const handleDownloadPdf = async (id: number) => {
     try {
-      const token = localStorage.getItem('koda_token') || localStorage.getItem('sgd_token') || '';
-      const headers: any = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const response = await fetch(`${BASE_URL}/ventas/${id}/pdf`, {
-        headers,
-        credentials: 'include',
-      });
-      if (!response.ok) throw new Error('Error al generar el PDF de la factura');
-      const blob = await response.blob();
-      const fileURL = URL.createObjectURL(blob);
-      window.open(fileURL, '_blank');
+      // Nota: se usa api.download (crea un <a download> oculto) en vez de
+      // window.open(blobUrl) porque window.open llamado después de un await
+      // pierde el "user activation" del click y los navegadores lo bloquean
+      // silenciosamente como popup — el botón parecía "no hacer nada".
+      await api.download(`/ventas/${id}/pdf`, `Factura-${id}.pdf`);
     } catch (error: any) {
       alert(error.message || 'Error al descargar PDF');
     }
