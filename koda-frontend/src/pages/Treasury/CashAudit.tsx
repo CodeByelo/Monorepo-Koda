@@ -89,6 +89,8 @@ const CashAudit = () => {
     try {
       await api.post('/tesoreria/arqueo/cerrar', {
         caja: selectedCaja,
+        sistema_usd: systemTotalUsd,
+        cajero: auditorName,
         diferencia_usd: diffUsd,
         fisico_usd: totalUsdPhysical,
         fisico_ves: totalVesPhysical,
