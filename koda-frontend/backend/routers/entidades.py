@@ -130,10 +130,17 @@ import os
 from fastapi import File, UploadFile
 import secrets
 
+def _logo_path(tenant_id) -> str:
+    """Per-tenant logo file path. Namespaced by tenant_id to avoid one
+    tenant's uploaded logo leaking onto another tenant's documents
+    (this used to be a single global backend/static/logo.png)."""
+    return f"backend/static/logo_{tenant_id}.png"
+
 @router.get("/empresa/perfil", dependencies=[Depends(role_required(['Admin']))])
 def obtener_perfil(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     emp = _get_or_create_empresa(db, current_user)
-    logo_exists = os.path.exists("backend/static/logo.png")
+    logo_path = _logo_path(current_user.tenant_id)
+    logo_exists = os.path.exists(logo_path)
     return {
         "rif": emp.rif,
         "razon_social": emp.razon_social,
@@ -142,7 +149,7 @@ def obtener_perfil(db: Session = Depends(get_db), current_user: Profile = Depend
         "telefono": emp.telefono,
         "direccion": emp.direccion,
         "tipo_contribuyente": emp.tipo_contribuyente,
-        "logo_url": "/api/static/logo.png" if logo_exists else None,
+        "logo_url": f"/api/static/logo_{current_user.tenant_id}.png" if logo_exists else None,
     }
 
 @router.put("/empresa/perfil", dependencies=[Depends(role_required(['Admin']))])
@@ -167,12 +174,12 @@ def crear_sucursal(data: SucursalCreate, db: Session = Depends(get_db), current_
     return s
 
 @router.post("/empresa/logo")
-async def subir_logo(file: UploadFile = File(...)):
+async def subir_logo(file: UploadFile = File(...), current_user: Profile = Depends(get_current_user)):
     os.makedirs("backend/static", exist_ok=True)
-    logo_path = "backend/static/logo.png"
+    logo_path = _logo_path(current_user.tenant_id)
     with open(logo_path, "wb") as buffer:
         buffer.write(await file.read())
-    return {"ok": True, "message": "Logo registrado exitosamente", "logo_url": "/api/static/logo.png"}
+    return {"ok": True, "message": "Logo registrado exitosamente", "logo_url": f"/api/static/logo_{current_user.tenant_id}.png"}
 
 @router.post("/empresa/api-tokens")
 def crear_token(current_user=Depends(role_required(['Admin']))):
@@ -180,8 +187,8 @@ def crear_token(current_user=Depends(role_required(['Admin']))):
     return {"ok": True, "token": secure_token}
 
 @router.delete("/empresa/logo")
-def eliminar_logo():
-    logo_path = "backend/static/logo.png"
+def eliminar_logo(current_user: Profile = Depends(get_current_user)):
+    logo_path = _logo_path(current_user.tenant_id)
     if os.path.exists(logo_path):
         os.remove(logo_path)
         return {"ok": True, "message": "Logo eliminado exitosamente"}
