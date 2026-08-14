@@ -923,6 +923,17 @@ async def register_user(
     user: schemas.UsuarioCreate,
     conn = Depends(get_db_connection)
 ):
+    # Deshabilitado: este endpoint público, sin autenticación, permitía a
+    # cualquiera auto-registrarse con rol_id=1/2 (CEO/Administrador) y
+    # asignaba el tenant_id de la organización MÁS ANTIGUA del sistema —
+    # toma de control total de un tenant real sin login. routers/auth_router.py
+    # ya deshabilita /auth/register con este mismo mensaje; este duplicado
+    # legacy nunca se había desactivado. No usar este endpoint para
+    # onboarding — el alta real de tenants es vía /dev/tenants + claim-account.
+    raise HTTPException(
+        status_code=400,
+        detail="El registro público está deshabilitado en este entorno corporativo."
+    )
     try:
         existing = await conn.fetchrow(
             "SELECT id FROM profiles WHERE username = $1 OR email = $2",
