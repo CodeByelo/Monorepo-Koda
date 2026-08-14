@@ -9,6 +9,7 @@ import logging
 import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from services.bcv_service import fetch_and_save_bcv_rates
+from services.alertas_notificaciones_service import revisar_alertas_notificaciones
 
 logger = logging.getLogger("sistema_corporativo")
 
@@ -61,7 +62,24 @@ scheduler.add_job(
     misfire_grace_time=60,
 )
 
+
+# ── Job 3: Evaluación de reglas de notificación / alertas de inventario ────────
+# Consulta notificaciones_reglas + GET /bot/alertas (koda-frontend/backend) y
+# notifica por Telegram a los administradores de cada tenant vinculado.
+# Intervalo configurable — por defecto cada 6 horas (no hay urgencia de tiempo
+# real para esta clase de alertas y evita presionar al otro backend).
+_alertas_interval_hours = int(os.getenv("ALERTAS_NOTIFICACIONES_INTERVAL_HOURS", "6"))
+scheduler.add_job(
+    revisar_alertas_notificaciones,
+    trigger="interval",
+    hours=_alertas_interval_hours,
+    id="alertas_notificaciones_job",
+    replace_existing=True,
+    misfire_grace_time=1800,  # 30 min de gracia
+)
+
 logger.info(
     "📅 Scheduler inicializado — Jobs: BCV Sync (Lun-Vie 8:00/13:00 VET) | "
-    "Keep-alive (cada 10 min, activo si RENDER_SELF_URL está configurada)"
+    "Keep-alive (cada 10 min, activo si RENDER_SELF_URL está configurada) | "
+    f"Alertas de Notificación (cada {_alertas_interval_hours}h)"
 )
