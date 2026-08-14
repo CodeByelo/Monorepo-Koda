@@ -78,6 +78,10 @@ const IVADeclaration = () => {
         retenciones,
         data
       });
+      // Descargar el documento oficial del formulario DP-31 recién cerrado.
+      // Antes, este botón solo cerraba el período en la base de datos sin
+      // producir ningún documento — el usuario no veía ningún resultado.
+      await api.download(`/fiscal/declaracion-iva/pdf?periodo=${periodo}`, `DP31_${periodo}.pdf`);
       showToast("DP-31 generado. El período ha sido cerrado fiscalmente.", "success");
       fetchDeclarationData();
     } catch (error) {

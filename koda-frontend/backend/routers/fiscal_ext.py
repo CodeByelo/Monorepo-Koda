@@ -434,11 +434,99 @@ def finalizar_iva(body: dict, db: Session = Depends(get_db), current_user: Profi
     decl.credito_fiscal_mes = data["credito_fiscal_mes"]
     decl.retenciones = body.get("retenciones", 0)
     decl.estado = "FINALIZADA"
-    decl.fecha_presentacion = datetime.now(timezone.utc)
-    
+    # NOTA: el modelo DeclaracionIVA no tiene columna `fecha_presentacion`
+    # (solo `fecha_cierre`) — asignar el nombre viejo no fallaba porque
+    # SQLAlchemy permite atributos arbitrarios en la instancia, pero nunca
+    # se persistía. Se corrige al campo real.
+    decl.fecha_cierre = datetime.now(timezone.utc)
+
     db.add(decl)
     db.commit()
     return {"ok": True, "id": decl.id}
+
+
+@router.get("/declaracion-iva/pdf")
+def generar_pdf_declaracion_iva(
+    periodo: str = Query(...),
+    db: Session = Depends(get_db),
+    current_user: Profile = Depends(get_current_user),
+):
+    """Genera el documento oficial del Formulario DP-31 (Declaración y Pago de IVA)
+    para un período ya finalizado. Sin esto, "Generar DP-31 Final" solo cerraba
+    el período en la base de datos pero no producía ningún documento descargable."""
+    import io
+    from backend.models.erp_extended import Empresa
+    from reportlab.pdfgen import canvas as pdf_canvas
+    from reportlab.lib import colors
+
+    decl = db.query(DeclaracionIVA).filter(
+        DeclaracionIVA.periodo == periodo,
+        DeclaracionIVA.tenant_id == current_user.tenant_id,
+    ).first()
+    if not decl or decl.estado != "FINALIZADA":
+        raise HTTPException(status_code=404, detail="No existe una declaración DP-31 finalizada para este período.")
+
+    empresa = db.query(Empresa).filter(Empresa.tenant_id == current_user.tenant_id).first()
+    rif = empresa.rif if empresa else "N/A"
+    razon_social = empresa.razon_social if empresa else "N/A"
+
+    debito = to_float(decl.debito_fiscal_usd)
+    credito = to_float(decl.credito_fiscal_mes_usd)
+    retenciones = to_float(decl.retenciones_usd)
+    total_a_pagar = max(debito - credito - retenciones, 0)
+
+    buffer = io.BytesIO()
+    c = pdf_canvas.Canvas(buffer, pagesize=letter)
+    ancho, alto = letter
+
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, alto - 50, razon_social)
+    c.setFont("Helvetica", 10)
+    c.drawString(50, alto - 65, f"R.I.F.: {rif}")
+
+    c.setFont("Helvetica-Bold", 16)
+    c.setFillColor(colors.HexColor("#0b5156"))
+    c.drawString(340, alto - 50, "FORMULARIO DP-31")
+    c.setFillColor(colors.black)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(340, alto - 68, "DECLARACIÓN Y PAGO DEL I.V.A.")
+    c.setFont("Helvetica", 10)
+    c.drawString(340, alto - 82, f"PERÍODO: {periodo}")
+    c.drawString(340, alto - 96, f"ESTADO: {decl.estado}")
+
+    c.setLineWidth(1)
+    c.setStrokeColor(colors.HexColor("#e2e8f0"))
+    c.line(50, alto - 115, ancho - 50, alto - 115)
+
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(50, alto - 140, "RESUMEN DE LA DECLARACIÓN (Bs.)")
+
+    filas = [
+        ("Débito Fiscal (IVA en ventas)", debito),
+        ("Crédito Fiscal del mes (IVA en compras)", credito),
+        ("Retenciones de IVA soportadas", retenciones),
+        ("Total a Pagar", total_a_pagar),
+    ]
+    y = alto - 165
+    c.setFont("Helvetica", 10)
+    for label, valor in filas:
+        c.drawString(50, y, label)
+        c.drawRightString(ancho - 50, y, f"Bs. {valor:,.2f}")
+        y -= 20
+
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawCentredString(ancho / 2, 40, "Documento generado por Koda ERP. Presentar ante el Portal SENIAT conforme a la normativa vigente.")
+
+    c.showPage()
+    c.save()
+    buffer.seek(0)
+
+    filename = f"DP31_{periodo}.pdf"
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 
 @router.get("/retenciones-iva")
