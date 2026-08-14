@@ -496,7 +496,7 @@ const AlertsCenter = () => {
 
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { isAuthenticated, licenseError, userRole, checkLicense, logout } = useAuth();
+  const { isAuthenticated, isAuthLoading, licenseError, userRole, checkLicense, logout } = useAuth();
   const [isChecking, setIsChecking] = useState(false);
   const [checkResult, setCheckResult] = useState<'success' | 'failed' | null>(null);
 
@@ -509,6 +509,13 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
       setCheckResult('failed');
     }
   };
+
+  // Mientras la sesión se hidrata (token restaurado desde localStorage aún sin
+  // decodificar, o un ?exchange_code=... aún en vuelo) mostramos un loader en
+  // vez de evaluar isAuthenticated/userRole con datos parcialmente listos.
+  if (isAuthLoading) {
+    return <PageLoader />;
+  }
 
   if (!isAuthenticated) {
     return (

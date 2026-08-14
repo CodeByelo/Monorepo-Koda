@@ -38,6 +38,12 @@ interface AuthContextType {
   login: (token: string, userData?: any) => void;
   logout: () => void;
   isAuthenticated: boolean;
+  // true mientras la sesión aún se está "hidratando": el token ya está en
+  // localStorage (o llegó un ?exchange_code=... por resolver) pero los datos
+  // derivados (rol, tenant, etc.) todavía no se han decodificado/aplicado.
+  // Los guards de ruta deben mostrar un loader mientras esto sea true, en vez
+  // de renderizar con userRole/tenantId en null.
+  isAuthLoading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -62,6 +68,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
     return null;
+  });
+
+  // Hidratación de la sesión: dos fuentes async que deben resolver antes de
+  // considerar la sesión "lista" (ver isAuthLoading más abajo).
+  // 1. tokenDecoded: el efecto que decodifica el JWT (rol/tenant/etc.) ya corrió.
+  //    Si no había token al montar, no hay nada que decodificar -> ya está listo.
+  const [tokenDecoded, setTokenDecoded] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    const hasToken = !!(localStorage.getItem('koda_token') || localStorage.getItem('sgd_token'));
+    return !hasToken;
+  });
+  // 2. exchangeResolved: si llegó un ?exchange_code=... en la URL, ya se
+  //    resolvió (éxito o falla). Si no había código, no hay nada que esperar.
+  const [exchangeResolved, setExchangeResolved] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    return !new URLSearchParams(window.location.search).get('exchange_code');
   });
 
   // Intercambio de código de sesión (?exchange_code=...) al llegar desde otra
@@ -101,6 +123,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } catch (e) {
         console.error('Error al intercambiar el código de sesión', e);
+      } finally {
+        // Se resuelve el intercambio (éxito o falla): ya no bloquea isAuthLoading.
+        setExchangeResolved(true);
       }
     })();
     // Se ejecuta una única vez al montar el provider.
@@ -159,7 +184,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.removeItem('koda_token');
       localStorage.removeItem('sgd_token');
     }
+    // Este efecto ya corrió al menos una vez: el token (si existía) fue
+    // decodificado, o se confirmó que no había ninguno que decodificar.
+    setTokenDecoded(true);
   }, [token]);
+
+  const isAuthLoading = !tokenDecoded || !exchangeResolved;
 
   // Escuchar eventos globales de error de licencia
   useEffect(() => {
@@ -227,7 +257,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setLicenseError,
       login,
       logout,
-      isAuthenticated: !!token
+      isAuthenticated: !!token,
+      isAuthLoading
     }}>
       {children}
     </AuthContext.Provider>
