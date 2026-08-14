@@ -16,7 +16,17 @@ class Producto(Base):
     nombre = Column(String(150), nullable=False)
     precio_usd = Column(Numeric(15, 2), nullable=False)
     costo_usd = Column(Numeric(15, 2), nullable=False)
+    # Total global de stock. Legacy: sigue siendo la fuente de verdad para
+    # ventas/facturación/valorización (routers/sales.py, facturacion.py,
+    # inventory.py, logistica.py, modulos_ext.py), ninguno de los cuales es
+    # todavía consciente de almacén. El detalle real por almacén vive en
+    # StockPorAlmacen (models/erp_extended.py). Las transferencias entre
+    # almacenes son de suma neta cero y no tocan esta columna. Sales/compras
+    # SÍ pueden desincronizar este total respecto a sum(StockPorAlmacen) hasta
+    # que esos flujos se rediseñen para ser conscientes de almacén (fuera de
+    # alcance de esta fase).
     stock = Column(Numeric(15, 2), default=0.00, nullable=False)
+    stock_minimo = Column(Numeric(15, 2), default=10.00, nullable=False)  # Umbral de reposición por producto (antes hardcodeado a 10 en el frontend)
     es_exento = Column(Boolean, default=False, nullable=False)  # Indica si está exento de IVA (0%)
     imagen_url = Column(String(500), nullable=True)
 
@@ -39,6 +49,10 @@ class Venta(Base):
     estado = Column(String(20), default="ACTIVA", nullable=False) # ACTIVA, ANULADA
     creado_por = Column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=True)
     vendedor_id = Column(Integer, ForeignKey("public.vendedores.id"), nullable=True)
+    # Comisión calculada y congelada al momento de la emisión (según la tasa
+    # del vendedor vigente en ese momento). NULL = venta previa a esta
+    # migración, para la cual no se conoce el valor real (ver reporte_vendedores).
+    comision_usd = Column(Numeric(15, 2), nullable=True)
 
     # Relación uno-a-muchos con los detalles de la venta
     cliente = relationship("Cliente")

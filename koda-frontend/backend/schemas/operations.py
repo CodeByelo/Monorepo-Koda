@@ -34,6 +34,7 @@ class ProductoBase(BaseModel):
     precio_usd: Decimal = Field(..., gt=0, decimal_places=2)
     costo_usd: Decimal = Field(..., ge=0, decimal_places=2)
     stock: int = Field(..., ge=0)
+    stock_minimo: int = Field(default=10, ge=0)
     es_exento: bool = Field(default=False)
     imagen_url: Optional[str] = Field(default=None)
 

@@ -1,7 +1,7 @@
 from sqlalchemy import ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 """Modelos extendidos para módulos ERP (cobranzas, compras, tesorería, empresa)."""
-from sqlalchemy import Column, Integer, String, Numeric, Boolean, DateTime, ForeignKey, Text, Date
+from sqlalchemy import Column, Integer, String, Numeric, Boolean, DateTime, ForeignKey, Text, Date, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from backend.core.database import Base
@@ -371,6 +371,26 @@ class TransferenciaInventario(Base):
     fecha = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
 
+class StockPorAlmacen(Base):
+    """
+    Stock real por almacén (Fase 2). Reemplaza el reparto porcentual
+    fabricado (60/25/15) que existía únicamente en el frontend
+    (InventoryWarehouses.tsx). Producto.stock sigue existiendo como total
+    global legacy — ver comentario en models/operations.py.
+    """
+    __tablename__ = "stock_por_almacen"
+    __table_args__ = (
+        UniqueConstraint('producto_id', 'almacen_id', name='uq_stock_producto_almacen'),
+        {'schema': 'public'}
+    )
+    tenant_id = Column(UUID(as_uuid=True))
+
+    id = Column(Integer, primary_key=True, index=True)
+    producto_id = Column(Integer, ForeignKey("public.productos.id"), index=True, nullable=False)
+    almacen_id = Column(Integer, ForeignKey("public.almacenes.id"), index=True, nullable=False)
+    cantidad = Column(Numeric(15, 2), default=0.00, nullable=False)
+
+
 class RequisicionCompra(Base):
     __tablename__ = "requisiciones_compra"
     __table_args__ = {'schema': 'public'}
@@ -455,6 +475,9 @@ class Vendedor(Base):
     codigo = Column(String(20), unique=True, nullable=False)
     activo = Column(Boolean, default=True, nullable=False)
     meta_mensual_usd = Column(Numeric(15, 2), default=0, nullable=False)
+    # Ya existe en la base de datos de producción (Supabase) con DEFAULT 5.00;
+    # este mapeo solo la expone en el ORM, no requiere migración.
+    porcentaje_comision = Column(Numeric(5, 2), nullable=False, server_default="5.00")
 
     @property
     def meta_mensual(self):
