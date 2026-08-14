@@ -28,6 +28,9 @@ interface Producto {
   sku: string;
   nombre: string;
   precio_usd: number | string;
+  precio_detal?: number | string | null;
+  precio_mayor?: number | string | null;
+  precio_gran_mayor?: number | string | null;
   costo_usd: number | string;
   stock: number;
   es_exento: boolean;
@@ -39,16 +42,35 @@ interface Vendedor {
   codigo: string;
 }
 
+// Tarifa de negocio a usar como punto de partida para el precio unitario de
+// la fila. NO es un candado: el precio queda siempre editable a mano después
+// (pricing negociado por línea), este selector solo autocompleta un valor
+// inicial razonable.
+type Tarifa = 'Mayor' | 'Detal' | 'GranMayor';
+
 interface FacturaRow {
   tempId: string;
   producto_id: string;
   descripcion: string;
   cantidad: number;
   precio_unitario: number;
+  tarifa: Tarifa;
 }
 
 const getClientUuid = (id: number): string => {
   return `00000000-0000-0000-0000-${String(id).padStart(12, '0')}`;
+};
+
+// Resuelve el precio de la tarifa elegida contra el producto; si esa tarifa
+// específica no está configurada para el producto (null/undefined), cae de
+// vuelta al precio base `precio_usd`.
+const resolveTierPrice = (prod: Producto, tarifa: Tarifa): number => {
+  const raw =
+    tarifa === 'Mayor' ? prod.precio_mayor :
+    tarifa === 'GranMayor' ? prod.precio_gran_mayor :
+    prod.precio_detal;
+  const n = raw != null ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : (Number(prod.precio_usd) || 0);
 };
 
 export default function NuevaFactura() {
@@ -65,7 +87,7 @@ export default function NuevaFactura() {
   const [aplicaIgtf, setAplicaIgtf] = useState<boolean>(false);
   
   const [rows, setRows] = useState<FacturaRow[]>([
-    { tempId: 'init-row-1', producto_id: '', descripcion: '', cantidad: 1, precio_unitario: 0 }
+    { tempId: 'init-row-1', producto_id: '', descripcion: '', cantidad: 1, precio_unitario: 0, tarifa: 'Detal' }
   ]);
   
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -109,7 +131,8 @@ export default function NuevaFactura() {
               producto_id: firstP.sku || String(firstP.id),
               descripcion: firstP.nombre,
               cantidad: 1,
-              precio_unitario: Number(firstP.precio_usd) || 0
+              precio_unitario: resolveTierPrice(firstP, 'Detal'),
+              tarifa: 'Detal'
             }]);
           }
         }
@@ -180,14 +203,15 @@ export default function NuevaFactura() {
       producto_id: '',
       descripcion: '',
       cantidad: 1,
-      precio_unitario: 0
+      precio_unitario: 0,
+      tarifa: 'Detal'
     };
     setRows([...rows, newRow]);
   };
 
   const handleRemoveRow = (tempId: string) => {
     if (rows.length === 1) {
-      setRows([{ tempId: 'init-row-1', producto_id: '', descripcion: '', cantidad: 1, precio_unitario: 0 }]);
+      setRows([{ tempId: 'init-row-1', producto_id: '', descripcion: '', cantidad: 1, precio_unitario: 0, tarifa: 'Detal' }]);
       return;
     }
     setRows(rows.filter(r => r.tempId !== tempId));
@@ -205,11 +229,27 @@ export default function NuevaFactura() {
             ...row,
             producto_id: prod.sku || String(prod.id),
             descripcion: prod.nombre,
-            precio_unitario: Number(prod.precio_usd) || 0
+            precio_unitario: resolveTierPrice(prod, row.tarifa)
           };
         }
       }
       return row;
+    }));
+  };
+
+  // Cambiar la tarifa de una fila recalcula el precio unitario sugerido a
+  // partir del producto ya seleccionado en esa fila (o deja 0 si no hay
+  // producto todavía). El usuario puede seguir editando el precio a mano
+  // después de este autocompletado.
+  const handleRowTarifaChange = (tempId: string, tarifa: Tarifa) => {
+    setRows(prevRows => prevRows.map(row => {
+      if (row.tempId !== tempId) return row;
+      const prod = productos.find(p => p.sku === row.producto_id || String(p.id) === row.producto_id);
+      return {
+        ...row,
+        tarifa,
+        precio_unitario: prod ? resolveTierPrice(prod, tarifa) : row.precio_unitario
+      };
     }));
   };
 
@@ -294,7 +334,7 @@ export default function NuevaFactura() {
       setMonedaDocumento('USD');
       setMetodoPago('Divisa');
       setAplicaIgtf(false);
-      setRows([{ tempId: 'init-row-1', producto_id: '', descripcion: '', cantidad: 1, precio_unitario: 0 }]);
+      setRows([{ tempId: 'init-row-1', producto_id: '', descripcion: '', cantidad: 1, precio_unitario: 0, tarifa: 'Detal' }]);
     } catch (err: any) {
       console.error(err);
       setErrorMessage(err.message || "Ocurrió un error inesperado al emitir la factura fiscal.");
@@ -563,10 +603,11 @@ export default function NuevaFactura() {
               <table className="w-full text-left border-collapse min-w-[600px]">
                 <thead>
                   <tr className="border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-wider">
-                    <th className="pb-3 w-[30%]">Producto Base</th>
-                    <th className="pb-3 w-[35%]">Descripción Fiscal</th>
-                    <th className="pb-3 w-[15%] text-right">Cant.</th>
-                    <th className="pb-3 w-[15%] text-right">Precio Unit.</th>
+                    <th className="pb-3 w-[22%]">Producto Base</th>
+                    <th className="pb-3 w-[26%]">Descripción Fiscal</th>
+                    <th className="pb-3 w-[12%] text-right">Cant.</th>
+                    <th className="pb-3 w-[13%] text-center">Tarifa</th>
+                    <th className="pb-3 w-[17%] text-right">Precio Unit.</th>
                     <th className="pb-3 w-[10%] text-center">Acción</th>
                   </tr>
                 </thead>
@@ -608,6 +649,19 @@ export default function NuevaFactura() {
                           onChange={(e) => handleRowValueChange(row.tempId, 'cantidad', e.target.value)}
                           className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-bold text-right text-slate-800 focus:outline-none focus:border-[#0b5156]/50 transition-all"
                         />
+                      </td>
+
+                      {/* Tarifa (Mayor/Detal/Gran Mayor) — solo autocompleta el precio inicial */}
+                      <td className="py-4 pr-3">
+                        <select
+                          value={row.tarifa}
+                          onChange={(e) => handleRowTarifaChange(row.tempId, e.target.value as Tarifa)}
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:border-[#0b5156]/50 transition-all uppercase"
+                        >
+                          <option value="Mayor">Mayor</option>
+                          <option value="Detal">Detal</option>
+                          <option value="GranMayor">Gran Mayor</option>
+                        </select>
                       </td>
 
                       {/* Precio */}

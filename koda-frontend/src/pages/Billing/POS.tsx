@@ -14,6 +14,20 @@ import {
   Package
 } from 'lucide-react';
 
+// Tarifa de negocio usada como punto de partida al agregar un producto al
+// carrito. Solo autocompleta el precio de la línea; sigue siendo editable
+// por línea después (pricing negociado), no es un candado.
+type Tarifa = 'Mayor' | 'Detal' | 'GranMayor';
+
+const resolveTierPrice = (p: any, tarifa: Tarifa): number => {
+  const raw =
+    tarifa === 'Mayor' ? p.precio_mayor :
+    tarifa === 'GranMayor' ? p.precio_gran_mayor :
+    p.precio_detal;
+  const n = raw != null ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : (Number(p.precio) || 0);
+};
+
 const POS = () => {
   const { userName } = useAuth();
   const [cart, setCart] = useState<any[]>([]);
@@ -28,6 +42,7 @@ const POS = () => {
   const [client, setClient] = useState('');
   const [vendedores, setVendedores] = useState<any[]>([]);
   const [vendedorId, setVendedorId] = useState('');
+  const [tarifa, setTarifa] = useState<Tarifa>('Detal');
   const [metodoPago, setMetodoPago] = useState<'Efectivo' | 'Divisa' | 'Transferencia' | 'PagoMovil'>('Divisa');
   const [toast, setToast] = useState<{message: string, type: 'error' | 'success'} | null>(null);
 
@@ -99,8 +114,18 @@ const POS = () => {
           item.id === product.id ? { ...item, qty: item.qty + 1 } : item
         );
       }
-      return [...prevCart, { id: product.id, name: product.nombre, price: product.precio, qty: 1, sku: product.sku, stock: product.stock }];
+      // El precio inicial se autocompleta desde la tarifa activa (con fallback
+      // a precio_usd si ese tier no está configurado); queda editable por
+      // línea en el carrito, no es un candado sobre el precio negociado.
+      return [...prevCart, { id: product.id, name: product.nombre, price: resolveTierPrice(product, tarifa), qty: 1, sku: product.sku, stock: product.stock }];
     });
+  };
+
+  const handleCartPriceChange = (id: number, value: string) => {
+    const newPrice = parseFloat(value);
+    setCart((prevCart) => prevCart.map((item) =>
+      item.id === id ? { ...item, price: Number.isFinite(newPrice) ? newPrice : 0 } : item
+    ));
   };
 
   const handleCheckout = () => {
@@ -205,7 +230,7 @@ const POS = () => {
         <div className="lg:col-span-2 space-y-6">
           <section className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
             <h3 className="text-xl font-black uppercase tracking-tight text-slate-800 font-mono">Búsqueda de Rubros</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-start">
                <div className="space-y-1.5">
                   <label className="text-sm font-black text-slate-500 uppercase tracking-widest">Código / SKU / Nombre</label>
                   <div className="relative">
@@ -251,6 +276,18 @@ const POS = () => {
                      ))}
                   </select>
                </div>
+               <div className="space-y-1.5">
+                  <label className="text-sm font-black text-slate-500 uppercase tracking-widest">Tarifa</label>
+                  <select
+                    value={tarifa}
+                    onChange={(e) => setTarifa(e.target.value as Tarifa)}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase"
+                  >
+                     <option value="Mayor">Mayor</option>
+                     <option value="Detal">Detal</option>
+                     <option value="GranMayor">Gran Mayor</option>
+                  </select>
+               </div>
             </div>
           </section>
 
@@ -270,7 +307,7 @@ const POS = () => {
                       <h4 className="text-sm font-black text-slate-800 uppercase leading-tight h-8">{p.nombre}</h4>
                       <div className="flex justify-between items-end">
                          <div>
-                            <p className="text-xs font-bold text-slate-500 uppercase font-mono">${p.precio.toFixed(2)}</p>
+                            <p className="text-xs font-bold text-slate-500 uppercase font-mono">${resolveTierPrice(p, tarifa).toFixed(2)}</p>
                             <p className="text-xs font-black text-[#0b5156] tracking-tighter uppercase font-mono">{p.sku}</p>
                          </div>
                          <div className="w-6 h-6 bg-[#0b5156] rounded-lg flex items-center justify-center text-white shadow-sm opacity-0 group-hover:opacity-100 transition-opacity">
@@ -363,7 +400,18 @@ const POS = () => {
                      <div key={item.id} className="flex justify-between items-start border-b border-slate-100 pb-4">
                         <div className="space-y-0.5">
                            <p className="text-sm font-black text-slate-800 uppercase leading-tight">{item.name}</p>
-                           <p className="text-xs font-bold text-slate-500 uppercase font-mono">{item.qty} x ${item.price.toFixed(2)}</p>
+                           <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500 uppercase font-mono">
+                             <span>{item.qty} x $</span>
+                             <input
+                               type="number"
+                               min="0"
+                               step="0.01"
+                               value={item.price}
+                               onChange={(e) => handleCartPriceChange(item.id, e.target.value)}
+                               title="Precio negociado — editable por línea"
+                               className="w-20 px-1.5 py-0.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-800 focus:outline-none focus:border-[#0b5156]/50"
+                             />
+                           </div>
                         </div>
                         <strong className="text-sm font-black text-slate-800 font-mono">${(item.qty * item.price).toFixed(2)}</strong>
                      </div>
