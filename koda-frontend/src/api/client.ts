@@ -90,6 +90,19 @@ function _redirectToLogin(reason = 'timeout') {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Tiempo máximo de espera para cualquier petición. Sin esto, un backend caído
+// o que nunca responde deja el `fetch` colgado indefinidamente: cualquier UI
+// que dependa de `await api.xxx(...)` (p.ej. el botón "Reintentar Conexión"
+// del gate de licencia, que muestra "Verificando...") queda atascada para
+// siempre en vez de fallar y mostrar un error.
+const DEFAULT_TIMEOUT_MS = 20000;
+
+function _fetchWithTimeout(input: string, init: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(input, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 export async function request<T>(endpoint: string, options: RequestInit = {}, _isRetry = false): Promise<T> {
   const isFormData = options.body instanceof FormData;
   const headers: any = {
@@ -109,11 +122,19 @@ export async function request<T>(endpoint: string, options: RequestInit = {}, _i
     }
   }
 
-  const response = await fetch(`${BASE_URL}${endpoint}`, {
-    ...options,
-    headers,
-    credentials: 'include', // Enviar cookies httpOnly automáticamente
-  });
+  let response: Response;
+  try {
+    response = await _fetchWithTimeout(`${BASE_URL}${endpoint}`, {
+      ...options,
+      headers,
+      credentials: 'include', // Enviar cookies httpOnly automáticamente
+    });
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error('Tiempo de espera agotado al contactar el servidor. Verifica tu conexión e intenta nuevamente.');
+    }
+    throw err;
+  }
 
   if (!response.ok) {
     // ── Interceptor 401: intentar refresh silencioso ──────────────────────────
@@ -177,11 +198,21 @@ export const api = {
     const token = typeof window !== 'undefined'
       ? (localStorage.getItem('koda_token') || localStorage.getItem('sgd_token'))
       : null;
-    const response = await fetch(`${BASE_URL}${endpoint}`, {
-      method: 'GET',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      credentials: 'include',
-    });
+    let response: Response;
+    try {
+      // Timeout más holgado: generar un PDF/reporte en el backend puede
+      // tardar más que una consulta JSON normal.
+      response = await _fetchWithTimeout(`${BASE_URL}${endpoint}`, {
+        method: 'GET',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
+      }, 60000);
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        throw new Error('Tiempo de espera agotado al generar el archivo. Intenta nuevamente.');
+      }
+      throw err;
+    }
     if (!response.ok) {
       throw new Error('Error al descargar el archivo');
     }
