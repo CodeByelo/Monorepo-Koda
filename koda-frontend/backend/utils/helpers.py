@@ -26,16 +26,21 @@ def periodo_rango(periodo: str) -> Tuple[datetime, datetime]:
     return inicio, fin
 
 
-def ventas_periodo(db: Session, periodo: Optional[str] = None):
-    q = db.query(Venta).filter(Venta.estado == "ACTIVA")
+def ventas_periodo(db: Session, tenant_id, periodo: Optional[str] = None):
+    q = db.query(Venta).filter(Venta.estado == "ACTIVA", Venta.tenant_id == tenant_id)
     if periodo:
         inicio, fin = periodo_rango(periodo)
         q = q.filter(Venta.fecha >= inicio, Venta.fecha < fin)
     return q
 
 
-def tasa_actual(db: Session) -> float:
-    tasa = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
+def tasa_actual(db: Session, tenant_id) -> float:
+    tasa = (
+        db.query(TasaCambio)
+        .filter(TasaCambio.tenant_id == tenant_id)
+        .order_by(TasaCambio.fecha.desc())
+        .first()
+    )
     if tasa and getattr(tasa, "valor_ves", None):
         return to_float(tasa.valor_ves) or 36.52
     return 36.52

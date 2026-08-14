@@ -1520,9 +1520,7 @@ def flujo_caja(periodo: str, db: Session = Depends(get_db), current_user = Depen
 
     # Si la base de datos está vacía de asientos, hacemos un fallback para mostrar actividad
     if operativo_in == 0.0 and operativo_out == 0.0 and inversion == 0.0 and financiamiento == 0.0:
-        from backend.models.operations import Venta
-        # ventas_periodo() no filtra por tenant; se acota aquí al tenant actual.
-        ventas = ventas_periodo(db, periodo).filter(Venta.tenant_id == current_user.tenant_id).all()
+        ventas = ventas_periodo(db, current_user.tenant_id, periodo).all()
         operativo_in = sum(to_float(v.total) for v in ventas)
         operativo_out = -operativo_in * 0.65
 
@@ -1730,9 +1728,7 @@ def exportar_flujo(periodo: str, formato: str, db: Session = Depends(get_db), cu
 
 @router.get("/cierre/checklist")
 def cierre_checklist(periodo: str, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    from backend.models.operations import Venta
-    # ventas_periodo() no filtra por tenant; se acota aquí al tenant actual.
-    ventas_count = ventas_periodo(db, periodo).filter(Venta.tenant_id == current_user.tenant_id).count()
+    ventas_count = ventas_periodo(db, current_user.tenant_id, periodo).count()
     
     y, m = map(int, periodo.split("-"))
     start_date = datetime(y, m, 1, 0, 0, 0, tzinfo=timezone.utc)

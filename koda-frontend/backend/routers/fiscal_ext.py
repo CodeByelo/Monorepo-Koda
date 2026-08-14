@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Optional
 
 from backend.core.database import get_db
-from backend.models.core import Profile, TasaCambio
+from backend.models.core import Profile
 from backend.models.operations import Venta, Cliente
 from backend.models.erp_extended import Compra, DeclaracionIVA, RetencionIVA, RetencionISLR, DeclaracionISLR
 from backend.models.fiscal import ReglaFiscal
@@ -30,22 +30,9 @@ def _tasa_iva(db: Session, tenant_id) -> Decimal:
     return Decimal(str(regla.tasa)) if regla else Decimal("0.16")
 
 
-def _tasa_actual_tenant(db: Session, tenant_id) -> float:
-    """Igual que utils.helpers.tasa_actual pero acotado al tenant actual."""
-    tasa = (
-        db.query(TasaCambio)
-        .filter(TasaCambio.tenant_id == tenant_id)
-        .order_by(TasaCambio.fecha.desc())
-        .first()
-    )
-    if tasa and getattr(tasa, "valor_ves", None):
-        return to_float(tasa.valor_ves) or 36.52
-    return 36.52
-
-
 @router.get("/dashboard")
 def fiscal_dashboard(periodo: str = Query(...), db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
-    ventas = ventas_periodo(db, periodo).filter(Venta.tenant_id == current_user.tenant_id).all()
+    ventas = ventas_periodo(db, current_user.tenant_id, periodo).all()
     inicio, fin = periodo_rango(periodo)
     compras = db.query(Compra).filter(
         Compra.fecha >= inicio,
@@ -61,7 +48,7 @@ def fiscal_dashboard(periodo: str = Query(...), db: Session = Depends(get_db), c
     iva_compras = sum(to_float(c.iva) for c in compras)
     base_compras = sum(to_float(c.subtotal) for c in compras)
 
-    tasa = _tasa_actual_tenant(db, current_user.tenant_id)
+    tasa = tasa_actual(db, current_user.tenant_id)
 
     # Convert to Bs
     debitos_fiscales = iva_ventas * tasa
@@ -131,7 +118,7 @@ def fiscal_dashboard(periodo: str = Query(...), db: Session = Depends(get_db), c
 
 @router.get("/libro-ventas")
 def libro_ventas(periodo: str = Query(...), db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
-    ventas = ventas_periodo(db, periodo).filter(Venta.tenant_id == current_user.tenant_id).order_by(Venta.fecha).all()
+    ventas = ventas_periodo(db, current_user.tenant_id, periodo).order_by(Venta.fecha).all()
     clientes = {c.id: c for c in db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).all()}
     movimientos = []
     for v in ventas:
@@ -167,7 +154,7 @@ def libro_ventas(periodo: str = Query(...), db: Session = Depends(get_db), curre
 @router.get("/libro-ventas/auditar-rifs")
 def auditar_rifs_ventas(periodo: str = Query(...), db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     import re
-    ventas = ventas_periodo(db, periodo).filter(Venta.tenant_id == current_user.tenant_id).all()
+    ventas = ventas_periodo(db, current_user.tenant_id, periodo).all()
     clientes = {c.id: c for c in db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).all()}
     
     invalidos = []
@@ -187,9 +174,9 @@ def auditar_rifs_ventas(periodo: str = Query(...), db: Session = Depends(get_db)
 
 @router.get("/libro-ventas/exportar")
 def exportar_libro_ventas(periodo: str, formato: str = "pdf", db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
-    ventas = ventas_periodo(db, periodo).filter(Venta.tenant_id == current_user.tenant_id).order_by(Venta.fecha).all()
+    ventas = ventas_periodo(db, current_user.tenant_id, periodo).order_by(Venta.fecha).all()
     clientes = {c.id: c for c in db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).all()}
-    
+
     if formato == "txt":
         output = io.StringIO()
         writer = csv.writer(output, delimiter='\t')
@@ -313,7 +300,7 @@ def libro_compras(periodo: str = Query(...), db: Session = Depends(get_db), curr
 
 @router.get("/declaracion-iva")
 def declaracion_iva(periodo: str = Query(...), db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
-    ventas = ventas_periodo(db, periodo).filter(Venta.tenant_id == current_user.tenant_id).all()
+    ventas = ventas_periodo(db, current_user.tenant_id, periodo).all()
     inicio, fin = periodo_rango(periodo)
     compras = db.query(Compra).filter(
         Compra.fecha >= inicio,
@@ -324,7 +311,7 @@ def declaracion_iva(periodo: str = Query(...), db: Session = Depends(get_db), cu
     credito = sum(to_float(c.iva) for c in compras)
     base_ventas = sum(to_float(v.subtotal) for v in ventas)
     base_compras = sum(to_float(c.subtotal) for c in compras)
-    tasa = _tasa_actual_tenant(db, current_user.tenant_id)
+    tasa = tasa_actual(db, current_user.tenant_id)
 
     # Calcular retenciones soportadas
     from backend.models.erp_extended import RetencionIVA
@@ -405,7 +392,7 @@ def guardar_borrador_iva(body: dict, db: Session = Depends(get_db), current_user
         decl = DeclaracionIVA(
             periodo=periodo,
             estado="BORRADOR",
-            tasa_cambio_bs=_tasa_actual_tenant(db, current_user.tenant_id),
+            tasa_cambio_bs=tasa_actual(db, current_user.tenant_id),
             tenant_id=current_user.tenant_id,
         )
         db.add(decl)
@@ -426,7 +413,7 @@ def finalizar_iva(body: dict, db: Session = Depends(get_db), current_user: Profi
     if not decl:
         decl = DeclaracionIVA(
             periodo=periodo,
-            tasa_cambio_bs=_tasa_actual_tenant(db, current_user.tenant_id),
+            tasa_cambio_bs=tasa_actual(db, current_user.tenant_id),
             tenant_id=current_user.tenant_id,
         )
         db.add(decl)
@@ -639,8 +626,8 @@ def igtf(periodo: str, quincena: str = "1", db: Session = Depends(get_db), curre
     except:
         y, m = 2026, 7
 
-    query = ventas_periodo(db, periodo).filter(Venta.estado == "ACTIVA", Venta.tenant_id == current_user.tenant_id)
-    
+    query = ventas_periodo(db, current_user.tenant_id, periodo)
+
     if quincena == "1":
         query = query.filter(extract('day', Venta.fecha) <= 15)
         rango = f"01/{m:02d}/{y} al 15/{m:02d}/{y}"
@@ -706,7 +693,7 @@ def exportar_igtf(formato: str, periodo: str, quincena: str, db: Session = Depen
     except:
         y, m = 2026, 7
 
-    query = ventas_periodo(db, periodo).filter(Venta.estado == "ACTIVA", Venta.tenant_id == current_user.tenant_id)
+    query = ventas_periodo(db, current_user.tenant_id, periodo)
     if quincena == "1":
         query = query.filter(extract('day', Venta.fecha) <= 15)
     else:

@@ -45,11 +45,11 @@ def principal_dashboard(db: Session = Depends(get_db), current_user: Profile = D
     valor_inv = db.query(func.sum(Producto.stock * Producto.costo_usd)).filter(
         Producto.tenant_id == current_user.tenant_id
     ).scalar() or 0
-    ventas_mes = ventas_periodo(db, datetime.now(timezone.utc).strftime("%Y-%m")).filter(
-        Venta.tenant_id == current_user.tenant_id
+    ventas_mes = ventas_periodo(
+        db, current_user.tenant_id, datetime.now(timezone.utc).strftime("%Y-%m")
     ).all()
     utilidad = sum(to_float(v.subtotal) for v in ventas_mes) * 0.25
-    tasa = tasa_actual(db)
+    tasa = tasa_actual(db, current_user.tenant_id)
 
     # ── Resumen 7 días reales ──────────────────────────────────────────────────
     desde_7d = datetime.now(timezone.utc) - timedelta(days=7)
@@ -133,7 +133,7 @@ def pos_contexto(db: Session = Depends(get_db), current_user: Profile = Depends(
     ventas_recientes = db.query(Venta).filter(
         Venta.estado == "ACTIVA", Venta.tenant_id == current_user.tenant_id
     ).order_by(Venta.fecha.desc()).limit(10).all()
-    tasa = tasa_actual(db)
+    tasa = tasa_actual(db, current_user.tenant_id)
 
     # Calcular ventas de hoy
     hoy_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -282,7 +282,7 @@ def estado_cuenta_cliente(cliente_id: int = Query(None), rif: str = Query(None),
     cxc = db.query(CuentaPorCobrar).filter(
         CuentaPorCobrar.cliente_id == cli.id, CuentaPorCobrar.tenant_id == current_user.tenant_id
     ).order_by(CuentaPorCobrar.fecha_emision).all()
-    tasa = tasa_actual(db)
+    tasa = tasa_actual(db, current_user.tenant_id)
     saldo = sum(to_float(r.monto_total - r.monto_pagado) for r in cxc if r.estado != "PAGADA")
     
     movimientos = []
@@ -695,7 +695,7 @@ def ajuste_inflacion(db: Session = Depends(get_db), current_user = Depends(get_c
         Producto.stock > 0,
         Producto.tenant_id == current_user.tenant_id
     ).all()
-    tasa = Decimal(str(tasa_actual(db)))
+    tasa = Decimal(str(tasa_actual(db, current_user.tenant_id)))
     
     # Obtener el INPC de cierre (Mayo 2026 = 124.0)
     inpc_cierre_obj = db.query(INPCIndice).filter(INPCIndice.anio == 2026, INPCIndice.mes == 5).first()
@@ -1602,7 +1602,7 @@ def listar_bancos(db: Session = Depends(get_db), current_user = Depends(get_curr
     result = []
     for c in cuentas:
         saldo_usd = to_float(c.saldo_actual_usd)
-        tasa = to_float(tasa_actual(db)) or 36.42
+        tasa = to_float(tasa_actual(db, current_user.tenant_id)) or 36.42
         saldo_bs = saldo_usd * tasa
         diferencia = 0.0 # fallback
         result.append({
@@ -1723,7 +1723,7 @@ async def importar_movimientos_csv(
     rows = list(reader)
     
     inserted = 0
-    tasa_act = to_float(tasa_actual(db)) or 36.42
+    tasa_act = to_float(tasa_actual(db, current_user.tenant_id)) or 36.42
     
     for row in rows:
         fecha_str = row.get("FECHA") or row.get("DATE_VAL") or row.get("fecha") or ""
@@ -2428,7 +2428,7 @@ def confirmar_transferencia(transferencia_id: int, db: Session = Depends(get_db)
     cuenta_origen = db.query(CuentaBancaria).filter(CuentaBancaria.id == transferencia.cuenta_origen_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
     cuenta_destino = db.query(CuentaBancaria).filter(CuentaBancaria.id == transferencia.cuenta_destino_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
     monto_bs = to_float(transferencia.monto_bs)
-    tasa = to_float(tasa_actual(db)) or 36.42
+    tasa = to_float(tasa_actual(db, current_user.tenant_id)) or 36.42
     monto_usd = monto_bs / tasa if tasa > 0 else 0.0
     
     if cuenta_origen:

@@ -236,7 +236,7 @@ def create_requisicion(req: RequisicionCreate, db: Session = Depends(get_db), cu
         new_numero = f"REQ-{(max_id + 1):08d}"
         
         # Get tasa actual
-        tasa = tasa_actual(db)
+        tasa = tasa_actual(db, current_user.tenant_id)
         
         # Guardar en base de datos. Se omite area/descripcion porque no existen en tabla actual
         # Se guarda el solicitante con el nombre y el area para no perder el dato
@@ -2003,7 +2003,7 @@ def tesoreria_dashboard(db: Session = Depends(get_db), current_user = Depends(ge
 @tesoreria_router.get("/bancos")
 def listar_bancos(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     cuentas = db.query(CuentaBancaria).filter(CuentaBancaria.tenant_id == current_user.tenant_id).all()
-    tasa = tasa_actual(db)
+    tasa = tasa_actual(db, current_user.tenant_id)
     res = []
     for c in cuentas:
         saldo_usd = to_float(c.saldo_actual_usd)
