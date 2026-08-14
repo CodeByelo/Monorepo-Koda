@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from backend.core.database import get_db
 from backend.models.operations import Producto, Venta, KardexMovimiento, Cliente
+from backend.models.erp_extended import AuditoriaLog, Vendedor
 from backend.schemas.operations import VentaCreate, VentaResponse, VentaReporteResponse
 from backend.core.security import get_current_user, require_role
 from backend.utils.idempotency import require_idempotency
@@ -101,6 +102,28 @@ def registrar_venta_y_cxc(
             dias_credito=venta_in.dias_credito,
             vendedor_id=venta_in.vendedor_id,
         )
+
+        # 4. Auditoría (mismo patrón que facturacion.py/bot_api.py: cada router
+        # que invoca procesar_emision_factura registra su propio log dentro de
+        # su propia transacción). Se incluye el vendedor asignado (si lo hay)
+        # para la bitácora de actividad por vendedor.
+        vendedor_detalle = ""
+        if resultado.venta.vendedor_id is not None:
+            vendedor = db.query(Vendedor).filter(Vendedor.id == resultado.venta.vendedor_id).first()
+            nombre_vendedor = vendedor.nombre if vendedor else "?"
+            vendedor_detalle = f" | Vendedor: {nombre_vendedor} (ID {resultado.venta.vendedor_id})"
+
+        db.add(AuditoriaLog(
+            tenant_id=tenant_id,
+            usuario=f"{current_user.email} (ID:{current_user.id})",
+            accion="VENTA_CREADA",
+            modulo="VENTAS",
+            detalle=(
+                f"Venta creada: {resultado.numero_factura} | "
+                f"Cliente: {cliente.nombre} ({cliente.rif}){vendedor_detalle} | "
+                f"Total: {venta_in.moneda_pago or ''} {resultado.monto_total}"
+            ),
+        ))
 
         # Confirmación de la transacción atómica
         db.commit()
@@ -224,7 +247,13 @@ def anular_venta(
     try:
         # 1. Revertir el estado de la factura
         venta.estado = "ANULADA"
-        
+
+        vendedor_detalle = ""
+        if venta.vendedor_id is not None:
+            vendedor = db.query(Vendedor).filter(Vendedor.id == venta.vendedor_id).first()
+            nombre_vendedor = vendedor.nombre if vendedor else "?"
+            vendedor_detalle = f" | Vendedor original: {nombre_vendedor} (ID {venta.vendedor_id})"
+
         # 2. Devolver el stock a cada producto y registrar en Kardex Inmutable
         producto_ids = [detalle.producto_id for detalle in venta.detalles]
         unique_producto_ids = list(set(producto_ids))
@@ -249,7 +278,19 @@ def anular_venta(
             movimientos_reversos.append(movimiento_reverso)
             
         db.add_all(movimientos_reversos)
-            
+
+        # 3. Auditoría de la anulación (bitácora de actividad por vendedor)
+        db.add(AuditoriaLog(
+            tenant_id=current_user.tenant_id,
+            usuario=f"{current_user.email} (ID:{current_user.id})",
+            accion="VENTA_ANULADA",
+            modulo="VENTAS",
+            detalle=(
+                f"Venta anulada: {venta.numero_factura}{vendedor_detalle} | "
+                f"Total: {venta.total_usd}"
+            ),
+        ))
+
         db.commit()
         db.refresh(venta)
         return venta
