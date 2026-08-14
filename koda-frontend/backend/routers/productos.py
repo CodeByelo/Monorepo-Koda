@@ -48,7 +48,15 @@ def crear_producto(producto: ProductoCreate, db: Session = Depends(get_db), curr
     ).first()
     if db_producto:
         raise HTTPException(status_code=400, detail="El SKU ya existe")
-    nuevo_producto = Producto(**producto.model_dump(), tenant_id=current_user.tenant_id)
+    datos = producto.model_dump()
+    # Fallback: el tier "Detal" nunca debe quedar vacío para un producto
+    # nuevo. Si el usuario no especifica una tarifa de detal explícita,
+    # se asume igual al precio base (precio_usd). Mayor/Gran Mayor sí pueden
+    # quedar sin configurar: la facturación cae de vuelta a precio_usd para
+    # esos tiers (ver facturacion helpers en el frontend).
+    if datos.get("precio_detal") is None:
+        datos["precio_detal"] = datos["precio_usd"]
+    nuevo_producto = Producto(**datos, tenant_id=current_user.tenant_id)
     db.add(nuevo_producto)
     db.commit()
     db.refresh(nuevo_producto)
@@ -82,7 +90,10 @@ def actualizar_producto(producto_id: int, producto_update: ProductoCreate, db: S
     if duplicado:
         raise HTTPException(status_code=400, detail="El SKU ya está en uso por otro producto")
 
-    for key, value in producto_update.model_dump().items():
+    datos = producto_update.model_dump()
+    if datos.get("precio_detal") is None:
+        datos["precio_detal"] = datos["precio_usd"]
+    for key, value in datos.items():
         setattr(producto, key, value)
     db.commit()
     db.refresh(producto)

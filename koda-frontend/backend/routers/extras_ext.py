@@ -150,7 +150,16 @@ def pos_contexto(db: Session = Depends(get_db), current_user: Profile = Depends(
         "total_hoy": total_hoy,
         "count_hoy": count_hoy,
         "productos": [
-            {"id": p.id, "sku": p.sku, "nombre": p.nombre, "precio": to_float(p.precio_usd), "stock": p.stock}
+            {
+                "id": p.id,
+                "sku": p.sku,
+                "nombre": p.nombre,
+                "precio": to_float(p.precio_usd),
+                "precio_detal": to_float(p.precio_detal) if p.precio_detal is not None else None,
+                "precio_mayor": to_float(p.precio_mayor) if p.precio_mayor is not None else None,
+                "precio_gran_mayor": to_float(p.precio_gran_mayor) if p.precio_gran_mayor is not None else None,
+                "stock": p.stock,
+            }
             for p in productos
         ],
         "tickets_recientes": [
