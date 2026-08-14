@@ -26,9 +26,27 @@ async def main():
     env_path = Path(__file__).parent / ".env"
     load_dotenv(dotenv_path=env_path)
     db_url = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL")
-    
+
     if not db_url:
         print("Error: DATABASE_URL or SUPABASE_DB_URL is not set!", flush=True)
+        return
+
+    if os.getenv("HARD_RESET_CONFIRM") != "yes-wipe-all-tenants":
+        print(
+            "Refusing to run: this script TRUNCATEs almost every table and deletes "
+            "every user account except 'hrodriguez'. It is NOT scoped to a single "
+            "tenant - it wipes ALL tenants' data.\n"
+            "Set HARD_RESET_CONFIRM=yes-wipe-all-tenants in the environment to proceed.",
+            flush=True,
+        )
+        return
+
+    db_host = db_url.split("@")[-1].split("/")[0] if "@" in db_url else db_url
+    typed = input(
+        f"Type the database host ('{db_host}') to confirm you want to wipe it: "
+    ).strip()
+    if typed != db_host:
+        print("Confirmation text did not match. Aborting.", flush=True)
         return
 
     print("Connecting to database...", flush=True)
