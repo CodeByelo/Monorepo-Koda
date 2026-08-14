@@ -99,6 +99,7 @@ def registrar_venta_y_cxc(
             metodo_pago=venta_in.metodo_pago,
             moneda_documento=venta_in.moneda_pago,
             dias_credito=venta_in.dias_credito,
+            vendedor_id=venta_in.vendedor_id,
         )
 
         # Confirmación de la transacción atómica
@@ -109,6 +110,11 @@ def registrar_venta_y_cxc(
     except HTTPException as he:
         db.rollback()
         raise he
+    except ValueError as e:
+        # Errores de validación de negocio (p.ej. vendedor_id inválido/ajeno
+        # al tenant): son un error del cliente, no una falla del servidor.
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         db.rollback()
         raise HTTPException(

@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 from backend.models.core import TasaCambio
 from backend.models.fiscal import ReglaFiscal, CorrelativoFiscal
 from backend.models.operations import Venta, VentaDetalle, KardexMovimiento
-from backend.models.erp_extended import CuentaPorCobrar
+from backend.models.erp_extended import CuentaPorCobrar, Vendedor
 from backend.services.contabilidad import ContabilidadService
 
 TWO_PLACES = Decimal("0.01")
@@ -63,6 +63,7 @@ class ResultadoFactura:
     retencion_iva: Decimal
     aplica_igtf: bool
     tasa_bs: Decimal
+    comision_usd: Decimal
 
 
 def derivar_aplica_igtf(metodo_pago: str, moneda: Optional[str]) -> bool:
@@ -111,6 +112,7 @@ def procesar_emision_factura(
     metodo_pago: str,
     moneda_documento: Optional[str],
     dias_credito: int = 0,
+    vendedor_id: Optional[int] = None,
 ) -> ResultadoFactura:
     if not lineas:
         raise ValueError("La factura debe tener al menos un detalle.")
@@ -149,6 +151,44 @@ def procesar_emision_factura(
     monto_igtf_r = monto_igtf.quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
     retencion_iva_r = retencion_iva.quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
     monto_total_r = monto_total.quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
+
+    # Monto neto de la CxC (lo que efectivamente se espera cobrar de esta
+    # factura). Se calcula aquí, antes de crear la Venta, porque es también
+    # la base de la comisión del vendedor (ver más abajo): es la cifra que,
+    # una vez cobrada en su totalidad, coincidirá con el "monto cobrado" que
+    # usa `reporte_vendedores` para su cálculo de comisión — así el valor
+    # congelado en `Venta.comision_usd` queda alineado con esa misma
+    # convención (comisión sobre el monto que el vendedor efectivamente
+    # generará a cobrar), en vez de usar el total bruto o la base imponible.
+    monto_neto_cxc = (monto_total_r - retencion_iva_r).quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
+
+    # --- Vendedor y comisión (congelada a la tasa vigente del vendedor en
+    # el momento de la emisión) ---
+    vendedor = None
+    if vendedor_id is not None:
+        vendedor = (
+            db.query(Vendedor)
+            .filter(Vendedor.id == vendedor_id, Vendedor.tenant_id == tenant_id)
+            .first()
+        )
+        if not vendedor:
+            # Nunca ignorar en silencio un vendedor_id inválido/ajeno al tenant:
+            # mejor rechazar la operación que asociar la venta a un vendedor
+            # equivocado o dejarla "huérfana" sin que nadie se entere.
+            raise ValueError(
+                f"El vendedor {vendedor_id} no existe o no pertenece a esta empresa."
+            )
+
+    if vendedor is not None:
+        tasa_comision = Decimal(str(vendedor.porcentaje_comision)) / Decimal("100")
+        comision_usd = (monto_neto_cxc * tasa_comision).quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
+    else:
+        # Venta deliberadamente sin vendedor asignado: 0.00, NO NULL.
+        # NULL en `Venta.comision_usd` está reservado exclusivamente para
+        # ventas anteriores a la migración de esta columna, cuyo valor real
+        # se desconoce (ver comentario en el modelo `Venta`). Una venta nueva
+        # sin vendedor es un hecho conocido: su comisión es cero.
+        comision_usd = Decimal("0.00")
 
     fecha_venta = datetime.now(timezone.utc)
 
@@ -192,6 +232,8 @@ def procesar_emision_factura(
         tasa_cambio_bs=tasa_bs,
         estado="ACTIVA",
         creado_por=current_user.id,
+        vendedor_id=vendedor.id if vendedor is not None else None,
+        comision_usd=comision_usd,
         tenant_id=tenant_id,
     )
     db.add(nueva_venta)
@@ -219,7 +261,6 @@ def procesar_emision_factura(
 
     # --- Cuenta por Cobrar ---
     fecha_venc = fecha_venta + timedelta(days=dias_credito)
-    monto_neto_cxc = (monto_total_r - retencion_iva_r).quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
     cxc = CuentaPorCobrar(
         cliente_id=cliente.id,
         venta_id=nueva_venta.id,
@@ -253,4 +294,5 @@ def procesar_emision_factura(
         retencion_iva=retencion_iva_r,
         aplica_igtf=aplica_igtf,
         tasa_bs=tasa_bs,
+        comision_usd=comision_usd,
     )

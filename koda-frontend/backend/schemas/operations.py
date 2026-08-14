@@ -72,6 +72,7 @@ class VentaCreate(BaseModel):
     moneda_pago: str = Field(..., pattern="^(Bs|USD)$")
     dias_credito: int = Field(default=0, ge=0)
     detalles: List[VentaDetalleCreate] = Field(..., min_length=1)
+    vendedor_id: Optional[int] = None
 
 class FacturaDetalleRequest(BaseModel):
     producto_id: Union[str, int]
@@ -85,6 +86,7 @@ class FacturaEmisionRequest(BaseModel):
     aplica_igtf: Optional[bool] = False
     moneda_documento: Optional[str] = "USD"
     detalles: List[FacturaDetalleRequest] = Field(..., min_length=1)
+    vendedor_id: Optional[int] = None
 
 class VentaResponse(BaseModel):
     id: int

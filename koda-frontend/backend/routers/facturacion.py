@@ -176,6 +176,7 @@ def emitir_factura_fiscal(
             metodo_pago=metodo_pago,
             moneda_documento=moneda,
             dias_credito=0,
+            vendedor_id=body.vendedor_id,
         )
 
         now = resultado.venta.fecha
@@ -223,6 +224,11 @@ def emitir_factura_fiscal(
     except HTTPException:
         db.rollback()
         raise
+    except ValueError as e:
+        # Errores de validación de negocio (p.ej. vendedor_id inválido/ajeno
+        # al tenant): son un error del cliente, no una falla del servidor.
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         db.rollback()
         raise HTTPException(
