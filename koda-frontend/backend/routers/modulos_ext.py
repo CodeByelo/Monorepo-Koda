@@ -3819,23 +3819,60 @@ def rentabilidad_productos(db: Session = Depends(get_db), current_user = Depends
     }
 
 
+def _parse_vendedor_ids(vendedor_ids: str = None):
+    """Parsea el query param `vendedor_ids` ("1,2,3") a una lista de enteros.
+    Devuelve None cuando no se envía el filtro (comportamiento: todos los
+    vendedores, igual que antes de este filtro)."""
+    if not vendedor_ids:
+        return None
+    ids = []
+    for raw in vendedor_ids.split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            ids.append(int(raw))
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"vendedor_ids inválido: '{raw}' no es un ID numérico.",
+            )
+    return ids or None
+
+
 @reportes_router.get("/vendedores")
-def reporte_vendedores(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+def reporte_vendedores(vendedor_ids: str = None, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     from backend.models.erp_extended import Vendedor, CuentaPorCobrar
     from backend.models.operations import Venta
     from datetime import datetime, timezone
-    
-    ventas = db.query(Venta).filter(Venta.tenant_id == current_user.tenant_id, Venta.estado == "ACTIVA").all()
-    cxc = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.tenant_id == current_user.tenant_id).all()
-    
+
+    ids_filtro = _parse_vendedor_ids(vendedor_ids)
+
+    ventas_query = db.query(Venta).filter(Venta.tenant_id == current_user.tenant_id, Venta.estado == "ACTIVA")
+    if ids_filtro is not None:
+        ventas_query = ventas_query.filter(Venta.vendedor_id.in_(ids_filtro))
+    ventas = ventas_query.all()
+
+    cxc_query = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.tenant_id == current_user.tenant_id)
+    if ids_filtro is not None:
+        # Restringimos la CxC a las ventas ya filtradas por vendedor (evita
+        # una segunda consulta ambigua vía relationship y mantiene todo
+        # tenant-scoped).
+        venta_ids_filtradas = [v.id for v in ventas]
+        cxc_query = cxc_query.filter(CuentaPorCobrar.venta_id.in_(venta_ids_filtradas))
+    cxc = cxc_query.all()
+
     total_facturado = sum(to_float(v.total_usd) for v in ventas)
     total_cobrado = sum(to_float(c.monto_pagado_usd) for c in cxc)
     sales_force = []
-    
-    vendedores = db.query(Vendedor).filter(
+
+    vendedores_query = db.query(Vendedor).filter(
         Vendedor.tenant_id == current_user.tenant_id,
         Vendedor.activo == True
-    ).all()
+    )
+    if ids_filtro is not None:
+        vendedores_query = vendedores_query.filter(Vendedor.id.in_(ids_filtro))
+    vendedores = vendedores_query.all()
 
     # --- Comisión: usar el valor REAL calculado y persistido en cada venta
     # (Venta.comision_usd, congelado a la tasa vigente del vendedor en el
@@ -3860,7 +3897,12 @@ def reporte_vendedores(db: Session = Depends(get_db), current_user = Depends(get
         comision_estimada_legacy = cobrado_sin_dato * 0.05
         return comision_real + comision_estimada_legacy
 
-    if not vendedores:
+    if not vendedores and ids_filtro is None:
+        # Fallback histórico: tenant sin vendedores registrados en absoluto.
+        # Si el usuario filtró por vendedor_ids y ninguno coincidió, NO se
+        # aplica este fallback (mostraría un total "Vendedor Interno" que no
+        # respeta el filtro que el usuario pidió) — simplemente cae al bloque
+        # `else` con `vendedores` vacío, que produce una lista vacía.
         v_billed = total_facturado
         v_collected = total_cobrado
         v_efficiency = (v_collected / v_billed * 100.0) if v_billed > 0 else 100.0
@@ -4091,7 +4133,7 @@ def reporte_excepciones(db: Session = Depends(get_db), current_user = Depends(ge
 
 
 @reportes_router.get("/exportar")
-def exportar_reporte(reporte: str, periodo: str = None, formato: str = "csv", db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+def exportar_reporte(reporte: str, periodo: str = None, formato: str = "csv", vendedor_ids: str = None, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     from fastapi.responses import StreamingResponse
     import io
     import csv
@@ -4189,7 +4231,7 @@ def exportar_reporte(reporte: str, periodo: str = None, formato: str = "csv", db
             writer.writerow([p["name"], p["price"], p["cost"], p["opExp"], p["netMargin"], p["netPercent"], p["status"]])
 
     elif reporte == "vendedores":
-        data_vend = reporte_vendedores(db, current_user)
+        data_vend = reporte_vendedores(vendedor_ids, db, current_user)
         writer.writerow(["REPORTE DE RENDIMIENTO FUERZA DE VENTAS Y COMISIONES"])
         writer.writerow([])
         writer.writerow(["Metricas"])
@@ -4355,13 +4397,25 @@ def descargar_factura_pdf(
 ):
     """Genera el PDF oficial de una factura (venta) usando ReportLab."""
     import io
+    import os
     from fastapi.responses import StreamingResponse
     from backend.models.operations import Venta
-    
-    venta = db.query(Venta).filter(Venta.id == id).first()
+    from backend.routers.entidades import _get_or_create_empresa, _logo_path
+
+    # Tenant-scoped lookup: filtro explícito por tenant_id, siguiendo la
+    # convención del resto de este router (ver /cotizaciones más abajo).
+    # Nota: current_tenant_id_var + with_loader_criteria (core/database.py)
+    # ya aplican un filtro automático de tenant a nivel de sesión de ORM,
+    # así que esto es defensa en profundidad, no el único guardado.
+    venta = db.query(Venta).filter(
+        Venta.id == id,
+        Venta.tenant_id == current_user.tenant_id,
+    ).first()
     if not venta:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
-        
+
+    empresa = _get_or_create_empresa(db, current_user)
+
     try:
         from reportlab.pdfgen import canvas
         from reportlab.lib.pagesizes import letter
@@ -4369,17 +4423,36 @@ def descargar_factura_pdf(
         from reportlab.platypus import Table, TableStyle
     except ImportError:
         raise HTTPException(status_code=500, detail="Librería reportlab no instalada.")
-        
+
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
     ancho, alto = letter
-    
-    # Emisor (Koda ERP default)
+
+    # Emisor (datos reales del tenant, con fallback si aún no hay Empresa configurada)
+    logo_path = _logo_path(current_user.tenant_id)
+    texto_x = 50
+    if os.path.exists(logo_path):
+        try:
+            # El logo se guarda por tenant (backend/static/logo_{tenant_id}.png);
+            # si en el futuro se sirve desde otro almacenamiento (S3, etc.)
+            # este drawImage deberá apuntar a esa nueva ruta/URL resuelta a archivo local.
+            logo_w, logo_h = 60, 45
+            c.drawImage(
+                logo_path,
+                50, alto - 50 - logo_h + 10,
+                width=logo_w, height=logo_h,
+                preserveAspectRatio=True, mask='auto'
+            )
+            texto_x = 50 + logo_w + 10
+        except Exception:
+            # Logo corrupto/ilegible: no debe tumbar la generación de la factura.
+            texto_x = 50
+
     c.setFont("Helvetica-Bold", 14)
-    c.drawString(50, alto - 50, "KODA ENTERPRISES, C.A.")
+    c.drawString(texto_x, alto - 50, empresa.razon_social)
     c.setFont("Helvetica", 10)
-    c.drawString(50, alto - 65, "R.I.F.: J-41234567-8")
-    c.drawString(50, alto - 78, "Av. Francisco de Miranda, Caracas, Venezuela")
+    c.drawString(texto_x, alto - 65, f"R.I.F.: {empresa.rif}")
+    c.drawString(texto_x, alto - 78, empresa.direccion or "")
     
     # Título Documento
     c.setFont("Helvetica-Bold", 16)
