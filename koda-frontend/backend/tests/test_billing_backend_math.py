@@ -12,7 +12,7 @@ from backend.main import app
 from backend.core.database import SessionLocal, get_db
 from backend.models.operations import Producto, Venta, VentaDetalle, Cliente
 from backend.models.core import Profile, TasaCambio
-from backend.core.security import get_current_user_from_token
+from backend.core.security import get_current_user
 
 # Mock de autenticación para que devuelva un perfil válido en los tests
 def mock_get_current_user():
@@ -27,7 +27,7 @@ def mock_get_current_user():
                 apellido="Auth",
                 email="test_auth@koda.com",
                 password_hash="...",
-                rol="Admin",
+                rol_id=2,  # 2 => "Admin" (ver Profile.rol en backend/models/core.py)
                 tenant_id=uuid.uuid4()
             )
             session.add(user)
@@ -38,7 +38,7 @@ def mock_get_current_user():
         session.close()
 
 # Inyectar el mock en la dependencia de FastAPI
-app.dependency_overrides[get_current_user_from_token] = mock_get_current_user
+app.dependency_overrides[get_current_user] = mock_get_current_user
 
 client = TestClient(app)
 
@@ -72,6 +72,13 @@ def main():
     
     session = SessionLocal()
     try:
+        # 0. Resolver el mismo tenant que usará el usuario autenticado simulado
+        # (mock_get_current_user), para que los fixtures de Producto/Cliente
+        # sean visibles bajo los filtros de aislamiento multi-tenant.
+        auth_profile = mock_get_current_user()
+        tenant_id = auth_profile.tenant_id
+        print(f"🏢 Tenant de prueba: {tenant_id}")
+
         # 1. Preparar tasa de cambio oficial (por ejemplo 36.50)
         tasa = session.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
         if not tasa:
@@ -93,7 +100,8 @@ def main():
             precio_usd=Decimal("10.00"),
             costo_usd=Decimal("5.00"),
             stock=Decimal("100.00"),
-            es_exento=False
+            es_exento=False,
+            tenant_id=tenant_id
         )
         # Producto B: precio 20.00 USD, costo 10.00, stock 100, exento (0% IVA)
         prod_b = Producto(
@@ -102,7 +110,8 @@ def main():
             precio_usd=Decimal("20.00"),
             costo_usd=Decimal("10.00"),
             stock=Decimal("100.00"),
-            es_exento=True
+            es_exento=True,
+            tenant_id=tenant_id
         )
         session.add(prod_a)
         session.add(prod_b)
@@ -111,15 +120,16 @@ def main():
         session.refresh(prod_b)
         print(f"✔️  Productos de prueba creados: TEST-A (${prod_a.precio_usd}) y TEST-B (${prod_b.precio_usd})")
         
-        # 3. Obtener o crear un cliente de prueba en la base de datos
-        cliente = session.query(Cliente).first()
+        # 3. Obtener o crear un cliente de prueba en la base de datos (mismo tenant)
+        cliente = session.query(Cliente).filter(Cliente.tenant_id == tenant_id).first()
         if not cliente:
             cliente = Cliente(
                 rif="J-12345678-9",
                 nombre="Cliente de Prueba",
                 telefono="0212-5555555",
                 email="cliente@test.com",
-                direccion="Caracas, Venezuela"
+                direccion="Caracas, Venezuela",
+                tenant_id=tenant_id
             )
             session.add(cliente)
             session.commit()
