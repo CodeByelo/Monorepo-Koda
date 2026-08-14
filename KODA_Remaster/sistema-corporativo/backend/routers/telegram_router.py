@@ -4,6 +4,7 @@ import logging
 import secrets
 import string
 import json
+from datetime import datetime, timezone
 from typing import Optional
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -26,6 +27,53 @@ router = APIRouter(prefix="/webhook", tags=["telegram"])
 
 # Token del bot de Telegram obtenido desde las variables de entorno
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+
+async def ensure_telegram_webhook() -> None:
+    """
+    Re-registra el webhook de Telegram apuntando a esta instancia desplegada.
+
+    Telegram solo entrega updates a UNA URL de webhook por bot token: la
+    última que haya llamado a setWebhook "gana". Si un desarrollador prueba
+    el bot localmente (p. ej. vía ngrok) y llama setWebhook manualmente hacia
+    su túnel local, la instancia de Render deja de recibir mensajes hasta que
+    alguien vuelva a apuntar el webhook al dominio público — y ese fue
+    exactamente el síntoma reportado ("el bot solo responde si mi máquina
+    local está corriendo").
+
+    Esta función se ejecuta en el evento startup del backend desplegado y
+    reclama el webhook cada vez que el proceso arranca, así la instancia de
+    Render siempre recupera el control sin intervención manual. Solo se activa
+    si RENDER_SELF_URL está configurada (igual que el keep-alive de
+    core/scheduler.py) para que el desarrollo local NUNCA le robe el webhook
+    a producción sin querer.
+    """
+    self_url = os.getenv("RENDER_SELF_URL", "").strip().rstrip("/")
+    if not self_url:
+        logger.info(
+            "[TELEGRAM] RENDER_SELF_URL no configurada — se omite el registro "
+            "automático de webhook (entorno de desarrollo local)."
+        )
+        return
+
+    if not TELEGRAM_BOT_TOKEN:
+        logger.warning(
+            "[TELEGRAM] TELEGRAM_BOT_TOKEN no configurado — no se puede registrar el webhook."
+        )
+        return
+
+    webhook_url = f"{self_url}/webhook/telegram"
+    api_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(api_url, json={"url": webhook_url})
+            data = response.json()
+            if data.get("ok"):
+                logger.info(f"[TELEGRAM] Webhook registrado correctamente hacia {webhook_url}")
+            else:
+                logger.error(f"[TELEGRAM] Telegram rechazó el registro del webhook: {data}")
+    except Exception as e:
+        logger.error(f"[TELEGRAM] Error al registrar el webhook en el arranque: {e}")
 
 # =============================================================================
 # MODELOS PYDANTIC PARA PAYLOAD DEL WEBHOOK DE TELEGRAM
