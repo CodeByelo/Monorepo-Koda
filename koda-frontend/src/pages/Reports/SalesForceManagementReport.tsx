@@ -20,17 +20,23 @@ const SalesForceManagementReport = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showCriticalOnly, setShowCriticalOnly] = useState(false);
 
+  const [showCommissionModal, setShowCommissionModal] = useState(false);
+  const [commissionVendorId, setCommissionVendorId] = useState<string>('');
+  const [commissionValue, setCommissionValue] = useState<string>('');
+  const [isSavingCommission, setIsSavingCommission] = useState(false);
+
+  const fetchSalesForce = async () => {
+    try {
+      const res = await api.get<any>('/reportes/vendedores');
+      setData(res);
+    } catch (error) {
+      console.error("Error fetching sales force report:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchSalesForce = async () => {
-      try {
-        const res = await api.get<any>('/reportes/vendedores');
-        setData(res);
-      } catch (error) {
-        console.error("Error fetching sales force report:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
     fetchSalesForce();
   }, []);
 
@@ -43,8 +49,46 @@ const SalesForceManagementReport = () => {
     }
   };
 
+  // Vendedores con id conocido (los únicos que se pueden editar; el bucket
+  // "Vendedor Interno" que aparece cuando el tenant no tiene vendedores
+  // registrados no tiene un id de Vendedor real y no aplica aquí).
+  const vendedoresEditables = (data?.salesForce || []).filter((v: any) => v.id != null);
+
   const handleConfigureCommissions = () => {
-    setModalMessage("Las tasas de comisiones se configuran individualmente en la ficha de cada vendedor en el maestro de Fuerza de Ventas.");
+    if (vendedoresEditables.length === 0) {
+      setModalMessage("No hay vendedores registrados para configurar. Cree un vendedor primero en el maestro de Fuerza de Ventas.");
+      return;
+    }
+    const first = vendedoresEditables[0];
+    setCommissionVendorId(String(first.id));
+    setCommissionValue(String(first.porcentaje_comision ?? ''));
+    setShowCommissionModal(true);
+  };
+
+  const handleVendorSelectChange = (id: string) => {
+    setCommissionVendorId(id);
+    const v = vendedoresEditables.find((x: any) => String(x.id) === id);
+    setCommissionValue(v?.porcentaje_comision != null ? String(v.porcentaje_comision) : '');
+  };
+
+  const handleSaveCommission = async () => {
+    const pct = Number(commissionValue);
+    if (!commissionVendorId || Number.isNaN(pct) || pct < 0 || pct > 100) {
+      setModalMessage("Ingrese un porcentaje de comisión válido entre 0 y 100.");
+      return;
+    }
+    setIsSavingCommission(true);
+    try {
+      await api.patch(`/vendedores/${commissionVendorId}`, { porcentaje_comision: pct });
+      setShowCommissionModal(false);
+      await fetchSalesForce();
+      setModalMessage("Comisión actualizada correctamente.");
+    } catch (error: any) {
+      console.error("Error updating vendor commission:", error);
+      setModalMessage(error?.message || "Error al actualizar la comisión del vendedor.");
+    } finally {
+      setIsSavingCommission(false);
+    }
   };
 
   const metrics = data?.metrics || [];
@@ -234,6 +278,63 @@ const SalesForceManagementReport = () => {
                   className="bg-[#0b5156] text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all"
                 >
                   Aceptar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCommissionModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-[#0b5156] p-4 text-white flex items-center justify-between">
+              <h3 className="text-xs font-black uppercase tracking-widest">Configurar Comisión de Vendedor</h3>
+              <button
+                onClick={() => setShowCommissionModal(false)}
+                className="text-white/70 hover:text-white text-xs font-bold uppercase transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Vendedor</label>
+                <select
+                  value={commissionVendorId}
+                  onChange={(e) => handleVendorSelectChange(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-[#0b5156]/50 uppercase transition-all"
+                >
+                  {vendedoresEditables.map((v: any) => (
+                    <option key={v.id} value={v.id}>{v.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Porcentaje de Comisión (%)</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  value={commissionValue}
+                  onChange={(e) => setCommissionValue(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-[#0b5156]/50 transition-all"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setShowCommissionModal(false)}
+                  className="bg-white text-slate-500 px-6 py-2 rounded-xl text-[10px] font-black uppercase border border-slate-200 hover:bg-slate-50 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleSaveCommission}
+                  disabled={isSavingCommission}
+                  className="bg-[#0b5156] text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isSavingCommission ? 'Guardando...' : 'Guardar'}
                 </button>
               </div>
             </div>

@@ -33,6 +33,12 @@ interface Producto {
   es_exento: boolean;
 }
 
+interface Vendedor {
+  id: number;
+  nombre: string;
+  codigo: string;
+}
+
 interface FacturaRow {
   tempId: string;
   producto_id: string;
@@ -48,10 +54,12 @@ const getClientUuid = (id: number): string => {
 export default function NuevaFactura() {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [productos, setProductos] = useState<Producto[]>([]);
+  const [vendedores, setVendedores] = useState<Vendedor[]>([]);
   const [tasaBcv, setTasaBcv] = useState<number>(0);
   const [isLoadingTasa, setIsLoadingTasa] = useState<boolean>(true);
-  
+
   const [selectedClienteId, setSelectedClienteId] = useState<string>('');
+  const [selectedVendedorId, setSelectedVendedorId] = useState<string>('');
   const [monedaDocumento, setMonedaDocumento] = useState<'VED' | 'USD' | 'EUR'>('USD');
   const [metodoPago, setMetodoPago] = useState<'Efectivo' | 'Divisa' | 'Transferencia' | 'PagoMovil'>('Divisa');
   const [aplicaIgtf, setAplicaIgtf] = useState<boolean>(false);
@@ -77,16 +85,18 @@ export default function NuevaFactura() {
     
     const loadData = async () => {
       try {
-        const [clientsData, productsData] = await Promise.all([
+        const [clientsData, productsData, vendedoresData] = await Promise.all([
           api.get<Cliente[]>('/clientes').catch(() => []),
-          api.get<Producto[]>('/productos').catch(() => [])
+          api.get<Producto[]>('/productos').catch(() => []),
+          api.get<Vendedor[]>('/vendedores').catch(() => [])
         ]);
-        
+
         if (active) {
           const clientList = clientsData || [];
           const productList = productsData || [];
           setClientes(clientList);
           setProductos(productList);
+          setVendedores(vendedoresData || []);
 
           if (clientList.length > 0) {
             setSelectedClienteId(String(clientList[0].id));
@@ -263,6 +273,7 @@ export default function NuevaFactura() {
         moneda_documento: monedaDocumento,
         metodo_pago: metodoPago,
         aplica_igtf: appliesIgtf,
+        vendedor_id: selectedVendedorId ? Number(selectedVendedorId) : null,
         detalles: rows.map(r => ({
           producto_id: r.producto_id,
           descripcion: r.descripcion,
@@ -279,6 +290,7 @@ export default function NuevaFactura() {
       
       // Limpiar Formulario
       setSelectedClienteId('');
+      setSelectedVendedorId('');
       setMonedaDocumento('USD');
       setMetodoPago('Divisa');
       setAplicaIgtf(false);
@@ -497,6 +509,21 @@ export default function NuevaFactura() {
                   <option value="Efectivo">Efectivo (Bs.)</option>
                   <option value="Transferencia">Transferencia</option>
                   <option value="PagoMovil">Pago Móvil</option>
+                </select>
+              </div>
+
+              {/* Vendedor (opcional) */}
+              <div className="md:col-span-3 space-y-1.5">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Vendedor (opcional)</label>
+                <select
+                  value={selectedVendedorId}
+                  onChange={(e) => setSelectedVendedorId(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-[#0b5156]/50 uppercase transition-all"
+                >
+                  <option value="">-- Sin vendedor asignado --</option>
+                  {vendedores.map(v => (
+                    <option key={v.id} value={v.id}>{v.nombre} ({v.codigo})</option>
+                  ))}
                 </select>
               </div>
             </div>

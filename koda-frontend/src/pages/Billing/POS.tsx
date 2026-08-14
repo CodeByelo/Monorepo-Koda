@@ -26,6 +26,8 @@ const POS = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [clientes, setClientes] = useState<any[]>([]);
   const [client, setClient] = useState('');
+  const [vendedores, setVendedores] = useState<any[]>([]);
+  const [vendedorId, setVendedorId] = useState('');
   const [metodoPago, setMetodoPago] = useState<'Efectivo' | 'Divisa' | 'Transferencia' | 'PagoMovil'>('Divisa');
   const [toast, setToast] = useState<{message: string, type: 'error' | 'success'} | null>(null);
 
@@ -75,6 +77,10 @@ const POS = () => {
         }
       }
     }).catch(() => setClientes([]));
+
+    api.get<any[]>('/vendedores').then((data) => {
+      setVendedores(data || []);
+    }).catch(() => setVendedores([]));
   };
 
   useEffect(() => {
@@ -116,6 +122,7 @@ const POS = () => {
       metodo_pago: metodoPago,
       aplica_igtf: metodoPago === 'Divisa',
       moneda_documento: (metodoPago === 'Transferencia' || metodoPago === 'PagoMovil') ? 'VED' : 'USD',
+      vendedor_id: vendedorId ? parseInt(vendedorId, 10) : null,
       detalles: cart.map(item => ({
         producto_id: item.id,
         cantidad: item.qty,
@@ -198,7 +205,7 @@ const POS = () => {
         <div className="lg:col-span-2 space-y-6">
           <section className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
             <h3 className="text-xl font-black uppercase tracking-tight text-slate-800 font-mono">Búsqueda de Rubros</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
                <div className="space-y-1.5">
                   <label className="text-sm font-black text-slate-500 uppercase tracking-widest">Código / SKU / Nombre</label>
                   <div className="relative">
@@ -227,6 +234,21 @@ const POS = () => {
                      {clientes.length === 0 && (
                        <option value="">No hay clientes cargados</option>
                      )}
+                  </select>
+               </div>
+               <div className="space-y-1.5">
+                  <label className="text-sm font-black text-slate-500 uppercase tracking-widest">Vendedor (opcional)</label>
+                  <select
+                    value={vendedorId}
+                    onChange={(e) => setVendedorId(e.target.value)}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase"
+                  >
+                     <option value="">Sin vendedor asignado</option>
+                     {vendedores.map((v) => (
+                       <option key={v.id} value={v.id.toString()}>
+                         {v.nombre} ({v.codigo})
+                       </option>
+                     ))}
                   </select>
                </div>
             </div>
