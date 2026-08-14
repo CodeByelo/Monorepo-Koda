@@ -29,6 +29,21 @@ def _as_aware(dt):
         return dt.replace(tzinfo=timezone.utc)
     return dt
 
+
+def calcular_reserva_fiscal(db: Session, tenant_id) -> float:
+    """Single source of truth for 'Reserva Fiscal': sum of pending IVA/ISLR
+    withholdings owed to SENIAT. Used by both the Pagos and Tesorería
+    dashboards so the figure never diverges between modules."""
+    ret_iva = db.query(func.sum(RetencionIVA.monto_usd)).filter(
+        RetencionIVA.estado == "PENDIENTE",
+        RetencionIVA.tenant_id == tenant_id
+    ).scalar()
+    ret_islr = db.query(func.sum(RetencionISLR.monto_usd)).filter(
+        RetencionISLR.estado == "PENDIENTE",
+        RetencionISLR.tenant_id == tenant_id
+    ).scalar()
+    return to_float(ret_iva) + to_float(ret_islr)
+
 # --- COMPRAS ---
 compras_router = APIRouter(prefix="/compras", tags=["Compras"], dependencies=[Depends(get_current_user)])
 
@@ -1312,8 +1327,8 @@ def pagos_dashboard(db: Session = Depends(get_db), current_user = Depends(get_cu
         CuentaBancaria.tenant_id == current_user.tenant_id
     ).all()
     saldo_bruto_usd = sum(float(cb.saldo_actual_usd) for cb in cuentas)
-    
-    reserva_fiscal_usd = saldo_bruto_usd * 0.16
+
+    reserva_fiscal_usd = calcular_reserva_fiscal(db, current_user.tenant_id)
     operativo_real_usd = saldo_bruto_usd - reserva_fiscal_usd
 
     total_deuda_usd = deuda_indexada_usd + (deuda_fija_bs / tasa_val)
@@ -1882,15 +1897,7 @@ def tesoreria_dashboard(db: Session = Depends(get_db), current_user = Depends(ge
             "icono": c.banco[0].upper() if c.banco else "B"
         })
     
-    ret_iva = db.query(func.sum(RetencionIVA.monto_usd)).filter(
-        RetencionIVA.estado == "PENDIENTE",
-        RetencionIVA.tenant_id == current_user.tenant_id
-    ).scalar()
-    ret_islr = db.query(func.sum(RetencionISLR.monto_usd)).filter(
-        RetencionISLR.estado == "PENDIENTE",
-        RetencionISLR.tenant_id == current_user.tenant_id
-    ).scalar()
-    reserva_fiscal = to_float(ret_iva) + to_float(ret_islr)
+    reserva_fiscal = calcular_reserva_fiscal(db, current_user.tenant_id)
 
     efectivo_transito = db.query(func.sum(MovimientoBancario.monto_usd)).filter(
         MovimientoBancario.estado == "PENDIENTE",
