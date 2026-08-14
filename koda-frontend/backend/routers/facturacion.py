@@ -260,11 +260,14 @@ def emitir_factura_fiscal(
     cxc = CuentaPorCobrar(
         cliente_id=cliente.id,
         venta_id=nueva_venta.id,
-        monto_original=monto_cxc,
-        saldo=monto_cxc,
-        moneda=moneda,
+        numero_documento=numero_factura,
+        monto_total_usd=monto_cxc,
+        monto_pagado_usd=Decimal("0.00"),
+        tasa_cambio_bs=tasa_bs,
         estado="PENDIENTE",
         fecha_emision=now,
+        fecha_vencimiento=now,
+        tenant_id=current_user.tenant_id,
     )
     db.add(cxc)
 

@@ -207,7 +207,6 @@ def registrar_venta_y_cxc(
             numero_documento=numero_factura_final,
             monto_total_usd=monto_neto_cxc,
             monto_pagado_usd=Decimal('0.00'),
-            monto_restante_usd=monto_neto_cxc,
             tasa_cambio_bs=tasa_bs,
             fecha_emision=fecha_venta,
             fecha_vencimiento=fecha_venc,
