@@ -53,6 +53,7 @@ export default function NuevaFactura() {
   
   const [selectedClienteId, setSelectedClienteId] = useState<string>('');
   const [monedaDocumento, setMonedaDocumento] = useState<'VED' | 'USD' | 'EUR'>('USD');
+  const [metodoPago, setMetodoPago] = useState<'Efectivo' | 'Divisa' | 'Transferencia' | 'PagoMovil'>('Divisa');
   const [aplicaIgtf, setAplicaIgtf] = useState<boolean>(false);
   
   const [rows, setRows] = useState<FacturaRow[]>([
@@ -260,6 +261,7 @@ export default function NuevaFactura() {
       const payload = {
         cliente_id: clienteUuid,
         moneda_documento: monedaDocumento,
+        metodo_pago: metodoPago,
         aplica_igtf: appliesIgtf,
         detalles: rows.map(r => ({
           producto_id: r.producto_id,
@@ -278,6 +280,7 @@ export default function NuevaFactura() {
       // Limpiar Formulario
       setSelectedClienteId('');
       setMonedaDocumento('USD');
+      setMetodoPago('Divisa');
       setAplicaIgtf(false);
       setRows([{ tempId: 'init-row-1', producto_id: '', descripcion: '', cantidad: 1, precio_unitario: 0 }]);
     } catch (err: any) {
@@ -479,6 +482,21 @@ export default function NuevaFactura() {
                   <option value="USD">Dólares (USD)</option>
                   <option value="VED">Bolívares (VED)</option>
                   <option value="EUR">Euros (EUR)</option>
+                </select>
+              </div>
+
+              {/* Método de Pago */}
+              <div className="md:col-span-3 space-y-1.5">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Método de Pago</label>
+                <select
+                  value={metodoPago}
+                  onChange={(e) => setMetodoPago(e.target.value as any)}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-[#0b5156]/50 transition-all"
+                >
+                  <option value="Divisa">Divisa (efectivo/tarjeta en USD)</option>
+                  <option value="Efectivo">Efectivo (Bs.)</option>
+                  <option value="Transferencia">Transferencia</option>
+                  <option value="PagoMovil">Pago Móvil</option>
                 </select>
               </div>
             </div>

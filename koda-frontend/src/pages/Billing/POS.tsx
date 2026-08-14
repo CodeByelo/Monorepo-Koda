@@ -113,6 +113,7 @@ const POS = () => {
 
     const payload = {
       cliente_id: parseInt(client, 10),
+      metodo_pago: metodoPago,
       aplica_igtf: metodoPago === 'Divisa',
       moneda_documento: (metodoPago === 'Transferencia' || metodoPago === 'PagoMovil') ? 'VED' : 'USD',
       detalles: cart.map(item => ({
