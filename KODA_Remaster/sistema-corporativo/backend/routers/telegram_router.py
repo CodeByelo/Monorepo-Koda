@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from database.async_db import get_db_connection
 from auth.supabase_auth import get_current_user
 from redis.asyncio import Redis
+from services.bot_api_client import get_stock as bot_get_stock, registrar_venta, BotApiError
 
 # Almacenamiento temporal en memoria como fallback cuando Redis no esté disponible
 _TELEGRAM_LINK_TOKENS: dict = {}
@@ -86,14 +87,20 @@ class TelegramMessage(BaseModel):
     chat: TelegramChat
     text: Optional[str] = None
 
+class TelegramCallbackQuery(BaseModel):
+    id: str
+    data: Optional[str] = None
+    message: Optional[TelegramMessage] = None
+
 class TelegramUpdate(BaseModel):
     update_id: int
     message: Optional[TelegramMessage] = None
+    callback_query: Optional[TelegramCallbackQuery] = None
 
 # =============================================================================
 # FUNCIÓN AUXILIAR PARA ENVIAR MENSAJES A TELEGRAM
 # =============================================================================
-async def send_telegram_message(chat_id: int, text: str) -> None:
+async def send_telegram_message(chat_id: int, text: str, reply_markup: Optional[dict] = None) -> None:
     if not TELEGRAM_BOT_TOKEN:
         logger.warning(
             f"[TELEGRAM] TELEGRAM_BOT_TOKEN no está configurado. "
@@ -102,9 +109,12 @@ async def send_telegram_message(chat_id: int, text: str) -> None:
         return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(url, json={"chat_id": chat_id, "text": text})
+            response = await client.post(url, json=payload)
             response.raise_for_status()
             logger.info(f"[TELEGRAM] Mensaje enviado exitosamente al chat {chat_id}")
     except httpx.HTTPStatusError as e:
@@ -114,6 +124,21 @@ async def send_telegram_message(chat_id: int, text: str) -> None:
         )
     except Exception as e:
         logger.error(f"[TELEGRAM] Error inesperado al enviar mensaje a Telegram: {e}")
+
+
+async def answer_telegram_callback(callback_query_id: str, text: Optional[str] = None) -> None:
+    """Responde a un callback_query (botón inline) para quitar el "loading" del botón."""
+    if not TELEGRAM_BOT_TOKEN:
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+    payload = {"callback_query_id": callback_query_id}
+    if text:
+        payload["text"] = text
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(url, json=payload)
+    except Exception as e:
+        logger.error(f"[TELEGRAM] Error respondiendo callback_query: {e}")
 
 # Helper para guardar tokens de vinculación (Redis + Memoria)
 async def _save_link_token(code: str, payload: dict):
@@ -171,6 +196,262 @@ async def _delete_link_token(code: str):
         pass
 
 # =============================================================================
+# ESTADO TEMPORAL PARA CONFIRMACIÓN DE VENTAS (/venta) — Redis + memoria local
+# =============================================================================
+_PENDING_VENTAS: dict = {}
+_PENDING_VENTA_TTL_SECONDS = 300  # 5 minutos para confirmar/cancelar
+
+async def _save_pending_venta(token: str, payload: dict) -> None:
+    redis_key = f"telegram:pending_venta:{token}"
+    _PENDING_VENTAS[token] = {
+        "payload": payload,
+        "exp": datetime.now(timezone.utc).timestamp() + _PENDING_VENTA_TTL_SECONDS,
+    }
+    try:
+        redis_url = os.getenv("REDIS_URL", "").strip()
+        if redis_url:
+            r = Redis.from_url(redis_url)
+            await r.set(redis_key, json.dumps(payload), ex=_PENDING_VENTA_TTL_SECONDS)
+            await r.close()
+    except Exception as e:
+        logger.warning(f"[TELEGRAM] Redis no disponible para guardar venta pendiente: {e}")
+
+async def _get_pending_venta(token: str) -> Optional[dict]:
+    redis_key = f"telegram:pending_venta:{token}"
+    try:
+        redis_url = os.getenv("REDIS_URL", "").strip()
+        if redis_url:
+            r = Redis.from_url(redis_url)
+            val = await r.get(redis_key)
+            await r.close()
+            if val:
+                return json.loads(val)
+    except Exception as e:
+        logger.warning(f"[TELEGRAM] Redis no disponible para leer venta pendiente: {e}")
+
+    if token in _PENDING_VENTAS:
+        entry = _PENDING_VENTAS[token]
+        if datetime.now(timezone.utc).timestamp() < entry["exp"]:
+            return entry["payload"]
+        else:
+            del _PENDING_VENTAS[token]
+    return None
+
+async def _delete_pending_venta(token: str) -> None:
+    if token in _PENDING_VENTAS:
+        del _PENDING_VENTAS[token]
+    try:
+        redis_url = os.getenv("REDIS_URL", "").strip()
+        if redis_url:
+            r = Redis.from_url(redis_url)
+            await r.delete(f"telegram:pending_venta:{token}")
+            await r.close()
+    except Exception:
+        pass
+
+# =============================================================================
+# COMANDO /venta — VALIDACIÓN DE PERMISO DE VENDEDOR Y PARSEO
+# =============================================================================
+async def _get_vendedor_for_user(conn, tenant_id: str, user_id: str) -> Optional[dict]:
+    """
+    Verifica si el usuario vinculado a la sesión de Telegram tiene un perfil de
+    Vendedor activo asociado (vendedores.user_id -> profiles.id).
+
+    Esta tabla `vendedores` ya existe EN ESTE MISMO backend (ver
+    routers/vendedores_router.py — GET /vendedores/me usa exactamente este
+    vínculo), así que la verificación se hace con una consulta SQL local: NO
+    hace falta llamar a koda-frontend/backend para saber si alguien es
+    vendedor.
+    """
+    try:
+        row = await conn.fetchrow(
+            """
+            SELECT id, nombre, porcentaje_comision
+            FROM vendedores
+            WHERE user_id = $1::uuid
+              AND (tenant_id = $2::uuid OR tenant_id IS NULL)
+              AND activo = true
+            """,
+            uuid.UUID(user_id), uuid.UUID(tenant_id)
+        )
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"[TELEGRAM] Error verificando perfil de vendedor: {e}")
+        return None
+
+
+def _parse_venta_command(text: str):
+    """
+    Parsea "/venta <sku> <cantidad> [rif_cliente]".
+    Retorna (sku, cantidad, rif_cliente) o levanta ValueError con un mensaje de uso.
+    """
+    parts = text.split()
+    if len(parts) < 3:
+        raise ValueError(
+            "Uso: /venta <sku> <cantidad> [rif_cliente]\n"
+            "Ejemplo: /venta PROD-001 5 J-12345678-9"
+        )
+    sku = parts[1].strip()
+    try:
+        cantidad = int(parts[2])
+        if cantidad <= 0:
+            raise ValueError()
+    except ValueError:
+        raise ValueError(
+            "La cantidad debe ser un número entero positivo.\n"
+            "Uso: /venta <sku> <cantidad> [rif_cliente]"
+        )
+    rif_cliente = parts[3].strip() if len(parts) > 3 else None
+    return sku, cantidad, rif_cliente
+
+
+async def _handle_venta_command(command_text: str, chat_id: int, session_row, conn) -> dict:
+    user_id = str(session_row["user_id"])
+    tenant_id = str(session_row["tenant_id"])
+
+    vendedor = await _get_vendedor_for_user(conn, tenant_id, user_id)
+    if not vendedor:
+        await send_telegram_message(
+            chat_id,
+            "❌ Tu cuenta no tiene un perfil de Vendedor activo asociado. "
+            "El comando /venta solo está disponible para vendedores registrados. "
+            "Contacta a un administrador si crees que esto es un error."
+        )
+        return {"status": "not_a_vendedor"}
+
+    try:
+        sku, cantidad, rif_cliente = _parse_venta_command(command_text)
+    except ValueError as e:
+        await send_telegram_message(chat_id, str(e))
+        return {"status": "invalid_command_format"}
+
+    try:
+        stock_info = await bot_get_stock(tenant_id, sku)
+    except BotApiError as e:
+        await send_telegram_message(chat_id, f"❌ No se pudo verificar el producto '{sku}': {e}")
+        return {"status": "stock_lookup_failed", "detail": str(e)}
+
+    stock_actual = stock_info.get("stock", stock_info.get("cantidad_disponible", "N/D"))
+    minimo = stock_info.get("minimo", stock_info.get("stock_minimo", "N/D"))
+    bajo_minimo = stock_info.get("below_minimum", stock_info.get("bajo_minimo", False))
+
+    token = secrets.token_urlsafe(8)
+    await _save_pending_venta(token, {
+        "tenant_id": tenant_id,
+        "vendedor_id": vendedor["id"],
+        "sku": sku,
+        "cantidad": cantidad,
+        "rif_cliente": rif_cliente,
+        "chat_id": chat_id,
+    })
+
+    alerta_stock = "\n⚠️ Este producto está por debajo del stock mínimo." if bajo_minimo else ""
+    preview = (
+        "🧾 Confirmar venta\n\n"
+        f"SKU: {sku}\n"
+        f"Cantidad: {cantidad}\n"
+        f"Cliente: {rif_cliente or 'N/A'}\n"
+        f"Stock actual: {stock_actual} (mínimo: {minimo}){alerta_stock}\n\n"
+        "¿Confirmas esta venta?"
+    )
+    reply_markup = {
+        "inline_keyboard": [[
+            {"text": "✅ Confirmar", "callback_data": f"confirmar_venta:{token}"},
+            {"text": "❌ Cancelar", "callback_data": f"cancelar_venta:{token}"},
+        ]]
+    }
+    await send_telegram_message(chat_id, preview, reply_markup=reply_markup)
+    return {"status": "confirmation_pending", "token": token}
+
+
+async def _handle_stock_command(command_text: str, chat_id: int, session_row) -> dict:
+    parts = command_text.split()
+    if len(parts) < 2:
+        await send_telegram_message(chat_id, "Uso: /stock <sku>\nEjemplo: /stock PROD-001")
+        return {"status": "invalid_command_format"}
+
+    sku = parts[1].strip()
+    tenant_id = str(session_row["tenant_id"])
+    try:
+        stock_info = await bot_get_stock(tenant_id, sku)
+    except BotApiError as e:
+        await send_telegram_message(chat_id, f"❌ No se pudo consultar el stock de '{sku}': {e}")
+        return {"status": "stock_lookup_failed", "detail": str(e)}
+
+    stock_actual = stock_info.get("stock", stock_info.get("cantidad_disponible", "N/D"))
+    minimo = stock_info.get("minimo", stock_info.get("stock_minimo", "N/D"))
+    bajo_minimo = stock_info.get("below_minimum", stock_info.get("bajo_minimo", False))
+    alerta = "\n⚠️ Por debajo del stock mínimo." if bajo_minimo else ""
+    msg = f"📦 SKU: {sku}\nStock actual: {stock_actual}\nStock mínimo: {minimo}{alerta}"
+    await send_telegram_message(chat_id, msg)
+    return {"status": "success"}
+
+
+async def _handle_callback_query(callback_query: TelegramCallbackQuery) -> dict:
+    """Procesa la respuesta del usuario a los botones inline Confirmar/Cancelar de /venta."""
+    data = callback_query.data or ""
+    chat_id = callback_query.message.chat.id if callback_query.message else None
+
+    if ":" not in data:
+        await answer_telegram_callback(callback_query.id)
+        return {"status": "ignored", "detail": "malformed callback data"}
+
+    action, token = data.split(":", 1)
+    if action not in ("confirmar_venta", "cancelar_venta"):
+        await answer_telegram_callback(callback_query.id)
+        return {"status": "ignored", "detail": "unknown action"}
+
+    pending = await _get_pending_venta(token)
+    if not pending:
+        await answer_telegram_callback(callback_query.id, "Esta operación ya expiró.")
+        if chat_id:
+            await send_telegram_message(
+                chat_id,
+                "⏱️ Esta confirmación expiró o ya fue procesada. Vuelve a iniciar la venta con /venta."
+            )
+        return {"status": "expired_or_missing"}
+
+    # Se borra inmediatamente para que el botón no pueda re-ejecutarse dos veces (doble tap).
+    await _delete_pending_venta(token)
+    await answer_telegram_callback(callback_query.id)
+
+    target_chat_id = pending.get("chat_id", chat_id)
+
+    if action == "cancelar_venta":
+        await send_telegram_message(target_chat_id, "🚫 Venta cancelada. No se realizó ningún cambio.")
+        return {"status": "cancelled"}
+
+    # action == "confirmar_venta"
+    try:
+        result = await registrar_venta(
+            tenant_id=pending["tenant_id"],
+            vendedor_id=pending["vendedor_id"],
+            cliente_rif=pending.get("rif_cliente"),
+            lineas=[{"sku": pending["sku"], "cantidad": pending["cantidad"]}],
+            # metodo_pago/moneda_documento no se capturan en el comando /venta
+            # (solo <sku> <cantidad> [rif_cliente] por especificación); se usan
+            # valores por defecto razonables. Ver reporte para el detalle de
+            # esta decisión de diseño.
+            metodo_pago="EFECTIVO",
+            moneda_documento="USD",
+        )
+    except BotApiError as e:
+        await send_telegram_message(target_chat_id, f"❌ No se pudo registrar la venta: {e}")
+        return {"status": "venta_failed", "detail": str(e)}
+
+    numero_factura = result.get("numero_factura", result.get("invoice_number", "N/D"))
+    total = result.get("total", result.get("monto_total", "N/D"))
+    comision = result.get("comision", result.get("commission", "N/D"))
+    msg = (
+        "✅ Venta registrada exitosamente.\n\n"
+        f"Factura: {numero_factura}\n"
+        f"Total: {total}\n"
+        f"Comisión: {comision}"
+    )
+    await send_telegram_message(target_chat_id, msg)
+    return {"status": "success", "invoice": numero_factura}
+
+# =============================================================================
 # ENDPOINT: POST /webhook/telegram
 # =============================================================================
 @router.post("/telegram/generate-token")
@@ -201,6 +482,9 @@ async def telegram_webhook(
     update: TelegramUpdate,
     conn = Depends(get_db_connection)
 ):
+    if update.callback_query:
+        return await _handle_callback_query(update.callback_query)
+
     if not update.message:
         return {"status": "ignored", "detail": "No message in update"}
 
@@ -337,6 +621,14 @@ async def telegram_webhook(
         # Dado que el bot ejecuta lecturas de consultas en nombre del tenant, 'app.current_tenant' es suficiente.
         # Sin embargo, si quisiéramos simular el rol de Administrator:
         # await conn.execute("SELECT set_config('app.current_user_role', 'Administrator', true)")
+
+        # 3.1 Comandos de negocio propios del bot (/venta y /stock), evaluados
+        #     antes que el catálogo genérico de bot_commands.
+        if command_text.startswith("/venta"):
+            return await _handle_venta_command(command_text, chat_id, session_row, conn)
+
+        if command_text.startswith("/stock"):
+            return await _handle_stock_command(command_text, chat_id, session_row)
 
         # 4. Buscar si el comando coincide con algún trigger_command del tenant.
         # Gracias a RLS, PostgreSQL filtrará automáticamente para buscar solo en el tenant correspondiente.
