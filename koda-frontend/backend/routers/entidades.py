@@ -104,9 +104,13 @@ class SucursalCreate(BaseModel):
     ciudad: Optional[str] = None
     estado: str = "Activo"
 
-def _get_or_create_empresa(db: Session) -> Empresa:
-    emp = db.query(Empresa).first()
+def _get_or_create_empresa(db: Session, current_user: Profile) -> Empresa:
+    emp = db.query(Empresa).filter(Empresa.tenant_id == current_user.tenant_id).first()
     if not emp:
+        # TODO: Empresa.rif tiene UniqueConstraint global (unique=True), no por tenant.
+        # Este RIF placeholder colisionará entre tenants distintos hasta que se
+        # migre la constraint a UniqueConstraint('tenant_id', 'rif'). Fuera de
+        # alcance de este fix; decisión pendiente del humano.
         emp = Empresa(
             rif="J-40000000-0",
             razon_social="KODA ERP SOLUTIONS, C.A.",
@@ -115,6 +119,7 @@ def _get_or_create_empresa(db: Session) -> Empresa:
             telefono="+58 212 000-0000",
             direccion="Caracas, Venezuela",
             tipo_contribuyente="ORDINARIO",
+            tenant_id=current_user.tenant_id,
         )
         db.add(emp)
         db.commit()
@@ -126,8 +131,8 @@ from fastapi import File, UploadFile
 import secrets
 
 @router.get("/empresa/perfil", dependencies=[Depends(role_required(['Admin']))])
-def obtener_perfil(db: Session = Depends(get_db)):
-    emp = _get_or_create_empresa(db)
+def obtener_perfil(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    emp = _get_or_create_empresa(db, current_user)
     logo_exists = os.path.exists("backend/static/logo.png")
     return {
         "rif": emp.rif,
@@ -141,8 +146,8 @@ def obtener_perfil(db: Session = Depends(get_db)):
     }
 
 @router.put("/empresa/perfil", dependencies=[Depends(role_required(['Admin']))])
-def actualizar_perfil(data: EmpresaPerfilUpdate, db: Session = Depends(get_db)):
-    emp = _get_or_create_empresa(db)
+def actualizar_perfil(data: EmpresaPerfilUpdate, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    emp = _get_or_create_empresa(db, current_user)
     for k, v in data.model_dump(exclude_unset=True).items():
         setattr(emp, k, v)
     db.commit()
@@ -150,12 +155,12 @@ def actualizar_perfil(data: EmpresaPerfilUpdate, db: Session = Depends(get_db)):
     return {"ok": True}
 
 @router.get("/empresa/sucursales")
-def listar_sucursales(db: Session = Depends(get_db)):
-    return db.query(Sucursal).all()
+def listar_sucursales(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    return db.query(Sucursal).filter(Sucursal.tenant_id == current_user.tenant_id).all()
 
 @router.post("/empresa/sucursales")
-def crear_sucursal(data: SucursalCreate, db: Session = Depends(get_db)):
-    s = Sucursal(**data.model_dump())
+def crear_sucursal(data: SucursalCreate, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    s = Sucursal(**data.model_dump(), tenant_id=current_user.tenant_id)
     db.add(s)
     db.commit()
     db.refresh(s)
