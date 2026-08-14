@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from decimal import Decimal
-from backend.models.erp_extended import DetalleAsiento
+from backend.models.erp_extended import DetalleAsiento, CuentaBancaria, CuentaPorCobrar
 
 class ReporteService:
     @staticmethod
@@ -104,35 +104,32 @@ class ReporteService:
         }
 
     @staticmethod
-    def dashboard_resumen(db: Session):
+    def dashboard_resumen(db: Session, tenant_id):
         """
-        Extrae el saldo acumulado en Bancos (cuenta 1.1.01) y
-        el acumulado en Cuentas por Cobrar (cuenta 1.1.02) desde el libro diario.
+        Extrae el saldo acumulado en Bancos y el acumulado en Cuentas por
+        Cobrar directamente de las tablas operativas (CuentaBancaria /
+        CuentaPorCobrar), con alcance por tenant.
+
+        Nota: antes se leía esto del libro diario (DetalleAsiento, cuentas
+        1.1.01/1.1.02) sin filtro de tenant. El endpoint oficial de emisión
+        de facturas (/v1/facturacion/emitir) nunca generó asientos contables,
+        por lo que ese libro está vacío para ventas reales y el resumen
+        siempre mostraba $0,00. Esta es la misma fuente que ya usa
+        /reportes/dashboard (Centro de Reportes), para que ambos coincidan.
         """
-        resultados = db.query(
-            DetalleAsiento.cuenta_codigo,
-            func.sum(DetalleAsiento.debe_usd).label("debe_total"),
-            func.sum(DetalleAsiento.haber_usd).label("haber_total")
+        saldo_bancos = db.query(func.sum(CuentaBancaria.saldo_actual_usd)).filter(
+            CuentaBancaria.tenant_id == tenant_id,
+            CuentaBancaria.activa == True
+        ).scalar() or Decimal("0.00")
+
+        saldo_cxc = db.query(
+            func.sum(CuentaPorCobrar.monto_total_usd - CuentaPorCobrar.monto_pagado_usd)
         ).filter(
-            DetalleAsiento.cuenta_codigo.in_(["1.1.01", "1.1.02"])
-        ).group_by(
-            DetalleAsiento.cuenta_codigo
-        ).all()
-
-        saldo_bancos = Decimal("0.00")
-        saldo_cxc = Decimal("0.00")
-
-        for r in resultados:
-            debe = Decimal(str(r.debe_total or "0.00"))
-            haber = Decimal(str(r.haber_total or "0.00"))
-            saldo = debe - haber  # Al ser cuentas activas, naturaleza deudora
-
-            if r.cuenta_codigo == "1.1.01":
-                saldo_bancos = saldo
-            elif r.cuenta_codigo == "1.1.02":
-                saldo_cxc = saldo
+            CuentaPorCobrar.tenant_id == tenant_id,
+            CuentaPorCobrar.estado != "PAGADA"
+        ).scalar() or Decimal("0.00")
 
         return {
-            "saldo_bancos_usd": saldo_bancos,
-            "saldo_cxc_usd": saldo_cxc
+            "saldo_bancos_usd": Decimal(str(saldo_bancos)),
+            "saldo_cxc_usd": Decimal(str(saldo_cxc))
         }

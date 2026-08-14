@@ -73,14 +73,14 @@ def get_estado_resultados(db: Session = Depends(get_db)):
             detail=f"Error al generar estado de resultados: {str(e)}"
         )
 
-@router.get("/dashboard-resumen", response_model=DashboardResumenResponse, dependencies=[Depends(role_required(['Admin']))])
-def get_dashboard_resumen(db: Session = Depends(get_db)):
+@router.get("/dashboard-resumen", response_model=DashboardResumenResponse)
+def get_dashboard_resumen(db: Session = Depends(get_db), current_user = Depends(role_required(['Admin']))):
     """
     Obtiene métricas resumidas para el dashboard ejecutivo: saldo acumulado en Bancos
     y total pendiente por cobrar (CxC).
     """
     try:
-        return ReporteService.dashboard_resumen(db)
+        return ReporteService.dashboard_resumen(db, current_user.tenant_id)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

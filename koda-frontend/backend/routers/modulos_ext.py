@@ -2678,20 +2678,14 @@ reportes_router = APIRouter(prefix="/reportes", tags=["Reportes"], dependencies=
 def reportes_dashboard(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     from backend.models.erp_extended import CuentaBancaria, CuentaPorCobrar, LoteProducto
     from backend.models.operations import Producto, Venta
+    from backend.services.reportes import ReporteService
     from datetime import datetime, timezone, timedelta
-    
-    # 1. Total en bancos (USD)
-    total_bancos = db.query(func.sum(CuentaBancaria.saldo_actual_usd)).filter(
-        CuentaBancaria.tenant_id == current_user.tenant_id,
-        CuentaBancaria.activa == True
-    ).scalar() or 0.0
-    
-    # 2. Cuentas por cobrar activas (USD)
-    total_cxc = db.query(func.sum(CuentaPorCobrar.monto_total_usd - CuentaPorCobrar.monto_pagado_usd)).filter(
-        CuentaPorCobrar.tenant_id == current_user.tenant_id,
-        CuentaPorCobrar.estado != "PAGADA"
-    ).scalar() or 0.0
-    
+
+    # 1. Saldo en bancos y CxC (misma fuente que /repo_dashboard_resumen del "Inicio")
+    resumen = ReporteService.dashboard_resumen(db, current_user.tenant_id)
+    total_bancos = resumen["saldo_bancos_usd"]
+    total_cxc = resumen["saldo_cxc_usd"]
+
     # 3. Cantidad de SKUs
     total_productos = db.query(func.count(Producto.id)).filter(
         Producto.tenant_id == current_user.tenant_id

@@ -1,7 +1,8 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from backend.services.rate_limiter import check_rate_limit
 from backend.core.database import Base, engine, DATABASE_URL
+from backend.core.security import get_current_user
 
 print(f"\033[95m[SYSTEM] FastAPI motor BD verificado. Conexión apuntada a: {DATABASE_URL.split('@')[-1] if DATABASE_URL and '@' in DATABASE_URL else DATABASE_URL}\033[0m")
 
@@ -308,12 +309,12 @@ app.include_router(telemetry.router)
 
 # Endpoints de Dashboard para el Frontend
 @app.get("/repo_dashboard_resumen", tags=["Reportes Financieros"])
-def get_repo_dashboard_resumen():
+def get_repo_dashboard_resumen(current_user = Depends(get_current_user)):
     from fastapi import HTTPException
     from backend.services.reportes import ReporteService
     db = SessionLocal()
     try:
-        return ReporteService.dashboard_resumen(db)
+        return ReporteService.dashboard_resumen(db, current_user.tenant_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
