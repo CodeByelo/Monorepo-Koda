@@ -785,6 +785,14 @@ async def startup():
     except Exception as buffer_err:
         logger.error(f"❌ No se pudo iniciar el EventBuffer: {buffer_err}")
 
+    # Reclamar el webhook de Telegram para esta instancia (solo si RENDER_SELF_URL
+    # está configurada). Evita que un setWebhook manual apuntado a un entorno
+    # local/ngrok deje huérfana la instancia desplegada en Render.
+    try:
+        await telegram_router.ensure_telegram_webhook()
+    except Exception as tg_webhook_err:
+        logger.error(f"❌ No se pudo registrar el webhook de Telegram: {tg_webhook_err}")
+
 # ===================================================================
 # SHUTDOWN — Apagar el scheduler BCV limpiamente
 # ===================================================================
