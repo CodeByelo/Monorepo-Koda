@@ -23,6 +23,9 @@ interface Producto {
   sku: string;
   nombre: string;
   precio_usd: number | string;
+  precio_detal?: number | string | null;
+  precio_mayor?: number | string | null;
+  precio_gran_mayor?: number | string | null;
   costo_usd: number | string;
   stock: number;
   es_exento: boolean;
@@ -46,6 +49,9 @@ const Products = () => {
   const [sku, setSku] = useState('');
   const [nombre, setNombre] = useState('');
   const [precioUsd, setPrecioUsd] = useState('');
+  const [precioDetal, setPrecioDetal] = useState('');
+  const [precioMayor, setPrecioMayor] = useState('');
+  const [precioGranMayor, setPrecioGranMayor] = useState('');
   const [costoUsd, setCostoUsd] = useState('');
   const [stock, setStock] = useState('0');
   const [esExento, setEsExento] = useState(false);
@@ -92,6 +98,9 @@ const Products = () => {
     setSku('');
     setNombre('');
     setPrecioUsd('');
+    setPrecioDetal('');
+    setPrecioMayor('');
+    setPrecioGranMayor('');
     setCostoUsd('');
     setStock('0');
     setEsExento(false);
@@ -105,6 +114,9 @@ const Products = () => {
     setSku(p.sku);
     setNombre(p.nombre);
     setPrecioUsd(String(p.precio_usd));
+    setPrecioDetal(p.precio_detal != null ? String(p.precio_detal) : '');
+    setPrecioMayor(p.precio_mayor != null ? String(p.precio_mayor) : '');
+    setPrecioGranMayor(p.precio_gran_mayor != null ? String(p.precio_gran_mayor) : '');
     setCostoUsd(String(p.costo_usd));
     setStock(String(p.stock));
     setEsExento(p.es_exento);
@@ -158,6 +170,12 @@ const Products = () => {
         sku,
         nombre,
         precio_usd: parseFloat(precioUsd),
+        // Los 3 tiers son opcionales: si el usuario deja el campo vacío se
+        // envía undefined y el backend aplica su propio fallback (precio_detal
+        // cae a precio_usd; mayor/gran_mayor quedan sin configurar).
+        precio_detal: precioDetal.trim() ? parseFloat(precioDetal) : undefined,
+        precio_mayor: precioMayor.trim() ? parseFloat(precioMayor) : undefined,
+        precio_gran_mayor: precioGranMayor.trim() ? parseFloat(precioGranMayor) : undefined,
         costo_usd: parseFloat(costoUsd),
         stock: parseInt(stock, 10),
         es_exento: esExento,
@@ -463,6 +481,49 @@ const Products = () => {
                     placeholder="0.00"
                     className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-[#0b5156]"
                   />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
+                  Tarifas por Segmento (Opcional)
+                </label>
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight mb-2">
+                  Si se dejan vacías, "Detal" toma el Precio USD y "Mayor"/"Gran Mayor" caen de vuelta al Precio USD al facturar.
+                </p>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Detal</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={precioDetal}
+                      onChange={(e) => setPrecioDetal(e.target.value)}
+                      placeholder={precioUsd || '0.00'}
+                      className="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-[#0b5156]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Mayor</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={precioMayor}
+                      onChange={(e) => setPrecioMayor(e.target.value)}
+                      placeholder={precioUsd || '0.00'}
+                      className="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-[#0b5156]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Gran Mayor</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={precioGranMayor}
+                      onChange={(e) => setPrecioGranMayor(e.target.value)}
+                      placeholder={precioUsd || '0.00'}
+                      className="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-[#0b5156]"
+                    />
+                  </div>
                 </div>
               </div>
               <div>
