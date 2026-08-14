@@ -154,7 +154,18 @@ export async function request<T>(endpoint: string, options: RequestInit = {}, _i
     let errorMessage = 'Error en la petición';
     try {
       const errorData = await response.json();
-      errorMessage = errorData.detail || errorData.message || errorMessage;
+      const detail = errorData?.detail;
+      if (Array.isArray(detail)) {
+        // Forma estándar de error de validación de FastAPI: lista de objetos { loc, msg, type }
+        const mensajes = detail
+          .map((item: any) => (item && typeof item === 'object' ? item.msg : item))
+          .filter((msg: any) => typeof msg === 'string' && msg.length > 0);
+        errorMessage = mensajes.length > 0 ? mensajes.join(', ') : errorMessage;
+      } else if (typeof detail === 'string' && detail.length > 0) {
+        errorMessage = detail;
+      } else if (typeof errorData?.message === 'string' && errorData.message.length > 0) {
+        errorMessage = errorData.message;
+      }
     } catch {
       // Ignorar error de parseo
     }

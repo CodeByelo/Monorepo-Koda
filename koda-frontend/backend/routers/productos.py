@@ -1,4 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import os
+import uuid
+
+import requests
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -9,6 +13,20 @@ from backend.models.operations import Producto
 from backend.schemas.operations import ProductoCreate, ProductoResponse
 
 router = APIRouter(prefix="/productos", tags=["Productos"])
+
+# =========================================================
+# SUBIDA DE IMÁGENES DE PRODUCTO (Supabase Storage)
+# =========================================================
+# Requiere las variables de entorno SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY
+# (ver koda-frontend/.env.template). El bucket "productos" debe existir en
+# el proyecto de Supabase con una política de lectura pública, ya que las
+# imágenes se sirven luego vía la URL pública devuelta por Storage.
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+SUPABASE_STORAGE_BUCKET_PRODUCTOS = os.getenv("SUPABASE_STORAGE_BUCKET_PRODUCTOS", "productos")
+
+ALLOWED_IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
 
 
 @router.get("", response_model=List[ProductoResponse])
@@ -81,3 +99,78 @@ def eliminar_producto(producto_id: int, db: Session = Depends(get_db), current_u
     db.delete(producto)
     db.commit()
     return {"message": "Producto eliminado exitosamente"}
+
+
+@router.post("/{producto_id}/imagen", response_model=ProductoResponse)
+async def subir_imagen_producto(
+    producto_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: Profile = Depends(get_current_user),
+):
+    """Sube una imagen de producto a Supabase Storage y guarda la URL pública en imagen_url."""
+    producto = db.query(Producto).filter(
+        Producto.id == producto_id,
+        Producto.tenant_id == current_user.tenant_id,
+    ).first()
+    if not producto:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+
+    if file.content_type not in ALLOWED_IMAGE_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Formato de imagen no soportado. Usa JPG, PNG, WEBP o GIF.",
+        )
+
+    contenido = await file.read()
+    if len(contenido) > MAX_IMAGE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail="La imagen supera el tamaño máximo permitido (5MB).",
+        )
+    if len(contenido) == 0:
+        raise HTTPException(status_code=400, detail="El archivo de imagen está vacío.")
+
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "El almacenamiento de imágenes no está configurado en el servidor "
+                "(faltan SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)."
+            ),
+        )
+
+    extension = os.path.splitext(file.filename or "")[1] or ".jpg"
+    object_path = f"{current_user.tenant_id}/{producto_id}/{uuid.uuid4().hex}{extension}"
+
+    upload_url = f"{SUPABASE_URL.rstrip('/')}/storage/v1/object/{SUPABASE_STORAGE_BUCKET_PRODUCTOS}/{object_path}"
+    headers = {
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Content-Type": file.content_type,
+        "x-upsert": "true",
+    }
+
+    try:
+        resp = requests.post(upload_url, headers=headers, data=contenido, timeout=15)
+    except requests.RequestException as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"No se pudo contactar el almacenamiento de imágenes: {exc}",
+        )
+
+    if resp.status_code not in (200, 201):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Error al subir la imagen al almacenamiento ({resp.status_code}): {resp.text}",
+        )
+
+    public_url = (
+        f"{SUPABASE_URL.rstrip('/')}/storage/v1/object/public/"
+        f"{SUPABASE_STORAGE_BUCKET_PRODUCTOS}/{object_path}"
+    )
+
+    producto.imagen_url = public_url
+    db.commit()
+    db.refresh(producto)
+    return producto

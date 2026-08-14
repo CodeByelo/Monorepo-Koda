@@ -50,6 +50,10 @@ const Products = () => {
   const [stock, setStock] = useState('0');
   const [esExento, setEsExento] = useState(false);
   const [imagenUrl, setImagenUrl] = useState('');
+  const [imagenFile, setImagenFile] = useState<File | null>(null);
+  const [imagenPreview, setImagenPreview] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imagenError, setImagenError] = useState<string | null>(null);
 
   // Custom visual feedback states
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -77,6 +81,12 @@ const Products = () => {
     fetchProducts();
   }, []);
 
+  const resetImagenState = () => {
+    setImagenFile(null);
+    setImagenPreview(null);
+    setImagenError(null);
+  };
+
   const handleOpenCreateModal = () => {
     setEditingProduct(null);
     setSku('');
@@ -86,6 +96,7 @@ const Products = () => {
     setStock('0');
     setEsExento(false);
     setImagenUrl('');
+    resetImagenState();
     setIsModalOpen(true);
   };
 
@@ -98,7 +109,46 @@ const Products = () => {
     setStock(String(p.stock));
     setEsExento(p.es_exento);
     setImagenUrl(p.imagen_url || '');
+    setImagenFile(null);
+    setImagenPreview(p.imagen_url || null);
+    setImagenError(null);
     setIsModalOpen(true);
+  };
+
+  const handleImagenChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setImagenError(null);
+    if (!file) {
+      setImagenFile(null);
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      setImagenError('El archivo seleccionado no es una imagen válida.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setImagenError('La imagen supera el tamaño máximo permitido (5MB).');
+      return;
+    }
+    setImagenFile(file);
+    setImagenPreview(URL.createObjectURL(file));
+  };
+
+  const subirImagenProducto = async (productoId: number) => {
+    if (!imagenFile) return;
+    setUploadingImage(true);
+    setImagenError(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', imagenFile);
+      const actualizado = await api.post<Producto>(`/productos/${productoId}/imagen`, formData);
+      setImagenUrl(actualizado.imagen_url || '');
+    } catch (err: any) {
+      setImagenError(err.message || 'Error al subir la imagen del producto');
+      showToast(err.message || 'El producto se guardó, pero la imagen no pudo subirse', 'error');
+    } finally {
+      setUploadingImage(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -114,14 +164,19 @@ const Products = () => {
         imagen_url: imagenUrl.trim() || undefined
       };
 
-
+      let productoId = editingProduct?.id;
       if (editingProduct) {
         await api.put(`/productos/${editingProduct.id}`, payload);
-        showToast('Producto actualizado exitosamente', 'success');
       } else {
-        await api.post('/productos', payload);
-        showToast('Producto creado exitosamente', 'success');
+        const creado = await api.post<Producto>('/productos', payload);
+        productoId = creado.id;
       }
+
+      if (imagenFile && productoId) {
+        await subirImagenProducto(productoId);
+      }
+
+      showToast(editingProduct ? 'Producto actualizado exitosamente' : 'Producto creado exitosamente', 'success');
       setIsModalOpen(false);
       fetchProducts();
     } catch (err: any) {
@@ -411,14 +466,34 @@ const Products = () => {
                 </div>
               </div>
               <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">URL de Imagen (Opcional)</label>
-                <input 
-                  type="url" 
-                  value={imagenUrl}
-                  onChange={(e) => setImagenUrl(e.target.value)}
-                  placeholder="https://ejemplo.com/imagen.jpg"
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-[#0b5156]"
-                />
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Imagen del Producto (Opcional)</label>
+                <div className="flex items-center gap-3">
+                  <div className="w-14 h-14 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center overflow-hidden flex-shrink-0">
+                    {imagenPreview ? (
+                      <img
+                        src={imagenPreview}
+                        alt="Vista previa"
+                        className="w-full h-full object-cover"
+                        onError={() => setImagenError('No se pudo cargar la vista previa de la imagen.')}
+                      />
+                    ) : (
+                      <ImageIcon size={20} className="text-slate-400" />
+                    )}
+                  </div>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImagenChange}
+                    disabled={uploadingImage}
+                    className="w-full text-xs font-bold text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-[10px] file:font-black file:uppercase file:tracking-widest file:bg-[#0b5156] file:text-white hover:file:bg-[#093e42] disabled:opacity-50"
+                  />
+                </div>
+                {uploadingImage && (
+                  <p className="text-[10px] font-bold text-slate-400 uppercase mt-1.5">Subiendo imagen...</p>
+                )}
+                {imagenError && (
+                  <p className="text-[10px] font-bold text-red-500 uppercase mt-1.5">{imagenError}</p>
+                )}
               </div>
               <div>
                 <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Stock Inicial</label>
