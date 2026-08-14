@@ -1,4 +1,4 @@
-import { 
+import {
   ArrowLeft,
   Download,
   DollarSign,
@@ -7,7 +7,9 @@ import {
   Search,
   Filter,
   Briefcase,
-  Percent
+  Percent,
+  Users,
+  ChevronDown
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useState, useEffect } from 'react';
@@ -25,10 +27,29 @@ const SalesForceManagementReport = () => {
   const [commissionValue, setCommissionValue] = useState<string>('');
   const [isSavingCommission, setIsSavingCommission] = useState(false);
 
-  const fetchSalesForce = async () => {
+  // Filtro de vendedores del reporte. Vacío = "Todos" (comportamiento por
+  // defecto, igual que antes de este filtro). `vendorOptions` es el universo
+  // completo de vendedores seleccionables: se captura del primer fetch sin
+  // filtro y se mantiene estable aunque luego el reporte se filtre, para no
+  // perder opciones del selector.
+  const [selectedVendorIds, setSelectedVendorIds] = useState<number[]>([]);
+  const [vendorOptions, setVendorOptions] = useState<{ id: number; name: string; porcentaje_comision?: number }[]>([]);
+  const [showVendorFilter, setShowVendorFilter] = useState(false);
+
+  const buildVendorQuery = (ids: number[], separator: '?' | '&' = '?') =>
+    ids.length > 0 ? `${separator}vendedor_ids=${ids.join(',')}` : '';
+
+  const fetchSalesForce = async (ids: number[] = selectedVendorIds) => {
+    setIsLoading(true);
     try {
-      const res = await api.get<any>('/reportes/vendedores');
+      const res = await api.get<any>(`/reportes/vendedores${buildVendorQuery(ids)}`);
       setData(res);
+      if (ids.length === 0) {
+        const opts = (res?.salesForce || [])
+          .filter((v: any) => v.id != null)
+          .map((v: any) => ({ id: v.id, name: v.name, porcentaje_comision: v.porcentaje_comision }));
+        setVendorOptions(opts);
+      }
     } catch (error) {
       console.error("Error fetching sales force report:", error);
     } finally {
@@ -37,12 +58,27 @@ const SalesForceManagementReport = () => {
   };
 
   useEffect(() => {
-    fetchSalesForce();
+    fetchSalesForce([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const toggleVendorSelection = (id: number) => {
+    const next = selectedVendorIds.includes(id)
+      ? selectedVendorIds.filter((x) => x !== id)
+      : [...selectedVendorIds, id];
+    setSelectedVendorIds(next);
+    fetchSalesForce(next);
+  };
+
+  const selectAllVendors = () => {
+    setSelectedVendorIds([]);
+    fetchSalesForce([]);
+  };
 
   const handleExport = async () => {
     try {
-      await api.download('/reportes/exportar?reporte=vendedores', 'liquidacion_comisiones_vendedores.csv');
+      const query = `reporte=vendedores${buildVendorQuery(selectedVendorIds, '&')}`;
+      await api.download(`/reportes/exportar?${query}`, 'liquidacion_comisiones_vendedores.csv');
     } catch (error) {
       console.error("Error exporting sellers:", error);
       setModalMessage("Error al liquidar comisiones.");
@@ -51,8 +87,11 @@ const SalesForceManagementReport = () => {
 
   // Vendedores con id conocido (los únicos que se pueden editar; el bucket
   // "Vendedor Interno" que aparece cuando el tenant no tiene vendedores
-  // registrados no tiene un id de Vendedor real y no aplica aquí).
-  const vendedoresEditables = (data?.salesForce || []).filter((v: any) => v.id != null);
+  // registrados no tiene un id de Vendedor real y no aplica aquí). Se toma
+  // del universo completo (`vendorOptions`), no del reporte ya filtrado, para
+  // que "Configurar Comisiones" siempre pueda editar cualquier vendedor sin
+  // importar la selección activa del filtro de reporte.
+  const vendedoresEditables = vendorOptions;
 
   const handleConfigureCommissions = () => {
     if (vendedoresEditables.length === 0) {
@@ -81,7 +120,7 @@ const SalesForceManagementReport = () => {
     try {
       await api.patch(`/vendedores/${commissionVendorId}`, { porcentaje_comision: pct });
       setShowCommissionModal(false);
-      await fetchSalesForce();
+      await fetchSalesForce(selectedVendorIds);
       setModalMessage("Comisión actualizada correctamente.");
     } catch (error: any) {
       console.error("Error updating vendor commission:", error);
@@ -179,17 +218,58 @@ const SalesForceManagementReport = () => {
                   className="w-full md:w-64 bg-white border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs font-bold text-[#0b5156] outline-none focus:border-[#0b5156] shadow-sm" 
                 />
              </div>
-             <button 
+             <button
                onClick={() => setShowCriticalOnly(!showCriticalOnly)}
                title="Mostrar críticos / bajo rendimiento"
                className={`p-1.5 rounded-lg border shadow-sm transition-all ${
-                 showCriticalOnly 
-                   ? 'bg-[#0b5156] text-white border-[#0b5156]' 
+                 showCriticalOnly
+                   ? 'bg-[#0b5156] text-white border-[#0b5156]'
                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                }`}
              >
                 <Filter size={14} />
              </button>
+             <div className="relative">
+                <button
+                  onClick={() => setShowVendorFilter(!showVendorFilter)}
+                  className={`px-3 py-1.5 rounded-lg border shadow-sm transition-all text-xs font-bold flex items-center gap-1.5 whitespace-nowrap ${
+                    selectedVendorIds.length > 0
+                      ? 'bg-[#0b5156] text-white border-[#0b5156]'
+                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  <Users size={12} />
+                  {selectedVendorIds.length === 0 ? 'Todos los vendedores' : `${selectedVendorIds.length} vendedor(es)`}
+                  <ChevronDown size={12} />
+                </button>
+                {showVendorFilter && (
+                  <div className="absolute right-0 top-full mt-1 w-64 bg-white border border-slate-200 rounded-xl shadow-lg z-20 p-2 max-h-72 overflow-y-auto">
+                    <label className="flex items-center gap-2 px-2 py-1.5 text-xs font-bold text-slate-600 cursor-pointer hover:bg-slate-50 rounded">
+                      <input
+                        type="checkbox"
+                        checked={selectedVendorIds.length === 0}
+                        onChange={selectAllVendors}
+                      />
+                      Todos
+                    </label>
+                    <div className="border-t border-slate-100 my-1" />
+                    {vendorOptions.length === 0 ? (
+                      <p className="px-2 py-1.5 text-[10px] font-bold text-slate-400 uppercase">Sin vendedores registrados</p>
+                    ) : (
+                      vendorOptions.map((v) => (
+                        <label key={v.id} className="flex items-center gap-2 px-2 py-1.5 text-xs font-bold text-slate-600 cursor-pointer hover:bg-slate-50 rounded">
+                          <input
+                            type="checkbox"
+                            checked={selectedVendorIds.includes(v.id)}
+                            onChange={() => toggleVendorSelection(v.id)}
+                          />
+                          {v.name}
+                        </label>
+                      ))
+                    )}
+                  </div>
+                )}
+             </div>
           </div>
         </div>
 
