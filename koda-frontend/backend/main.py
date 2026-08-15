@@ -27,7 +27,7 @@ from backend.routers import (
     hr as hr_router, productos, proveedores, audit, entidades,
     dashboard_ext, fiscal_ext, contabilidad_ext, modulos_ext, admin_ext, extras_ext,
     pagos, reportes, developer, developer_router, payroll, facturacion, telegram_api,
-    forense, telemetry, bot_api,
+    forense, telemetry, bot_api, garantias,
 )
 from backend.routers import logistica as logistica_router
 from backend.utils.seed_extended import seed_extended_data
@@ -308,6 +308,8 @@ app.include_router(forense.router)
 app.include_router(telemetry.router)
 # API de servicio para el bot de Telegram (backend externo, clave compartida)
 app.include_router(bot_api.router)
+# Garantías de producto/venta
+app.include_router(garantias.router)
 
 # Endpoints de Dashboard para el Frontend
 @app.get("/repo_dashboard_resumen", tags=["Reportes Financieros"])

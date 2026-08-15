@@ -56,6 +56,7 @@ const InventoryWarehouses     = lazy(() => import('./pages/Inventory/InventoryWa
 const InventoryTransfer       = lazy(() => import('./pages/Inventory/InventoryTransfer'));
 const StockInventory          = lazy(() => import('./pages/Inventory/StockInventory'));
 const InventoryCritical       = lazy(() => import('./pages/Inventory/InventoryCritical'));
+const Warranties              = lazy(() => import('./pages/Inventory/Warranties'));
 const LotExpiry               = lazy(() => import('./pages/Inventory/LotExpiry'));
 // LOGÍSTICA
 const Logistics               = lazy(() => import('./pages/Logistics/Logistics'));
@@ -648,6 +649,7 @@ function App() {
           <Route path="/inventario/fisico" element={<StockInventory />} />
           <Route path="/inventario/critico" element={<InventoryCritical />} />
           <Route path="/inventario/lotes" element={<LotExpiry />} />
+          <Route path="/inventario/garantias" element={<Warranties />} />
           {/* LOGÍSTICA */}
           <Route path="/logistica" element={<Logistics />} />
           <Route path="/logistica/vehiculos" element={<FleetVehicles />} />

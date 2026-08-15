@@ -451,6 +451,38 @@ class NotaCredito(Base):
         return self.monto_usd
 
 
+class Garantia(Base):
+    """
+    Garantía de producto/venta ("Garantías"). Registra la cobertura de un
+    producto vendido (o entregado fuera de una venta puntual, ej. reemplazo
+    de fábrica) para permitir seguimiento de reclamos post-venta.
+    """
+    __tablename__ = "garantias"
+    __table_args__ = {'schema': 'public'}
+    tenant_id = Column(UUID(as_uuid=True))
+
+    id = Column(Integer, primary_key=True, index=True)
+    producto_id = Column(Integer, ForeignKey("public.productos.id"), index=True, nullable=False)
+    # Nullable a propósito: la mayoría de garantías nacen de una venta
+    # concreta (permite ubicar la línea exacta vía VentaDetalle), pero el
+    # negocio también registra garantías de fábrica/reemplazo sin una venta
+    # puntual asociada en el sistema.
+    venta_id = Column(Integer, ForeignKey("public.ventas.id"), index=True, nullable=True)
+    cliente_id = Column(Integer, ForeignKey("public.clientes.id"), index=True, nullable=False)
+    fecha_inicio = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    duracion_meses = Column(Integer, nullable=False)
+    # Se guarda calculada (fecha_inicio + duracion_meses) al crear/actualizar
+    # para permitir filtrar/ordenar por vencimiento sin recalcular en cada
+    # consulta.
+    fecha_vencimiento = Column(DateTime, nullable=False)
+    estado = Column(String(20), default="VIGENTE", nullable=False)  # VIGENTE, VENCIDA, RECLAMADA, ANULADA
+    notas = Column(Text, nullable=True)
+
+    producto = relationship("Producto")
+    cliente = relationship("Cliente")
+    venta = relationship("Venta")
+
+
 class AnticipoCliente(Base):
     __tablename__ = "anticipos_cliente"
     __table_args__ = {'schema': 'public'}

@@ -85,6 +85,8 @@ const navItems = [
       { label: 'Transferencias', path: '/inventario/transferencias' },
       { label: 'Ajustes Stock', path: '/inventario/ajustes' },
       { label: 'Toma Física', path: '/inventario/fisico' },
+      { label: 'POSVENTA' },
+      { label: 'Garantías', path: '/inventario/garantias' },
     ]
   },
   {
