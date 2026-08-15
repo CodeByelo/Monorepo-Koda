@@ -14,11 +14,14 @@ DetalleAsiento = AsientoDetalle
 
 class Empresa(Base):
     __tablename__ = "empresa"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'rif', name='_tenant_empresa_rif_uc'),
+        {'schema': 'public'}
+    )
     tenant_id = Column(UUID(as_uuid=True))
 
     id = Column(Integer, primary_key=True, index=True)
-    rif = Column(String(50), unique=True, nullable=False)
+    rif = Column(String(50), nullable=False)
     razon_social = Column(String(200), nullable=False)
     nombre_comercial = Column(String(200), nullable=True)
     email = Column(String(150), nullable=True)
@@ -44,11 +47,14 @@ class Sucursal(Base):
 
 class CuentaContable(Base):
     __tablename__ = "cuentas_contables"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'codigo', name='_tenant_cuentas_contables_codigo_uc'),
+        {'schema': 'public'}
+    )
     tenant_id = Column(UUID(as_uuid=True))
 
     id = Column(Integer, primary_key=True, index=True)
-    codigo = Column(String(50), unique=True, index=True, nullable=False)
+    codigo = Column(String(50), index=True, nullable=False)
     nombre = Column(String(200), nullable=False)
     tipo = Column(String(30), nullable=False)  # ACTIVO, PASIVO, PATRIMONIO, INGRESO, EGRESO
     naturaleza = Column(String(20), nullable=False, default="DEUDORA")
@@ -213,13 +219,16 @@ class CuentaBancaria(Base):
 
 class Cheque(Base):
     __tablename__ = "cheques"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'numero_cheque', name='_tenant_cheques_numero_cheque_uc'),
+        {'schema': 'public'}
+    )
     tenant_id = Column(UUID(as_uuid=True))
 
     id = Column(Integer, primary_key=True, index=True)
     cliente_id = Column(Integer, ForeignKey("public.clientes.id"), nullable=True)
     banco_emisor = Column(String(100), nullable=False)
-    numero_cheque = Column(String(50), unique=True, nullable=False)
+    numero_cheque = Column(String(50), nullable=False)
     monto_usd = Column(Numeric(15, 2), nullable=False)
     fecha_emision = Column(Date, default=lambda: datetime.now(timezone.utc).date(), nullable=False)
     fecha_cobro = Column(Date, nullable=False)
@@ -253,11 +262,14 @@ class MovimientoBancario(Base):
 
 class Cotizacion(Base):
     __tablename__ = "cotizaciones"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'numero_cotizacion', name='_tenant_cotizaciones_numero_cotizacion_uc'),
+        {'schema': 'public'}
+    )
     tenant_id = Column(UUID(as_uuid=True))
 
     id = Column(Integer, primary_key=True, index=True)
-    numero_cotizacion = Column(String(50), unique=True, nullable=False)
+    numero_cotizacion = Column(String(50), nullable=False)
     cliente_id = Column(Integer, ForeignKey("public.clientes.id"), nullable=True)
     fecha_emision = Column(Date, default=lambda: datetime.now(timezone.utc).date(), nullable=False)
     fecha_vencimiento = Column(Date, nullable=False)
@@ -346,11 +358,14 @@ class DeclaracionIVA(Base):
 
 class Almacen(Base):
     __tablename__ = "almacenes"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'codigo', name='_tenant_almacenes_codigo_uc'),
+        {'schema': 'public'}
+    )
     tenant_id = Column(UUID(as_uuid=True))
 
     id = Column(Integer, primary_key=True, index=True)
-    codigo = Column(String(20), unique=True, nullable=False)
+    codigo = Column(String(20), nullable=False)
     nombre = Column(String(150), nullable=False)
     responsable = Column(String(100), default="Sin asignar", nullable=True)
     direccion = Column(String(250), default="Dirección no especificada", nullable=True)
@@ -499,12 +514,15 @@ class AnticipoCliente(Base):
 
 class Vendedor(Base):
     __tablename__ = "vendedores"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'codigo', name='_tenant_vendedores_codigo_uc'),
+        {'schema': 'public'}
+    )
     tenant_id = Column(UUID(as_uuid=True))
 
     id = Column(Integer, primary_key=True, index=True)
     nombre = Column(String(150), nullable=False)
-    codigo = Column(String(20), unique=True, nullable=False)
+    codigo = Column(String(20), nullable=False)
     activo = Column(Boolean, default=True, nullable=False)
     meta_mensual_usd = Column(Numeric(15, 2), default=0, nullable=False)
     # Ya existe en la base de datos de producción (Supabase) con DEFAULT 5.00;
@@ -518,11 +536,14 @@ class Vendedor(Base):
 
 class CentroCosto(Base):
     __tablename__ = "centros_costo"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'codigo', name='_tenant_centros_costo_codigo_uc'),
+        {'schema': 'public'}
+    )
     tenant_id = Column(UUID(as_uuid=True))
 
     id = Column(Integer, primary_key=True, index=True)
-    codigo = Column(String(20), unique=True, nullable=False)
+    codigo = Column(String(20), nullable=False)
     nombre = Column(String(150), nullable=False)
     activo = Column(Boolean, default=True, nullable=False)
     responsable = Column(String(150), nullable=True)

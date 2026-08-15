@@ -107,10 +107,9 @@ class SucursalCreate(BaseModel):
 def _get_or_create_empresa(db: Session, current_user: Profile) -> Empresa:
     emp = db.query(Empresa).filter(Empresa.tenant_id == current_user.tenant_id).first()
     if not emp:
-        # TODO: Empresa.rif tiene UniqueConstraint global (unique=True), no por tenant.
-        # Este RIF placeholder colisionará entre tenants distintos hasta que se
-        # migre la constraint a UniqueConstraint('tenant_id', 'rif'). Fuera de
-        # alcance de este fix; decisión pendiente del humano.
+        # Empresa.rif ahora es único por (tenant_id, rif) — ver
+        # UniqueConstraint('_tenant_empresa_rif_uc') en models/erp_extended.py.
+        # Este RIF placeholder puede repetirse de forma segura entre tenants.
         emp = Empresa(
             rif="J-40000000-0",
             razon_social="KODA ERP SOLUTIONS, C.A.",
