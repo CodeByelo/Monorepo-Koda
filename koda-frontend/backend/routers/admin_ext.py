@@ -412,44 +412,45 @@ def ejecutar_respaldo(
     current_user: Profile = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    """Dispara un respaldo REAL bajo demanda (mismo motor que el job programado
+    de backend/core/scheduler.py — ver backend/services/backup_service.py)."""
     if not current_user.tenant_id:
         raise HTTPException(status_code=400, detail="El usuario no tiene una empresa asociada.")
-        
+
     real_ip = get_real_ip_str(request)
-    
-    settings = db.query(TenantIntegrationSettings).filter(
-        TenantIntegrationSettings.tenant_id == current_user.tenant_id
-    ).first()
-    
-    provider = settings.backup_provider if settings else "local"
-    
-    provider_labels = {
-        "local": "Local / Nube Koda",
-        "google_drive": "Google Drive (Cliente)",
-        "dropbox": "Dropbox (Cliente)",
-        "onedrive": "OneDrive (Cliente)"
-    }
-    
-    destino = provider_labels.get(provider, "Local / Nube Koda")
-    
-    db.add(AuditoriaLog(
-        usuario=f"admin (ip:{real_ip})",
-        accion="RESPALDO",
-        modulo="SISTEMA",
-        detalle=f"Respaldo manual ejecutado hacia: {destino}",
+
+    from backend.services.backup_service import SUPABASE_STORAGE_BUCKET_BACKUPS, ejecutar_backup
+
+    resultado = ejecutar_backup(
+        origen="manual",
+        tenant_id=current_user.tenant_id,
+        usuario=f"{current_user.email} (ip:{real_ip})",
         ip=real_ip,
-        tenant_id=current_user.tenant_id
-    ))
-    db.commit()
-    ts = datetime.now(timezone.utc)
+    )
+    # El respaldo real cubre TODA la base (ver docstring de backup_service.py),
+    # pero el evento de auditoría queda igualmente asociado al tenant que lo
+    # disparó para trazabilidad de quién ejecutó el respaldo manual.
+
+    ts_dt = datetime.fromisoformat(resultado["fecha"])
+    destino = f"Supabase Storage (bucket privado '{SUPABASE_STORAGE_BUCKET_BACKUPS}')"
+
+    if not resultado.get("ok"):
+        raise HTTPException(
+            status_code=502,
+            detail=f"El respaldo no pudo completarse: {resultado.get('error', 'error desconocido')}",
+        )
+
     return {
         "ok": True,
-        "mensaje": f"Respaldo iniciado correctamente hacia {destino}",
-        "id": f"BK-{ts.strftime('%Y%m%d%H%M')}",
-        "fecha": ts.strftime("%d/%m/%Y %H:%M"),
-        "tamano": "428 MB",
+        "mensaje": f"Respaldo completado correctamente hacia {destino}",
+        "id": f"BK-{ts_dt.strftime('%Y%m%d%H%M')}",
+        "archivo": resultado["archivo"],
+        "formato": resultado["formato"],
+        "fecha": ts_dt.strftime("%d/%m/%Y %H:%M"),
+        "tamano": resultado["tamano"],
         "destino": destino,
         "estado": "Exitoso",
+        "respaldos_purgados": resultado.get("purgados", 0),
     }
 
 
