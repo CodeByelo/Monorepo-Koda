@@ -168,6 +168,28 @@ def verify_bot_api_key(x_bot_api_key: Optional[str] = Header(default=None, alias
     return True
 
 
+# ==========================================
+# CLAVE DE SERVICIO (SINCRONIZACIÓN DE NOMBRE DE ORGANIZACIÓN — service-to-service)
+# ==========================================
+# Este backend (koda-frontend) es quien INICIA la llamada saliente hacia
+# KODA_Remaster/sistema-corporativo/backend (`PUT
+# /internal/organizations/{tenant_id}/name`, ver
+# `backend.services.org_sync_client`) para propagar el "Nombre Comercial
+# Público" configurado en Perfil de Empresa (`routers/entidades.py::
+# actualizar_perfil`) hacia `organizations.name` de ESE backend, de modo que
+# el nombre mostrado justo después del login en `frontend-enterprise` quede
+# consistente con el del ERP. Mismo patrón que BOT_INTERNAL_API_KEY pero en
+# la dirección inversa (aquí este backend es el EMISOR, no el receptor).
+#
+# CRÍTICO: sin fallback hardcodeado, igual que SECRET_KEY/AUDIT_LOG_SECRET/BOT_INTERNAL_API_KEY.
+ORG_SYNC_API_KEY = os.getenv("ORG_SYNC_API_KEY", "").strip()
+if not ORG_SYNC_API_KEY or len(ORG_SYNC_API_KEY) < 32:
+    raise RuntimeError(
+        "ORG_SYNC_API_KEY no configurado o inseguro: debe definirse como variable de entorno "
+        "con un valor de al menos 32 caracteres. No existe valor por defecto."
+    )
+
+
 def get_current_auditor(request: Request, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> AuditorSession:
     """
     Dependencia de seguridad que valida que la petición proviene de un auditor válido:

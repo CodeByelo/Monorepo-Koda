@@ -9,6 +9,7 @@ import json
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import jwt
+from fastapi import Header, HTTPException, status
 from passlib.context import CryptContext
 import bcrypt
 from dotenv import load_dotenv
@@ -24,6 +25,43 @@ if not SECRET_KEY or len(SECRET_KEY) < 32:
         "con un valor de al menos 32 caracteres. No existe valor por defecto."
     )
 ALGORITHM = "HS256"
+
+# ==========================================
+# CLAVE DE SERVICIO (SINCRONIZACIÓN DE NOMBRE DE ORGANIZACIÓN — service-to-service)
+# ==========================================
+# koda-frontend/backend (el ERP, un despliegue de Render COMPLETAMENTE
+# SEPARADO de este backend) es quien INICIA la llamada saliente hacia
+# `PUT /internal/organizations/{tenant_id}/name` (ver routers/internal_router.py)
+# cuando un Admin/CEO de un tenant actualiza el "Nombre Comercial Público" en
+# la pantalla Perfil de Empresa del ERP. Ese endpoint nunca usa
+# `require_developer`/JWT de usuario: es un límite de confianza distinto
+# (llamada servidor-a-servidor con una clave compartida), igual patrón que
+# BOT_INTERNAL_API_KEY pero en la dirección inversa (aquí este backend es el
+# RECEPTOR, no el emisor).
+#
+# CRÍTICO: sin fallback hardcodeado, igual que JWT_SECRET.
+ORG_SYNC_API_KEY = os.getenv("ORG_SYNC_API_KEY", "").strip()
+if not ORG_SYNC_API_KEY or len(ORG_SYNC_API_KEY) < 32:
+    raise RuntimeError(
+        "ORG_SYNC_API_KEY no configurado o inseguro: debe definirse como variable de entorno "
+        "con un valor de al menos 32 caracteres. No existe valor por defecto."
+    )
+
+
+def verify_org_sync_api_key(x_internal_api_key: Optional[str] = Header(default=None, alias="X-Internal-Api-Key")) -> bool:
+    """
+    Dependencia de FastAPI para el endpoint interno de sincronización de
+    nombre de organización (`routers/internal_router.py`). Deliberadamente
+    NUNCA se combina con `require_developer`/JWT: es un límite de confianza
+    distinto (llamada servidor-a-servidor con una clave compartida, no una
+    sesión de usuario de Desarrollador ni de tenant).
+    """
+    if not x_internal_api_key or not hmac.compare_digest(x_internal_api_key, ORG_SYNC_API_KEY):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="API key de servicio inválida o ausente.",
+        )
+    return True
 
 # Acepta hashes legacy bcrypt y genera hashes nuevos con pbkdf2_sha256.
 pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated="auto")

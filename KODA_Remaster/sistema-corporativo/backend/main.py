@@ -98,7 +98,7 @@ def _extract_client_ip(request: Request) -> Optional[str]:
             continue
     return None
 from src import schemas
-from routers import auth_router, users_router, gerencias_router, billing_router, developer_router, ledger_router, analytics_router, facturacion_router, nomina_router, telegram_router
+from routers import auth_router, users_router, gerencias_router, billing_router, developer_router, ledger_router, analytics_router, facturacion_router, nomina_router, telegram_router, internal_router
 from routers.ledger_router import event_buffer, KodaEventInternal, AggregateType, EventSeverity
 from auth.supabase_auth import get_current_user
 from utils.idempotency import require_idempotency
@@ -427,6 +427,7 @@ app.include_router(analytics_router.router)
 app.include_router(facturacion_router.router)
 app.include_router(nomina_router.router)
 app.include_router(telegram_router.router)
+app.include_router(internal_router.router)
 
 # Tasa BCV
 from routers import rates_router

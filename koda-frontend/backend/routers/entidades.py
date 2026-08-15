@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -10,8 +12,11 @@ from backend.models.operations import Cliente
 from backend.models.erp_extended import Empresa, Sucursal
 from backend.schemas.operations import ClienteCreate, ClienteResponse
 from backend.services.auth import role_required
+from backend.services.org_sync_client import sync_organization_name, OrgSyncError
 
 router = APIRouter(prefix="/entidades", tags=["Entidades"], dependencies=[Depends(role_required(['Admin', 'Ventas', 'Contabilidad']))])
+
+logger = logging.getLogger("koda_entidades")
 
 # =========================================================
 # CLIENTES
@@ -158,6 +163,27 @@ def actualizar_perfil(data: EmpresaPerfilUpdate, db: Session = Depends(get_db), 
         setattr(emp, k, v)
     db.commit()
     db.refresh(emp)
+
+    # Sincronización best-effort del nombre visible hacia el sistema
+    # institucional (KODA_Remaster/sistema-corporativo/backend), para que el
+    # nombre mostrado justo después del login en frontend-enterprise quede
+    # consistente con el "Nombre Comercial Público" de este ERP. Se usa
+    # nombre_comercial (el campo que esta pantalla realmente expone al
+    # usuario) y no razon_social (la razón social fiscal completa, fuente de
+    # verdad de la facturación de este ERP, no del nombre mostrado en el
+    # otro sistema). Un fallo aquí NUNCA debe hacer fallar el guardado local
+    # del perfil: es una comodidad de consistencia visual, no la fuente de
+    # verdad de los datos fiscales del ERP.
+    nombre_a_sincronizar = emp.nombre_comercial or emp.razon_social
+    if nombre_a_sincronizar:
+        try:
+            sync_organization_name(current_user.tenant_id, nombre_a_sincronizar)
+        except OrgSyncError as e:
+            logger.warning(
+                "No se pudo sincronizar el nombre de organización con "
+                f"KODA_Remaster para tenant {current_user.tenant_id}: {e}"
+            )
+
     return {"ok": True}
 
 @router.get("/empresa/sucursales")
