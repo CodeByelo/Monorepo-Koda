@@ -1,11 +1,24 @@
+import os
 import pytest
-import jwt
+from jose import jwt
 from fastapi.testclient import TestClient
-from main import app, SECRET_KEY, ALGORITHM
+from main import app
 
 client = TestClient(app)
 
-def create_test_token(username: string, tenant_id: string):
+# main.py no expone SECRET_KEY/ALGORITHM como constantes de módulo (solo
+# JWT_SECRET); se importa `main` arriba, así que este test debe usar el mismo
+# JWT_SECRET del entorno que ya validó main.py al importarse, igual que
+# tests/test_ledger_integration.py.
+SECRET_KEY = os.getenv("JWT_SECRET")
+if not SECRET_KEY:
+    raise RuntimeError(
+        "JWT_SECRET debe estar definido en el entorno antes de ejecutar este test "
+        "(main.py ya falla al importar si falta)."
+    )
+ALGORITHM = "HS256"
+
+def create_test_token(username: str, tenant_id: str):
     payload = {
         "sub": username,
         "tenant_id": tenant_id,
