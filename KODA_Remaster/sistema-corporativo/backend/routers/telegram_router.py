@@ -4,6 +4,7 @@ import logging
 import secrets
 import string
 import json
+import hmac
 from datetime import datetime, timezone
 from typing import Optional
 import httpx
@@ -28,6 +29,22 @@ router = APIRouter(prefix="/webhook", tags=["telegram"])
 
 # Token del bot de Telegram obtenido desde las variables de entorno
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+# Secreto para validar que las peticiones a /webhook/telegram realmente
+# provienen de Telegram (parámetro `secret_token` de setWebhook, devuelto en
+# cada request como header X-Telegram-Bot-Api-Secret-Token). Sin esto,
+# cualquiera en internet puede forjar un update falso — con un chat_id de una
+# víctima ya vinculada — y disparar /venta (factura real) o suplantar a un
+# chofer de logística. Sin fallback hardcodeado. Si el bot está habilitado
+# (TELEGRAM_BOT_TOKEN configurado), falla al importar cuando el secreto falta
+# o es débil, igual que JWT_SECRET en auth/security.py.
+TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+if TELEGRAM_BOT_TOKEN and (not TELEGRAM_WEBHOOK_SECRET or len(TELEGRAM_WEBHOOK_SECRET) < 32):
+    raise RuntimeError(
+        "TELEGRAM_WEBHOOK_SECRET no configurado o inseguro: con TELEGRAM_BOT_TOKEN "
+        "habilitado, debe definirse como variable de entorno con un valor de al "
+        "menos 32 caracteres. No existe valor por defecto."
+    )
 
 
 async def ensure_telegram_webhook() -> None:
@@ -67,7 +84,10 @@ async def ensure_telegram_webhook() -> None:
     api_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook"
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(api_url, json={"url": webhook_url})
+            response = await client.post(
+                api_url,
+                json={"url": webhook_url, "secret_token": TELEGRAM_WEBHOOK_SECRET},
+            )
             data = response.json()
             if data.get("ok"):
                 logger.info(f"[TELEGRAM] Webhook registrado correctamente hacia {webhook_url}")
@@ -480,8 +500,18 @@ async def generate_telegram_token(
 @router.post("/telegram")
 async def telegram_webhook(
     update: TelegramUpdate,
+    request: Request,
     conn = Depends(get_db_connection)
 ):
+    # Verificación obligatoria del secret_token de Telegram (ver ensure_telegram_webhook).
+    # hmac.compare_digest evita timing attacks frente a un simple `==`. Si el
+    # secreto no está configurado (bot deshabilitado en este entorno) se
+    # rechaza también: fail closed, nunca se procesa sin validar.
+    incoming_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if not TELEGRAM_WEBHOOK_SECRET or not hmac.compare_digest(incoming_secret, TELEGRAM_WEBHOOK_SECRET):
+        logger.warning("[TELEGRAM] Webhook rechazado: X-Telegram-Bot-Api-Secret-Token ausente o inválido.")
+        raise HTTPException(status_code=401, detail="Invalid webhook secret token")
+
     if update.callback_query:
         return await _handle_callback_query(update.callback_query)
 
