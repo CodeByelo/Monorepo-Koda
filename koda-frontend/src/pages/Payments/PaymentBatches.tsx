@@ -272,7 +272,7 @@ const PaymentBatches = () => {
             </div>
 
             <div className="pt-8 border-t border-slate-100 flex justify-between">
-              <button className="bg-slate-50 text-slate-600 px-6 py-3 rounded-xl text-xs font-black uppercase flex items-center gap-2 hover:bg-white transition-all">
+              <button onClick={() => navigate(-1)} className="bg-slate-50 text-slate-600 px-6 py-3 rounded-xl text-xs font-black uppercase flex items-center gap-2 hover:bg-white transition-all">
                 <ArrowLeft size={16} /> Volver
               </button>
               <button onClick={handleProcesarLote} disabled={totalErrores > 0} className="bg-[#0b5156] text-white px-6 py-3 rounded-xl text-xs font-black uppercase flex items-center gap-2 shadow-2xl hover:bg-[#083a3d] transition-all disabled:opacity-50 disabled:cursor-not-allowed">
@@ -336,7 +336,12 @@ const PaymentBatches = () => {
             <p className="text-xs font-bold text-slate-500 uppercase leading-relaxed">
               El archivo TXT para Banesco requiere que todos los proveedores tengan RIF y cuenta de 20 dígitos validada.
             </p>
-            <button className="text-xs font-black text-[#0b5156] uppercase hover:underline">Ver requisitos por banco</button>
+            <button
+              onClick={() => showToast('Próximamente: requisitos detallados por banco.')}
+              className="text-xs font-black text-[#0b5156] uppercase hover:underline"
+            >
+              Ver requisitos por banco
+            </button>
           </article>
         </aside>
       </div>

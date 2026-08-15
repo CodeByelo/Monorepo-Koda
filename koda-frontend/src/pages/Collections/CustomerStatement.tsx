@@ -274,44 +274,37 @@ const CustomerStatement = () => {
               </p>
             </div>
             <div className="p-6 space-y-4">
-              <div className="space-y-2">
+              <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                <ShieldAlert size={18} className="text-amber-500 shrink-0 mt-0.5" />
+                <p className="text-[11px] font-bold text-amber-700 leading-relaxed">
+                  El envío de email no está disponible en este servidor (no hay proveedor de correo configurado).
+                  Contacte al administrador del sistema para habilitar esta función.
+                </p>
+              </div>
+              <div className="space-y-2 opacity-50 pointer-events-none">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-2">Correo del Destinatario</label>
-                <input 
-                  type="email" 
+                <input
+                  type="email"
                   value={emailInput}
                   onChange={(e) => setEmailInput(e.target.value)}
+                  disabled
                   className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-xs font-black text-slate-700 outline-none focus:border-[#0b5156] transition-colors"
                   placeholder="cliente@email.com"
                 />
               </div>
               <div className="flex gap-3">
-                <button 
+                <button
                   onClick={() => setShowEmailModal(false)}
                   className="w-full py-3 border border-slate-200 rounded-xl text-xs font-black uppercase text-slate-500 hover:bg-slate-50"
                 >
-                  Cancelar
+                  Cerrar
                 </button>
-                <button 
-                  onClick={async () => {
-                    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-                    if (!emailInput || !emailRegex.test(emailInput)) {
-                      handleShowToast("Por favor, ingrese un correo electrónico válido.");
-                      return;
-                    }
-                    try {
-                      await api.post('/cobranzas/estado-cuenta/enviar', {
-                        cliente_id: clienteId,
-                        email: emailInput
-                      });
-                      setShowEmailModal(false);
-                      handleShowToast(`Estado de cuenta enviado exitosamente a: ${emailInput}`);
-                    } catch (e: any) {
-                      handleShowToast(e.response?.data?.detail || "Error al enviar el correo");
-                    }
-                  }}
-                  className="w-full py-3 bg-[#0b5156] text-white rounded-xl text-xs font-black uppercase shadow-lg shadow-green-900/20 hover:bg-[#083a3d]"
+                <button
+                  disabled
+                  title="Envío de email no disponible: no configurado en el servidor"
+                  className="w-full py-3 bg-slate-300 text-white rounded-xl text-xs font-black uppercase cursor-not-allowed"
                 >
-                  Enviar
+                  No disponible
                 </button>
               </div>
             </div>

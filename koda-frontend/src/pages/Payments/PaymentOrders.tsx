@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   Plus, 
   ShieldAlert, 
@@ -23,6 +23,12 @@ const PaymentOrders = () => {
   const [toast, setToast] = useState<string | null>(null);
   // details modal
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
+
+  // Filtro de estado para la cola de aprobación
+  const [statusFilter, setStatusFilter] = useState<'Todas las órdenes' | 'Urgentes' | 'Vencidas'>('Todas las órdenes');
+
+  // Método de pago preferido por orden (fila), seleccionado antes de aprobar
+  const [rowMethods, setRowMethods] = useState<Record<string, string>>({});
 
   // Manual invoice modal states
   const [isManualOpen, setIsManualOpen] = useState(false);
@@ -128,7 +134,15 @@ const PaymentOrders = () => {
     { label: 'Pagadas Mes', value: '0', desc: '$0.00 ejecutados', color: 'text-green-600' },
   ];
 
-  const displayOrders = pendingOrders;
+  const displayOrders = useMemo(() => {
+    if (statusFilter === 'Urgentes') {
+      return pendingOrders.filter(o => (o.priority || o.prioridad) === 'Alta');
+    }
+    if (statusFilter === 'Vencidas') {
+      return pendingOrders.filter(o => (o.due || o.vencimiento) === 'Vencida');
+    }
+    return pendingOrders;
+  }, [pendingOrders, statusFilter]);
 
   return (
     <div className="space-y-4 animate-in fade-in duration-500 pb-20">
@@ -181,7 +195,11 @@ const PaymentOrders = () => {
             <h2 className="text-xl font-black text-[#0b5156] uppercase tracking-tighter">Cola de Aprobación</h2>
             <p className="text-xs font-bold text-slate-500 uppercase">Desembolsos pendientes de autorización fiscal y financiera.</p>
           </div>
-          <select className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-xs font-black text-[#0b5156] outline-none focus:border-[#0b5156] uppercase">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+            className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-xs font-black text-[#0b5156] outline-none focus:border-[#0b5156] uppercase"
+          >
             <option>Todas las órdenes</option>
             <option>Urgentes</option>
             <option>Vencidas</option>
@@ -236,10 +254,14 @@ const PaymentOrders = () => {
                       {order.due || order.vencimiento}
                     </td>
                     <td className="py-4 px-2">
-                      <select className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-black text-[#0b5156] outline-none focus:border-[#0b5156] uppercase">
-                        <option>{order.method || order.metodo}</option>
-                        <option>Zelle / Custodia</option>
-                        <option>USD Efectivo</option>
+                      <select
+                        value={rowMethods[order.id || order.orden] || order.method || order.metodo || 'Transferencia'}
+                        onChange={(e) => setRowMethods(prev => ({ ...prev, [order.id || order.orden]: e.target.value }))}
+                        className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-black text-[#0b5156] outline-none focus:border-[#0b5156] uppercase"
+                      >
+                        <option value="Transferencia">Transferencia</option>
+                        <option value="Zelle">Zelle / Custodia</option>
+                        <option value="Efectivo">USD Efectivo</option>
                       </select>
                     </td>
                     <td className="py-4 px-2 text-center">
@@ -249,8 +271,11 @@ const PaymentOrders = () => {
                     </td>
                     <td className="py-4 px-4 text-right">
                       <div className="flex flex-col items-end gap-1">
-                        <button 
-                          onClick={() => setPayingOrder(order)}
+                        <button
+                          onClick={() => {
+                            setPayingOrder(order);
+                            setMetodo(rowMethods[order.id || order.orden] || order.method || order.metodo || 'Transferencia');
+                          }}
                           disabled={(order.status || order.estado) === 'Blocked'}
                           className={`text-xs font-black uppercase px-3 py-1.5 rounded-lg transition-all shadow-sm ${(order.status || order.estado) === 'Blocked' ? 'bg-white text-slate-300 cursor-not-allowed' : 'bg-[#0b5156] text-white hover:bg-[#083a3d]'}`}
                         >

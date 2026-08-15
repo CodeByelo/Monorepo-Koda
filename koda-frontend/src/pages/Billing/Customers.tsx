@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { 
   Users, 
@@ -33,13 +34,23 @@ interface Cliente {
   es_contribuyente_especial?: boolean;
 }
 
+interface CxcRow {
+  cliente: string;
+  rif: string;
+  saldo: number;
+  fecha_emision: string;
+  fecha_vencimiento: string;
+}
+
 const Customers = () => {
+  const navigate = useNavigate();
   const [customers, setCustomers] = useState<Cliente[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Cliente | null>(null);
+  const [cxcRows, setCxcRows] = useState<CxcRow[]>([]);
 
   // Modal States
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -106,7 +117,51 @@ const Customers = () => {
 
   useEffect(() => {
     fetchCustomers();
+    // Saldos y condición de pago reales, derivados de las cuentas por cobrar
+    // pendientes (no hay estos datos en el modelo de Cliente).
+    api.get<CxcRow[]>('/cobranzas/cuentas').then((rows) => {
+      setCxcRows(rows || []);
+    }).catch(() => setCxcRows([]));
   }, []);
+
+  const parseDdMmYyyy = (s: string): Date | null => {
+    const parts = (s || '').split('/');
+    if (parts.length !== 3) return null;
+    const [d, m, y] = parts.map(Number);
+    if (!d || !m || !y) return null;
+    return new Date(y, m - 1, d);
+  };
+
+  // Mapa RIF -> saldo pendiente y condición de pago, derivado de /cobranzas/cuentas.
+  const clienteFinancials = useMemo(() => {
+    const byRif = new Map<string, { saldo: number; ultimaFecha: Date | null; condicion: string }>();
+    for (const row of cxcRows) {
+      const existing = byRif.get(row.rif) || { saldo: 0, ultimaFecha: null, condicion: 'Contado' };
+      existing.saldo += row.saldo || 0;
+
+      const emision = parseDdMmYyyy(row.fecha_emision);
+      const vencimiento = parseDdMmYyyy(row.fecha_vencimiento);
+      if (emision && (!existing.ultimaFecha || emision > existing.ultimaFecha)) {
+        existing.ultimaFecha = emision;
+        if (vencimiento) {
+          const dias = Math.round((vencimiento.getTime() - emision.getTime()) / (1000 * 60 * 60 * 24));
+          existing.condicion = dias > 0 ? `Crédito ${dias}D` : 'Contado';
+        }
+      }
+      byRif.set(row.rif, existing);
+    }
+    return byRif;
+  }, [cxcRows]);
+
+  const totalCuentasPorCobrar = useMemo(
+    () => cxcRows.reduce((acc, r) => acc + (r.saldo || 0), 0),
+    [cxcRows]
+  );
+
+  const clientesConSaldoPendiente = useMemo(
+    () => new Set(cxcRows.filter(r => (r.saldo || 0) > 0).map(r => r.rif)).size,
+    [cxcRows]
+  );
 
   const handleOpenCreateModal = () => {
     setEditingCustomer(null);
@@ -218,8 +273,8 @@ const Customers = () => {
         {[
           { t: 'Clientes Totales', v: totalClientes, desc: 'En directorio activo', c: 'text-[#0b5156]', i: Users },
           { t: 'Contribuyentes Especiales', v: contribuyentesEspeciales, desc: 'Agentes de retencion (Jurídicos)', c: 'text-[#43584b]', i: ShieldCheck },
-          { t: 'Cuentas por Cobrar', v: '$0.00', desc: 'Saldo total adeudado', c: 'text-red-600', i: TrendingUp },
-          { t: 'Nuevos (Mes)', v: '+0', desc: 'Crecimiento de cartera', c: 'text-[#0b5156]', i: History }
+          { t: 'Cuentas por Cobrar', v: `$${totalCuentasPorCobrar.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`, desc: 'Saldo total adeudado', c: 'text-red-600', i: TrendingUp },
+          { t: 'Con Saldo Pendiente', v: clientesConSaldoPendiente, desc: 'Clientes con deuda activa', c: 'text-[#0b5156]', i: History }
         ].map((kpi, i) => (
           <div key={i} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm h-full flex flex-col">
             <div className="flex justify-between items-start min-h-[32px] mb-1">
@@ -279,6 +334,7 @@ const Customers = () => {
                 <tbody className="divide-y divide-slate-50">
                   {filteredCustomers.map((c, i) => {
                     const isSpecial = c.es_contribuyente_especial;
+                    const financials = clienteFinancials.get(c.rif);
                     return (
                       <tr 
                         key={i} 
@@ -297,9 +353,9 @@ const Customers = () => {
                              {isSpecial ? 'SI' : 'NO'}
                            </span>
                         </td>
-                        <td className="py-5 px-6 text-center text-xs font-bold text-slate-500 uppercase">Contado</td>
-                        <td className="py-5 px-6 text-right font-black text-slate-300">
-                          $0.00
+                        <td className="py-5 px-6 text-center text-xs font-bold text-slate-500 uppercase">{financials?.condicion || 'Contado'}</td>
+                        <td className={`py-5 px-6 text-right font-black ${financials && financials.saldo > 0 ? 'text-red-600' : 'text-slate-300'}`}>
+                          ${(financials?.saldo || 0).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
                         </td>
                         <td className="py-5 px-6 text-center" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-center gap-2">
@@ -362,7 +418,10 @@ const Customers = () => {
                </div>
 
                <div className="pt-6">
-                  <button className="w-full bg-[#0b5156] text-white font-black py-5 rounded-2xl uppercase text-sm tracking-widest flex items-center justify-center gap-2 shadow-xl shadow-[#0b5156]/20 hover:scale-[1.02] transition-all">
+                  <button
+                    onClick={() => navigate(`/cobranzas/estado-cuenta?cliente_id=${selectedCustomer.id}`)}
+                    className="w-full bg-[#0b5156] text-white font-black py-5 rounded-2xl uppercase text-sm tracking-widest flex items-center justify-center gap-2 shadow-xl shadow-[#0b5156]/20 hover:scale-[1.02] transition-all"
+                  >
                     Ver Historial de Pagos <ExternalLink size={16} />
                   </button>
                </div>

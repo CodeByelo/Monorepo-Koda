@@ -275,13 +275,21 @@ const PaymentsDashboard = () => {
                     </td>
                     <td className="py-4 px-4 text-right text-xs font-black text-[#0b5156] font-mono">{p.today || p.hoy}</td>
                     <td className="py-4 px-4 text-right">
-                      <button 
+                      <button
                         onClick={() => {
                           if (isFixed) {
-                            showToast("Acción Diferir no implementada, se procederá al pago.");
+                            // No existe (todavía) una función real de diferimiento de pagos
+                            // en el backend (no hay endpoint para posponer/aplazar una CxP).
+                            // Antes este botón afirmaba "no implementada" y de todas formas
+                            // abría el modal de pago sin preguntar — lo opuesto de lo que
+                            // decía. Ahora se pide confirmación explícita antes de proceder.
+                            const proceed = window.confirm(
+                              "Diferir pago aún no está implementado. ¿Desea proceder con el pago inmediato de todas formas?"
+                            );
+                            if (!proceed) return;
                           }
                           setPayingOrder(p);
-                        }} 
+                        }}
                         className={`text-xs font-black uppercase px-4 py-2 rounded-xl transition-all ${isFixed ? 'bg-white text-slate-500 hover:bg-slate-200 border border-slate-200' : 'bg-[#0b5156] text-white hover:bg-[#083a3d]'}`}
                       >
                         {isFixed ? 'Diferir' : 'Pagar'}

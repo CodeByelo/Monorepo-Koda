@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { api } from '@/api/client';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -14,7 +14,8 @@ import {
   ArrowRight,
   ShieldCheck,
   Zap,
-  X
+  X,
+  Loader2
 } from 'lucide-react';
 
 const CreditNotes = () => {
@@ -34,6 +35,13 @@ const CreditNotes = () => {
 
   // Toast State
   const [toast, setToast] = useState<{message: string, type: 'error' | 'success'} | null>(null);
+
+  // Historial: búsqueda local
+  const [historySearch, setHistorySearch] = useState('');
+
+  // Ver Factura Original (modal)
+  const [viewedInvoice, setViewedInvoice] = useState<any | null>(null);
+  const [isLoadingInvoice, setIsLoadingInvoice] = useState(false);
 
   const showToast = (message: string, type: 'error' | 'success' = 'error') => {
     setToast({ message, type });
@@ -144,6 +152,34 @@ const CreditNotes = () => {
         console.error(err);
         showToast(err.response?.data?.detail || `Error al crear la ${noteType.toLowerCase()}`, "error");
       });
+  };
+
+  const filteredNotes = useMemo(() => {
+    if (!historySearch.trim()) return notes;
+    const q = historySearch.trim().toLowerCase();
+    return notes.filter((n) =>
+      String(n.id).toLowerCase().includes(q) ||
+      String(n.invoice).toLowerCase().includes(q) ||
+      String(n.client).toLowerCase().includes(q) ||
+      String(n.reason || '').toLowerCase().includes(q) ||
+      String(n.status).toLowerCase().includes(q)
+    );
+  }, [notes, historySearch]);
+
+  const handleViewOriginalInvoice = async () => {
+    if (!invoiceNum.trim()) {
+      showToast('Debe buscar e ingresar una factura relacionada', 'error');
+      return;
+    }
+    setIsLoadingInvoice(true);
+    try {
+      const data = await api.get<any>(`/ventas/${invoiceNum.trim().toUpperCase()}`);
+      setViewedInvoice(data);
+    } catch (err: any) {
+      showToast(err.message || `No se pudo encontrar la factura ${invoiceNum.toUpperCase()}`, 'error');
+    } finally {
+      setIsLoadingInvoice(false);
+    }
   };
 
   // KPIs calculations based on notes
@@ -271,11 +307,13 @@ const CreditNotes = () => {
                 <button onClick={handleSaveNote} className="bg-[#0b5156] text-white px-8 py-3 rounded-2xl text-xs font-black uppercase shadow-xl shadow-[#0b5156]/20 hover:scale-105 transition-all">
                    Guardar y Vincular Nota
                 </button>
-                <button 
+                <button
                   type="button"
-                  onClick={() => invoiceNum ? showToast(`Abriendo visor de Factura Original para ${invoiceNum.toUpperCase()}...`, 'success') : showToast('Debe buscar e ingresar una factura relacionada', 'error')}
-                  className="bg-white text-slate-500 px-8 py-3 rounded-2xl text-xs font-black uppercase border border-slate-200 hover:bg-slate-50 transition-all"
+                  onClick={handleViewOriginalInvoice}
+                  disabled={isLoadingInvoice}
+                  className="bg-white text-slate-500 px-8 py-3 rounded-2xl text-xs font-black uppercase border border-slate-200 hover:bg-slate-50 transition-all disabled:opacity-50 flex items-center gap-2"
                 >
+                   {isLoadingInvoice && <Loader2 size={14} className="animate-spin" />}
                    Ver Factura Original
                 </button>
              </div>
@@ -289,7 +327,13 @@ const CreditNotes = () => {
                 </div>
                 <div className="relative">
                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
-                   <input type="text" placeholder="BUSCAR REGISTRO..." className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-black focus:outline-none focus:border-[#0b5156] uppercase" />
+                   <input
+                     type="text"
+                     value={historySearch}
+                     onChange={(e) => setHistorySearch(e.target.value)}
+                     placeholder="BUSCAR REGISTRO..."
+                     className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-black focus:outline-none focus:border-[#0b5156] uppercase"
+                   />
                 </div>
              </div>
              <div className="overflow-x-auto no-scrollbar">
@@ -305,8 +349,8 @@ const CreditNotes = () => {
                       </tr>
                    </thead>
                    <tbody className="divide-y divide-slate-50">
-                      {notes.length > 0 ? (
-                        notes.map(note => (
+                      {filteredNotes.length > 0 ? (
+                        filteredNotes.map(note => (
                           <tr key={note.id} className="group hover:bg-slate-50 transition-colors">
                              <td className="py-5 px-8">
                                 <span className="block text-sm text-slate-800 font-black font-mono">{note.id}</span>
@@ -328,7 +372,9 @@ const CreditNotes = () => {
                       ) : (
                         <tr>
                            <td colSpan={6} className="py-8 text-center text-slate-400 font-bold uppercase text-xs">
-                              No hay notas de crédito/débito emitidas.
+                              {notes.length === 0
+                                ? 'No hay notas de crédito/débito emitidas.'
+                                : 'Ningún registro coincide con la búsqueda.'}
                            </td>
                         </tr>
                       )}
@@ -416,6 +462,47 @@ const CreditNotes = () => {
           </article>
         </aside>
       </div>
+
+      {/* Modal: Ver Factura Original */}
+      {viewedInvoice && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden border border-slate-200 animate-in zoom-in-95 duration-200 my-8">
+            <div className="bg-[#0b5156] p-6 text-white relative flex justify-between items-center">
+              <div>
+                <h3 className="text-2xl font-black uppercase tracking-tighter">Factura {viewedInvoice.numero_factura}</h3>
+                <p className="text-white/80 text-[10px] font-bold uppercase tracking-widest mt-1">Documento original vinculado a esta nota</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewedInvoice(null)}
+                className="text-white/70 hover:text-white bg-white/10 p-2 rounded-xl"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4 text-xs font-bold uppercase">
+              <div className="grid grid-cols-2 gap-4 border-b border-slate-100 pb-4 text-slate-600">
+                <div>
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">Cliente</span>
+                  <strong className="text-slate-700 uppercase font-black">{viewedInvoice.cliente?.nombre || 'Consumidor Final'}</strong>
+                  <span className="block text-slate-400 font-mono font-bold">{viewedInvoice.cliente?.rif || '-'}</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">Fecha</span>
+                  <strong className="text-slate-700">{viewedInvoice.fecha ? new Date(viewedInvoice.fecha).toLocaleDateString('es-VE') : '-'}</strong>
+                  <span className="block text-slate-400">{viewedInvoice.estado}</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4 text-slate-600">
+                <div className="flex justify-between"><span>Subtotal</span><strong className="text-slate-800">${Number(viewedInvoice.subtotal_usd || 0).toFixed(2)}</strong></div>
+                <div className="flex justify-between"><span>IVA</span><strong className="text-slate-800">${Number(viewedInvoice.iva_usd || 0).toFixed(2)}</strong></div>
+                <div className="flex justify-between"><span>IGTF</span><strong className="text-slate-800">${Number(viewedInvoice.igtf_usd || 0).toFixed(2)}</strong></div>
+                <div className="flex justify-between border-t border-slate-100 pt-2"><span className="text-[#0b5156]">Total</span><strong className="text-[#0b5156] text-lg">${Number(viewedInvoice.total_usd || 0).toFixed(2)}</strong></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast Notification */}
       {toast && (

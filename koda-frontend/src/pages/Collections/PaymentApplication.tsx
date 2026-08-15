@@ -30,6 +30,8 @@ const PaymentApplication = () => {
   const [pendingPayments, setPendingPayments] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [toastMessage, setToastMessage] = useState<{msg: string, type: 'success' | 'error'} | null>(null);
+  const [diferenciaMotivo, setDiferenciaMotivo] = useState('Comisión Bancaria (Gasto)');
+  const [applyingId, setApplyingId] = useState<string | null>(null);
 
   const handleShowToast = (msg: string, type: 'success' | 'error' = 'success') => {
     setToastMessage({msg, type});
@@ -92,21 +94,41 @@ const PaymentApplication = () => {
 
   const difference = totalInCesta - invoiceBalance;
 
+  const fetchAplicacionData = async () => {
+    setIsLoading(true);
+    try {
+      const data = await api.get<any>(`/cobranzas/aplicacion?factura_id=${facturaId}`);
+      setKpis(data?.kpis || []);
+      setPendingPayments(data?.pagos_pendientes || data?.pendientes || []);
+    } catch (error) {
+      console.error("Error fetching payment application data:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchData = async () => {
-      setIsLoading(true);
-      try {
-        const data = await api.get<any>(`/cobranzas/aplicacion?factura_id=${facturaId}`);
-        setKpis(data?.kpis || []);
-        setPendingPayments(data?.pagos_pendientes || data?.pendientes || []);
-      } catch (error) {
-        console.error("Error fetching payment application data:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchData();
+    fetchAplicacionData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [facturaId]);
+
+  const handleAplicarPendiente = async (p: any) => {
+    const docId = p.id || p.documento;
+    if (!docId) return;
+    setApplyingId(docId);
+    try {
+      await api.post('/cobranzas/aplicacion/procesar', {
+        factura_id: docId,
+        monto: parseAmount(p.amount || p.monto),
+      });
+      handleShowToast(`Pago de ${docId} aplicado exitosamente.`);
+      await fetchAplicacionData();
+    } catch (error: any) {
+      handleShowToast(error.message || `Error al aplicar el pago de ${docId}.`, 'error');
+    } finally {
+      setApplyingId(null);
+    }
+  };
 
   const handleProcesarCobro = async () => {
     if (!facturaId) {
@@ -124,13 +146,15 @@ const PaymentApplication = () => {
         metodos: methods,
         monto: totalInCesta,
         diferencia: difference,
-        accion_diferencia: difference < 0 ? 'Faltante' : difference > 0 ? 'Excedente' : 'Sin diferencia'
+        accion_diferencia: difference < 0 ? 'Faltante' : difference > 0 ? 'Excedente' : 'Sin diferencia',
+        motivo_diferencia: difference !== 0 ? diferenciaMotivo : null
       });
       handleShowToast('Pago procesado y aplicado exitosamente.');
       setMethods([]); // Clear methods after success
+      await fetchAplicacionData();
     } catch (error: any) {
       console.error("Error processing payment:", error);
-      handleShowToast(error.response?.data?.detail || 'Error al procesar el pago.', 'error');
+      handleShowToast(error.message || 'Error al procesar el pago.', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -310,7 +334,11 @@ const PaymentApplication = () => {
                        <AlertCircle size={14} />
                        <span className="text-xs font-black uppercase tracking-tighter">Diferencia: ${difference.toFixed(2)}</span>
                     </div>
-                    <select className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-black text-slate-700 outline-none">
+                    <select
+                      value={diferenciaMotivo}
+                      onChange={(e) => setDiferenciaMotivo(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-black text-slate-700 outline-none"
+                    >
                        <option>Comisión Bancaria (Gasto)</option>
                        <option>Pérdida Cambiaria</option>
                     </select>
@@ -340,8 +368,12 @@ const PaymentApplication = () => {
                            <p className="text-xs font-black text-slate-700 uppercase tracking-tight">{p.client || p.cliente}</p>
                            <div className="flex justify-between items-center pt-2 border-t border-slate-200/40">
                               <span className="text-sm font-black text-[#0b5156] font-mono">{p.amount || p.monto}</span>
-                              <button className="bg-[#0b5156] text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest hover:scale-[1.02] active:scale-[0.98] transition-all">
-                                 Aplicar
+                              <button
+                                onClick={() => handleAplicarPendiente(p)}
+                                disabled={applyingId === (p.id || p.documento)}
+                                className="bg-[#0b5156] text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50"
+                              >
+                                 {applyingId === (p.id || p.documento) ? 'Aplicando...' : 'Aplicar'}
                               </button>
                            </div>
                         </div>
