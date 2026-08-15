@@ -42,12 +42,15 @@ class Producto(Base):
 
 class Venta(Base):
     __tablename__ = "ventas"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'numero_factura', name='_tenant_ventas_numero_factura_uc'),
+        {'schema': 'public'}
+    )
     tenant_id = Column(UUID(as_uuid=True))
 
     id = Column(Integer, primary_key=True, index=True)
     cliente_id = Column(Integer, ForeignKey("public.clientes.id"), index=True, nullable=True)
-    numero_factura = Column(String(50), unique=True, index=True, nullable=False)
+    numero_factura = Column(String(50), index=True, nullable=False)
     fecha = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     subtotal_usd = Column(Numeric(15, 2), nullable=False)
     iva_usd = Column(Numeric(15, 2), nullable=False)  # IVA 16% sobre productos no exentos
