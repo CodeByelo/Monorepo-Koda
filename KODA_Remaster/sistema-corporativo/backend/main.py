@@ -1077,7 +1077,7 @@ async def login_compat(
                o.name as tenant_name,
                p.permisos,
                p.gerencia_id, g.nombre as gerencia_nombre,
-               p.estado, p.mfa_enabled, p.totp_secret
+               p.estado, p.mfa_enabled, p.totp_secret, o.subscription_status
         FROM profiles p
         LEFT JOIN roles r ON p.rol_id = r.id
         LEFT JOIN gerencias g ON p.gerencia_id = g.id
@@ -1180,6 +1180,27 @@ async def login_compat(
         except Exception:
             pass
 
+    # Suscripción cancelada del tenant: bloquear el login por completo.
+    if user["subscription_status"] == "canceled":
+        try:
+            await _ensure_security_events_table(conn)
+            await conn.execute(
+                """
+                INSERT INTO security_events (tenant_id, user_id, username, evento, detalles, estado, page, ip_origen)
+                VALUES ($1::uuid, $2::uuid, $3, 'LOGIN_BLOCKED_SUBSCRIPTION_CANCELED', 'Intento de login con suscripcion cancelada', 'danger', '/login', $4)
+                """,
+                user["tenant_id"],
+                user["id"],
+                user["username"],
+                client_ip,
+            )
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=402,
+            detail="Su suscripción ha sido cancelada. Contacte a soporte para reactivar su cuenta."
+        )
+
     role_norm = _normalize_text(user["nombre_rol"])
     is_dev = role_norm in {"desarrollador", "dev", "developer"}
 
@@ -1250,6 +1271,7 @@ async def login_compat(
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "bearer",
+        "subscription_warning": user["subscription_status"] == "past_due",
         "user": {
             "id": str(user["id"]),
             "username": user["username"],
@@ -1262,6 +1284,7 @@ async def login_compat(
             "gerencia_id": user["gerencia_id"],
             "gerencia_depto": user["gerencia_nombre"],
             "permissions": _parse_permissions(user["permisos"]),
+            "subscription_status": user["subscription_status"],
         },
     }
     from fastapi.responses import JSONResponse as _JSONResp
@@ -1293,7 +1316,7 @@ async def validate_auth_session(
         SELECT p.id, p.username, p.nombre, p.apellido, p.email, p.estado, p.permisos,
                p.gerencia_id, COALESCE(g.nombre, 'Sin Asignar') as gerencia_depto,
                COALESCE(r.nombre_rol, 'Usuario') as role,
-               p.tenant_id, o.name as tenant_name
+               p.tenant_id, o.name as tenant_name, o.subscription_status
         FROM profiles p
         LEFT JOIN roles r ON p.rol_id = r.id
         LEFT JOIN gerencias g ON p.gerencia_id = g.id
@@ -1317,8 +1340,17 @@ async def validate_auth_session(
     if profile["estado"] is False:
         raise HTTPException(status_code=403, detail="Usuario inactivo")
 
+    # Sesiones de larga duración deben perder acceso si la suscripción del
+    # tenant pasa a "canceled" en medio de la sesión (no solo al hacer login).
+    if profile["subscription_status"] == "canceled":
+        raise HTTPException(
+            status_code=402,
+            detail="Su suscripción ha sido cancelada. Contacte a soporte para reactivar su cuenta."
+        )
+
     return {
         "authenticated": True,
+        "subscription_warning": profile["subscription_status"] == "past_due",
         "user": {
             "id": str(profile["id"]),
             "username": profile["username"],
@@ -1331,6 +1363,7 @@ async def validate_auth_session(
             "tenant_id": str(profile["tenant_id"]) if profile["tenant_id"] else None,
             "tenant_name": profile["tenant_name"],
             "permissions": _parse_permissions(profile["permisos"]),
+            "subscription_status": profile["subscription_status"],
         },
     }
 

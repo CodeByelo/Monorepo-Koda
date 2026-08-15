@@ -7,6 +7,7 @@ from database.async_db import get_db_connection
 from auth.security import verify_password, get_password_hash, create_access_token, create_refresh_token, verify_totp
 from auth.supabase_auth import get_current_user
 from datetime import datetime, timedelta
+from services.tenant_status import get_active_user_count_and_limit
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -140,7 +141,7 @@ async def login(login_data: UserLogin, request: Request, conn = Depends(get_db_c
     query = """
         SELECT p.id, p.username, p.nombre, p.apellido, p.password_hash, p.email,
                p.rol_id, r.nombre_rol, p.tenant_id, o.name as tenant_name, p.gerencia_id, g.nombre as gerencia_nombre,
-               p.mfa_enabled, p.totp_secret
+               p.mfa_enabled, p.totp_secret, o.subscription_status
         FROM profiles p
         LEFT JOIN roles r ON p.rol_id = r.id
         LEFT JOIN gerencias g ON p.gerencia_id = g.id
@@ -167,6 +168,25 @@ async def login(login_data: UserLogin, request: Request, conn = Depends(get_db_c
             gerencia_id=user["gerencia_id"] if user else None,
         )
         raise HTTPException(status_code=401, detail="Credenciales incorrectas")
+
+    # Suscripción cancelada del tenant: bloquear el login por completo.
+    if user["subscription_status"] == "canceled":
+        await _log_security_event(
+            conn,
+            tenant_id=user["tenant_id"],
+            user_id=user["id"],
+            username=user["username"],
+            evento="LOGIN_BLOCKED_SUBSCRIPTION_CANCELED",
+            detalles="Intento de login con suscripción cancelada",
+            estado="danger",
+            page="/auth/login",
+            ip_origen=_extract_client_ip(request),
+            gerencia_id=user["gerencia_id"],
+        )
+        raise HTTPException(
+            status_code=402,
+            detail="Su suscripción ha sido cancelada. Contacte a soporte para reactivar su cuenta."
+        )
 
     role_norm = user["nombre_rol"].lower().strip() if user["nombre_rol"] else ""
     is_dev = role_norm in {"desarrollador", "dev", "developer"}
@@ -233,6 +253,7 @@ async def login(login_data: UserLogin, request: Request, conn = Depends(get_db_c
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "bearer",
+        "subscription_warning": user["subscription_status"] == "past_due",
         "user": {
             "id": str(user['id']),
             "username": user['username'],
@@ -243,7 +264,8 @@ async def login(login_data: UserLogin, request: Request, conn = Depends(get_db_c
             "gerencia_id": user['gerencia_id'],
             "gerencia_depto": user['gerencia_nombre'],
             "tenant_id": str(user['tenant_id']) if user['tenant_id'] else None,
-            "tenant_name": user['tenant_name']
+            "tenant_name": user['tenant_name'],
+            "subscription_status": user["subscription_status"],
         }
     }
 
@@ -314,6 +336,16 @@ async def claim_account(payload: AccountClaim, request: Request, conn = Depends(
         )
         if existing:
             raise HTTPException(status_code=400, detail="Usuario o Email ya registrado")
+
+        # 3b. Validar límite de usuarios del plan antes de crear la cuenta
+        limits = await get_active_user_count_and_limit(conn, tenant_id)
+        if limits is not None:
+            active_users, resolved_max_users = limits
+            if active_users >= resolved_max_users:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Límite de usuarios alcanzado para su plan. Contacte a soporte para actualizar su plan."
+                )
 
         hashed_pw = get_password_hash(payload.password)
 
