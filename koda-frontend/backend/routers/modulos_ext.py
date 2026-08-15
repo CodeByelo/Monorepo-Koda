@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, date, timezone, timedelta
 from decimal import Decimal
 
 from backend.core.database import get_db

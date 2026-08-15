@@ -60,49 +60,6 @@ const ImportStatement = () => {
     }, 4500);
   };
 
-  const handleSimulateFile = (profile: string) => {
-    setFileName(`extracto_${profile.toLowerCase().replace(' ', '_')}_bcv.csv`);
-    setFileSize("12 KB");
-    setRawRows([]);
-    setFileLoaded(true);
-    
-    const simCols = [
-      'Columna A (FECHA)',
-      'Columna B (REF)',
-      'Columna C (CONCEPTO)',
-      'Columna D (MONTO)',
-      'Columna A (TRANS_ID)',
-      'Columna B (DATE_VAL)',
-      'Columna C (VALUE_BS)',
-      'Columna D (GL_DESC)'
-    ];
-    setColumns(simCols);
-
-    if (profile === 'Banesco Corp') {
-      setDateCol('Columna A (FECHA)');
-      setRefCol('Columna B (REF)');
-      setDescCol('Columna C (CONCEPTO)');
-      setAmountCol('Columna D (MONTO)');
-    } else if (profile === 'Mercantil Pyme') {
-      setDateCol('Columna B (DATE_VAL)');
-      setRefCol('Columna A (TRANS_ID)');
-      setDescCol('Columna D (GL_DESC)');
-      setAmountCol('Columna C (VALUE_BS)');
-    } else {
-      setDateCol('Columna A (FECHA)');
-      setRefCol('Columna C (REFERENCIA)');
-      setDescCol('Columna B (DESCRIPCION)');
-      setAmountCol('Columna D (MONTO)');
-    }
-
-    setPreviewData([
-      { date: '2026-06-15', ref: 'REF-98382', concept: 'PAGO MOVIL RECIBIDO - INVERSIONES EL FARO', amount: 'Bs. 12,500.00', num: 12500.0 },
-      { date: '2026-06-16', ref: 'REF-10492', concept: 'TRANSFERENCIA ENVIADA - ALCABALA SENIAT', amount: '-Bs. 45,000.00', num: -45000.0 },
-      { date: '2026-06-18', ref: 'REF-33291', concept: 'COBRO DE FACTURA COMERCIAL - TECHCORP', amount: 'Bs. 85,300.00', num: 85300.0 }
-    ]);
-    triggerNotification(`Perfil ${profile} cargado con datos simulados del extracto.`);
-  };
-
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
@@ -165,7 +122,7 @@ const ImportStatement = () => {
       }
       triggerNotification(`Perfil ${p} aplicado al archivo actual.`);
     } else {
-      handleSimulateFile(p);
+      triggerNotification('Cargue un extracto bancario real antes de aplicar un perfil de mapeo.');
     }
   };
 
