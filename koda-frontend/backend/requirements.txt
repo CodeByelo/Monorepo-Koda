@@ -12,5 +12,6 @@ reportlab>=4.1.0
 psycopg2-binary>=2.9.9
 email-validator>=2.1.0.post1
 redis>=5.0.0
+sentry-sdk[fastapi]>=2.0.0
 
 
