@@ -118,7 +118,6 @@ export const QuotationForm: React.FC<QuotationFormProps> = ({ onCancel, onSubmit
       };
       
       const response = await api.post<any>('/ventas/cotizaciones', formData);
-      console.log('Cotización creada con éxito:', response);
       onSubmit(response);
     } catch (error: any) {
       console.error('Error al guardar cotización:', error);

@@ -210,8 +210,7 @@ const Quotations = () => {
       <div className="space-y-6 animate-in fade-in duration-500 pb-20">
         <QuotationForm
           onCancel={() => setIsCreating(false)}
-          onSubmit={(formData) => {
-            console.log("Generando cotización:", formData);
+          onSubmit={() => {
             setIsCreating(false);
             fetchQuotations();
           }}
@@ -238,10 +237,7 @@ const Quotations = () => {
                <BookOpen size={16} className="text-blue-500" /> Manual de esta Opcion
              </button>
              <button
-               onClick={() => {
-                 console.log("Abriendo modal/vista de creación");
-                 setIsCreating(true);
-               }}
+               onClick={() => setIsCreating(true)}
                className="bg-slate-900 text-white px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 tracking-widest shadow-lg"
              >
                Nueva Cotizacion
