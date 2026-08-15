@@ -48,13 +48,19 @@ export const SessionGuard: React.FC = () => {
       : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000');
     const backendWsUrl = resolvedApiUrl.replace('http', 'ws');
     const sgdToken = typeof window !== 'undefined' ? localStorage.getItem('sgd_token') || '' : '';
-    const wsUrl = `${backendWsUrl}/api/session/connect?token=${encodeURIComponent(sgdToken)}&modulo=${encodeURIComponent(activeSystem)}&device=${encodeURIComponent(deviceName)}`;
-    
+    const wsUrl = `${backendWsUrl}/api/session/connect?modulo=${encodeURIComponent(activeSystem)}&device=${encodeURIComponent(deviceName)}`;
+
     let ws: WebSocket;
     let reconnectTimeout: NodeJS.Timeout;
 
     const connect = () => {
       ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        // Send the JWT as the first message instead of a query param so it
+        // never appears in the HTTP handshake / access logs.
+        ws.send(JSON.stringify({ type: 'auth', token: sgdToken }));
+      };
 
       ws.onmessage = (event) => {
         try {

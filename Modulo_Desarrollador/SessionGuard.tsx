@@ -34,13 +34,19 @@ export const SessionGuard: React.FC = () => {
     else if (ua.includes("Macintosh")) deviceName += " (macOS)";
     else if (ua.includes("Linux")) deviceName += " (Linux)";
 
-    const wsUrl = `${wsProto}//${wsHost}/api/session/connect?token=${encodeURIComponent(token)}&modulo=${encodeURIComponent(activeSystem)}&device=${encodeURIComponent(deviceName)}`;
-    
+    const wsUrl = `${wsProto}//${wsHost}/api/session/connect?modulo=${encodeURIComponent(activeSystem)}&device=${encodeURIComponent(deviceName)}`;
+
     let ws: WebSocket;
     let reconnectTimeout: any;
 
     const connect = () => {
       ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        // Send the JWT as the first message instead of a query param so it
+        // never appears in the HTTP handshake / access logs.
+        ws.send(JSON.stringify({ type: 'auth', token }));
+      };
 
       ws.onmessage = (event) => {
         try {
