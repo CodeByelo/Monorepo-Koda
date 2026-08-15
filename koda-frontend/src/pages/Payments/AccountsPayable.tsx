@@ -1,13 +1,15 @@
 import { useState, useEffect, useMemo } from 'react';
-import { 
-  Plus, 
-  FileText, 
-  Search, 
+import {
+  Plus,
+  FileText,
+  Search,
   Filter,
   Clock,
-  ArrowRight
+  ArrowRight,
+  Download,
+  ShieldCheck
 } from 'lucide-react';
-import { api } from '@/api/client';
+import { api, BASE_URL } from '@/api/client';
 
 const AccountsPayable = () => {
   const [metrics, setMetrics] = useState<any[]>([]);
@@ -39,6 +41,16 @@ const AccountsPayable = () => {
   const [montoTotalPlan, setMontoTotalPlan] = useState('');
   const [ordenFacturaRef, setOrdenFacturaRef] = useState('');
 
+  // Real aging (antigüedad) data — from /tesoreria/cuentas-por-pagar, mismo criterio
+  // de dias_vencido que usa /cobranzas para CxC (nada de cifras inventadas).
+  const [cxpAging, setCxpAging] = useState<any[]>([]);
+  const [tesoreriaKpis, setTesoreriaKpis] = useState<any[]>([]);
+
+  // Libro de Compras (SENIAT) export
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const [periodoLibro, setPeriodoLibro] = useState(currentMonth);
+  const [libroResumen, setLibroResumen] = useState<any>(null);
+
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 4000);
@@ -47,15 +59,19 @@ const AccountsPayable = () => {
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      const [data, bancosRes, provRes] = await Promise.all([
+      const [data, bancosRes, provRes, cxpAgingRes, kpisRes] = await Promise.all([
         api.get<any>('/pagos/cuentas'),
         api.get<any[]>('/tesoreria/bancos'),
-        api.get<any[]>('/proveedores')
+        api.get<any[]>('/proveedores'),
+        api.get<any[]>('/tesoreria/cuentas-por-pagar').catch(() => []),
+        api.get<any>('/tesoreria/cuentas-por-pagar/kpis').catch(() => null)
       ]);
       setMetrics(data?.metricas || []);
       setPayables(data?.facturas || data?.cuentas || []);
       setBancos(bancosRes || []);
       setProveedores(provRes || []);
+      setCxpAging(cxpAgingRes || []);
+      setTesoreriaKpis(kpisRes?.metricas || []);
       if (bancosRes && bancosRes.length > 0) {
         setBancoId(String(bancosRes[0].id));
       }
@@ -69,9 +85,73 @@ const AccountsPayable = () => {
     }
   };
 
+  const fetchLibroResumen = async () => {
+    try {
+      const data = await api.get<any>(`/fiscal/libro-compras?periodo=${periodoLibro}`);
+      setLibroResumen(data?.resumen || null);
+    } catch (error) {
+      console.error("Error fetching libro de compras resumen:", error);
+      setLibroResumen(null);
+    }
+  };
+
   useEffect(() => {
     fetchData();
   }, []);
+
+  useEffect(() => {
+    fetchLibroResumen();
+  }, [periodoLibro]);
+
+  const handleExportLibroCompras = (formato: 'txt' | 'xlsx' | 'pdf' = 'txt') => {
+    try {
+      const url = `${BASE_URL}/fiscal/libro-compras/exportar?periodo=${periodoLibro}&formato=${formato}`;
+      window.open(url, '_blank');
+    } catch (error) {
+      console.error(`Error al exportar ${formato}:`, error);
+    }
+  };
+
+  // Cuentas abiertas (no pagadas, con saldo real) para el reporte de antigüedad.
+  const openCxpAging = useMemo(
+    () => cxpAging.filter(c => c.estado_db !== 'PAGADA' && Number(c.saldo_raw) > 0),
+    [cxpAging]
+  );
+
+  // Distribución real por tramos de antigüedad (0-30 / 31-60 / 61-90 / +90),
+  // calculada sobre dias_vencido real que entrega el backend — reemplaza los
+  // montos hardcodeados que tenía este modal.
+  const agingBuckets = useMemo(() => {
+    const buckets = [
+      { label: '0 - 30 Días', min: 0, max: 30, total: 0, box: 'bg-slate-50 border-slate-200', label_c: 'text-slate-400', value_c: 'text-slate-700' },
+      { label: '31 - 60 Días', min: 31, max: 60, total: 0, box: 'bg-amber-50 border-amber-100', label_c: 'text-amber-600', value_c: 'text-amber-700' },
+      { label: '61 - 90 Días', min: 61, max: 90, total: 0, box: 'bg-orange-50 border-orange-100', label_c: 'text-orange-600', value_c: 'text-orange-700' },
+      { label: '+90 Días', min: 91, max: Infinity, total: 0, box: 'bg-red-50 border-red-100', label_c: 'text-red-600', value_c: 'text-red-700' },
+    ];
+    openCxpAging.forEach(c => {
+      const dias = Number(c.dias_vencido) || 0;
+      const bucket = buckets.find(b => dias >= b.min && dias <= b.max) || buckets[0];
+      bucket.total += Number(c.saldo_raw) || 0;
+    });
+    return buckets;
+  }, [openCxpAging]);
+
+  // Antigüedad agregada por proveedor. "Crítico" solo se marca cuando la mora
+  // real supera 30 días vencidos, el mismo umbral que usa el backend de
+  // /cobranzas/antiguedad-detalle para clasificar CxC como CRÍTICA.
+  const providerAging = useMemo(() => {
+    const map = new Map<string, { proveedor: string; rif: string; saldo: number; maxDias: number }>();
+    openCxpAging.forEach(c => {
+      const key = c.proveedor || 'N/A';
+      if (!map.has(key)) {
+        map.set(key, { proveedor: key, rif: c.rif, saldo: 0, maxDias: 0 });
+      }
+      const entry = map.get(key)!;
+      entry.saldo += Number(c.saldo_raw) || 0;
+      entry.maxDias = Math.max(entry.maxDias, Number(c.dias_vencido) || 0);
+    });
+    return Array.from(map.values()).sort((a, b) => b.maxDias - a.maxDias);
+  }, [openCxpAging]);
 
   const handleConfirmarPago = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -285,15 +365,68 @@ const AccountsPayable = () => {
           </div>
           <div className="space-y-1">
             <h3 className="text-lg font-black text-amber-700 uppercase tracking-tighter leading-none">Análisis de Antigüedad</h3>
-            <p className="text-xs font-bold text-amber-600 uppercase">Tienes facturas con mora crítica que pueden afectar tu crédito comercial.</p>
+            <p className="text-xs font-bold text-amber-600 uppercase">
+              {providerAging.some(p => p.maxDias > 30)
+                ? 'Tienes facturas con mora crítica que pueden afectar tu crédito comercial.'
+                : 'Sin proveedores en mora crítica (+30 días) por el momento.'}
+            </p>
           </div>
         </div>
-        <button 
+        <button
           onClick={() => setIsPlanOpen(true)}
           className="bg-amber-600 text-white px-6 py-3 rounded-xl text-xs font-black uppercase shadow-lg shadow-amber-900/20 flex items-center gap-2 hover:bg-amber-700 transition-all"
         >
           Generar Plan de Pagos <ArrowRight size={16} />
         </button>
+      </article>
+
+      {/* Libro de Compras (SENIAT) — export real, integrado desde Tesorería/CxP */}
+      <article className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div className="flex items-center gap-4">
+            <div className="p-4 bg-[#0b5156]/10 rounded-2xl text-[#0b5156]">
+              <ShieldCheck size={28} />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-lg font-black text-[#0b5156] uppercase tracking-tighter leading-none">Libro de Compras (SENIAT)</h3>
+              <p className="text-xs font-bold text-slate-500 uppercase">
+                Archivo TXT con la estructura exigida por la normativa, generado a partir de las compras registradas.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Periodo</span>
+              <input
+                type="month"
+                value={periodoLibro}
+                onChange={(e) => setPeriodoLibro(e.target.value)}
+                className="bg-transparent text-[#0b5156] font-mono text-xs font-black outline-none"
+              />
+            </div>
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Facturas</span>
+              <span className="text-xs font-black text-slate-700 font-mono">{libroResumen ? libroResumen.cantidad : '—'}</span>
+            </div>
+            <button
+              onClick={() => handleExportLibroCompras('txt')}
+              className="bg-[#0b5156] text-white px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center justify-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all"
+            >
+              <Download size={14} /> Descargar TXT
+            </button>
+          </div>
+        </div>
+        {tesoreriaKpis.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-100">
+            {tesoreriaKpis.map((k, i) => (
+              <div key={i} className="space-y-1">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{k.label}</p>
+                <strong className={`text-lg font-black ${k.color || 'text-slate-800'} font-mono`}>{k.value}</strong>
+                <p className="text-[10px] font-bold text-slate-400 uppercase">{k.desc}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </article>
 
       {/* Premium Toast Notification */}
@@ -418,22 +551,12 @@ const AccountsPayable = () => {
             </div>
 
             <div className="grid grid-cols-4 gap-4">
-              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-center space-y-1">
-                <span className="text-[9px] font-black text-slate-400 uppercase">0 - 30 Días</span>
-                <p className="text-lg font-black text-slate-700 font-mono">$1,250.00</p>
-              </div>
-              <div className="bg-green-50 p-4 rounded-2xl border border-green-100 text-center space-y-1">
-                <span className="text-[9px] font-black text-green-600 uppercase">31 - 60 Días</span>
-                <p className="text-lg font-black text-green-700 font-mono">$3,480.00</p>
-              </div>
-              <div className="bg-amber-50 p-4 rounded-2xl border border-amber-100 text-center space-y-1">
-                <span className="text-[9px] font-black text-amber-600 uppercase">61 - 90 Días</span>
-                <p className="text-lg font-black text-amber-700 font-mono">$0.00</p>
-              </div>
-              <div className="bg-red-50 p-4 rounded-2xl border border-red-100 text-center space-y-1">
-                <span className="text-[9px] font-black text-red-600 uppercase">+90 Días</span>
-                <p className="text-lg font-black text-red-700 font-mono">$4,730.00</p>
-              </div>
+              {agingBuckets.map((b, idx) => (
+                <div key={idx} className={`${b.box} p-4 rounded-2xl border text-center space-y-1`}>
+                  <span className={`text-[9px] font-black ${b.label_c} uppercase`}>{b.label}</span>
+                  <p className={`text-lg font-black ${b.value_c} font-mono`}>${b.total.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+                </div>
+              ))}
             </div>
 
             <div className="border border-slate-200 rounded-2xl overflow-hidden">
@@ -441,20 +564,30 @@ const AccountsPayable = () => {
                 <thead className="bg-slate-50 text-slate-500 font-black uppercase">
                   <tr>
                     <th className="p-3">Proveedor</th>
-                    <th className="p-3 text-right">Monto CxP</th>
-                    <th className="p-3 text-center">Mora Crítica</th>
+                    <th className="p-3 text-right">Saldo CxP</th>
+                    <th className="p-3 text-center">Días Vencido</th>
+                    <th className="p-3 text-center">Estado</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {proveedores.map((p, idx) => (
+                  {providerAging.length > 0 ? providerAging.map((p, idx) => (
                     <tr key={idx}>
-                      <td className="p-3 font-bold uppercase">{p.nombre}</td>
-                      <td className="p-3 text-right font-mono font-bold">$ {Number(p.saldo_deuda_usd || 1200).toLocaleString()}</td>
+                      <td className="p-3 font-bold uppercase">{p.proveedor}</td>
+                      <td className="p-3 text-right font-mono font-bold">${p.saldo.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                      <td className="p-3 text-center font-mono font-bold">{p.maxDias > 0 ? `${p.maxDias}d` : '-'}</td>
                       <td className="p-3 text-center">
-                        <span className="bg-red-50 text-red-600 px-2 py-0.5 rounded text-[9px] font-black uppercase">Crítico</span>
+                        {p.maxDias > 30 ? (
+                          <span className="bg-red-50 text-red-600 px-2 py-0.5 rounded text-[9px] font-black uppercase">Crítico</span>
+                        ) : (
+                          <span className="bg-green-50 text-green-600 px-2 py-0.5 rounded text-[9px] font-black uppercase">Al Día</span>
+                        )}
                       </td>
                     </tr>
-                  ))}
+                  )) : (
+                    <tr>
+                      <td colSpan={4} className="p-6 text-center text-slate-400 font-bold uppercase">No hay cuentas por pagar abiertas</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
