@@ -252,11 +252,28 @@ async def get_tenant_limits(tenant_id: str) -> tuple[int, List[str]]:
 @router.websocket("/session/connect")
 async def session_connect(websocket: WebSocket):
     params = websocket.query_params
-    token = params.get("token")
     modulo = params.get("modulo", "unknown")
     device = params.get("device", "unknown")
 
     await websocket.accept()
+
+    # The JWT must never travel in the connection URL (query strings land in
+    # server access logs, proxy/CDN logs and browser devtools history). The
+    # client instead sends it as the first message right after the handshake;
+    # we give it a short window to do so before dropping the connection.
+    try:
+        raw_auth = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+    except (asyncio.TimeoutError, WebSocketDisconnect):
+        await websocket.close(code=4000)
+        return
+
+    token = None
+    try:
+        auth_msg = json.loads(raw_auth)
+        if isinstance(auth_msg, dict) and auth_msg.get("type") == "auth":
+            token = auth_msg.get("token")
+    except (json.JSONDecodeError, TypeError):
+        token = None
 
     if not token:
         await websocket.close(code=4000)
