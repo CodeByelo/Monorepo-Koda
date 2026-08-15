@@ -311,6 +311,13 @@ async def vincular_usuario(
         if not profile:
             raise HTTPException(status_code=404, detail="Usuario no encontrado en este tenant")
 
+        vendedor_row = await conn.fetchval(
+            "SELECT id FROM vendedores WHERE id = $1 AND (tenant_id = $2::uuid OR tenant_id IS NULL)",
+            vendedor_id, uuid.UUID(tenant_id)
+        )
+        if not vendedor_row:
+            raise HTTPException(status_code=404, detail="Vendedor no encontrado en este tenant")
+
         existing = await conn.fetchval(
             "SELECT id FROM vendedores WHERE user_id = $1::uuid AND id != $2",
             uuid.UUID(user_id), vendedor_id
@@ -319,8 +326,8 @@ async def vincular_usuario(
             raise HTTPException(status_code=409, detail="Este usuario ya está vinculado a otro vendedor")
 
         await conn.execute(
-            "UPDATE vendedores SET user_id = $1::uuid WHERE id = $2",
-            uuid.UUID(user_id), vendedor_id
+            "UPDATE vendedores SET user_id = $1::uuid WHERE id = $2 AND (tenant_id = $3::uuid OR tenant_id IS NULL)",
+            uuid.UUID(user_id), vendedor_id, uuid.UUID(tenant_id)
         )
         await _log_event(
             conn, tenant_id=tenant_id, user_id=current_user.get("sub"),
