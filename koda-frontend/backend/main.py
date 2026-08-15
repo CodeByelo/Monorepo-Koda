@@ -362,3 +362,32 @@ def health_check():
         "message": "KODA ERP Bimonetario API está en funcionamiento y lista para transacciones.",
         "currency_support": ["VES", "USD"]
     }
+
+# ===================================================================
+# SCHEDULER — Respaldo automático de base de datos (APScheduler)
+# ===================================================================
+# No existe infraestructura de cron/worker separada para koda-frontend: este
+# mismo proceso FastAPI es el único lugar donde se puede ejecutar algo en un
+# horario, por eso el scheduler se arranca aquí (mismo patrón que
+# KODA_Remaster/sistema-corporativo/backend/core/scheduler.py).
+@app.on_event("startup")
+async def iniciar_scheduler():
+    try:
+        from backend.core.scheduler import scheduler as backup_scheduler
+
+        backup_scheduler.start()
+        app.state.backup_scheduler = backup_scheduler
+        print("\033[92m[SYSTEM] Scheduler de respaldos automáticos iniciado.\033[0m")
+    except Exception as sched_err:
+        print(f"\033[91m[SYSTEM] No se pudo iniciar el scheduler de respaldos: {sched_err}\033[0m")
+        app.state.backup_scheduler = None
+
+
+@app.on_event("shutdown")
+async def detener_scheduler():
+    backup_scheduler = getattr(app.state, "backup_scheduler", None)
+    if backup_scheduler is not None:
+        try:
+            backup_scheduler.shutdown(wait=False)
+        except Exception:
+            pass
