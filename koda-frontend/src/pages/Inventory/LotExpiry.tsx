@@ -1,27 +1,105 @@
-import { 
-  Search, 
-  Filter, 
-  ArrowRight, 
-  ShieldAlert, 
+import {
+  Search,
+  Filter,
+  ShieldAlert,
   Calendar,
-  CheckCircle2,
-  Activity
+  Printer
 } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
+import { api } from '@/api/client';
+
+interface LoteApi {
+  lote: string;
+  producto: string;
+  cantidad: number;
+  vence: string; // dd/mm/yyyy or '-'
+}
+
+interface LoteRow extends LoteApi {
+  days: number | null;
+  status: 'Vigente' | 'Próximo Venc.' | 'Vencido' | 'Sin Fecha';
+  color: string;
+  badge: string;
+}
+
+const parseVence = (vence: string): Date | null => {
+  if (!vence || vence === '-') return null;
+  const [dd, mm, yyyy] = vence.split('/').map(Number);
+  if (!dd || !mm || !yyyy) return null;
+  const d = new Date(yyyy, mm - 1, dd);
+  return isNaN(d.getTime()) ? null : d;
+};
+
+const classify = (vence: string): { days: number | null; status: LoteRow['status']; color: string; badge: string } => {
+  const fecha = parseVence(vence);
+  if (!fecha) {
+    return { days: null, status: 'Sin Fecha', color: 'border-slate-300', badge: 'bg-slate-100 text-slate-500' };
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diffMs = fecha.getTime() - today.getTime();
+  const days = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+  if (days < 0) {
+    return { days, status: 'Vencido', color: 'border-red-500', badge: 'bg-red-100 text-red-700' };
+  }
+  if (days < 30) {
+    return { days, status: 'Próximo Venc.', color: 'border-amber-500', badge: 'bg-amber-100 text-amber-700' };
+  }
+  return { days, status: 'Vigente', color: 'border-green-500', badge: 'bg-green-100 text-green-700' };
+};
 
 const LotExpiry = () => {
+  const [lotes, setLotes] = useState<LoteRow[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [onlyExpired, setOnlyExpired] = useState(false);
 
-  const stats = [
-    { label: 'Lotes Activos', value: '142', desc: 'En todos los almacenes', color: 'text-slate-800' },
-    { label: 'Próximos a Vencer', value: '8', desc: 'Menos de 30 días', color: 'text-amber-500' },
-    { label: 'Lotes Vencidos', value: '3', desc: 'Requieren retiro/ajuste', color: 'text-red-600' },
-    { label: 'Garantía de Frescura', value: '92%', desc: 'Índice de rotación FIFO', color: 'text-[#0b5156]' },
-  ];
+  useEffect(() => {
+    fetchLotes();
+  }, []);
 
-  const lots = [
-    { id: 'LOT-2026-001', name: 'Insumo médico A-120', expiry: '15/06/2026', stock: 120, warehouse: 'Almacén Principal', days: 34, status: 'Vigente', color: 'border-green-500', badge: 'bg-green-100 text-green-700' },
-    { id: 'LOT-2026-005', name: 'Arroz Blanco 1kg', expiry: '20/05/2026', stock: 450, warehouse: 'Sucursal Centro', days: 8, status: 'Próximo Venc.', color: 'border-amber-500', badge: 'bg-amber-100 text-amber-700' },
-    { id: 'LOT-2025-089', name: 'Producto alimenticio B-440', expiry: '10/04/2026', stock: 24, warehouse: 'Depósito Alterno', days: -32, status: 'Vencido', color: 'border-red-500', badge: 'bg-red-100 text-red-700' },
-  ];
+  const fetchLotes = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await api.get<LoteApi[]>('/inventario/lotes');
+      const mapped = (res || []).map((l) => ({ ...l, ...classify(l.vence) }));
+      setLotes(mapped);
+    } catch (err) {
+      console.error('Error fetching lotes:', err);
+      setError('No se pudieron cargar los lotes. Intente nuevamente.');
+      setLotes([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const filteredLotes = useMemo(() => {
+    return lotes.filter((l) => {
+      if (onlyExpired && l.status !== 'Vencido') return false;
+      if (search.trim()) {
+        const q = search.trim().toLowerCase();
+        return l.lote.toLowerCase().includes(q) || l.producto.toLowerCase().includes(q);
+      }
+      return true;
+    });
+  }, [lotes, search, onlyExpired]);
+
+  const stats = useMemo(() => {
+    const activos = lotes.length;
+    const proximos = lotes.filter((l) => l.status === 'Próximo Venc.').length;
+    const vencidos = lotes.filter((l) => l.status === 'Vencido').length;
+    const unidades = lotes.reduce((sum, l) => sum + (Number(l.cantidad) || 0), 0);
+    return [
+      { label: 'Lotes Activos', value: String(activos), desc: 'En todos los almacenes', color: 'text-slate-800' },
+      { label: 'Próximos a Vencer', value: String(proximos), desc: 'Menos de 30 días', color: 'text-amber-500' },
+      { label: 'Lotes Vencidos', value: String(vencidos), desc: 'Requieren retiro/ajuste', color: 'text-red-600' },
+      { label: 'Unidades en Lotes', value: unidades.toLocaleString(), desc: 'Suma de cantidades registradas', color: 'text-[#0b5156]' },
+    ];
+  }, [lotes]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-20">
@@ -30,15 +108,23 @@ const LotExpiry = () => {
           <div className="space-y-2">
             <h1 className="text-4xl font-black text-slate-800 tracking-tighter uppercase">Lotes y Vencimiento</h1>
             <p className="text-slate-500 text-sm font-bold uppercase tracking-tight max-w-2xl">
-              Seguimiento forense de lotes de producción, fechas de caducidad y alertas preventivas para garantizar la calidad y cumplimiento normativo.
+              Seguimiento de lotes de producción, fechas de caducidad y alertas preventivas para garantizar la calidad y cumplimiento normativo.
             </p>
           </div>
           <div className="flex gap-3">
-             <button className="bg-white text-slate-500 px-6 py-2.5 rounded-xl text-xs font-black uppercase border border-slate-200 flex items-center gap-2 tracking-widest shadow-sm hover:bg-slate-50">
-               <Calendar size={14} /> Reporte de Caducidad
+             <button
+               onClick={() => window.print()}
+               className="bg-white text-slate-500 px-6 py-2.5 rounded-xl text-xs font-black uppercase border border-slate-200 flex items-center gap-2 tracking-widest shadow-sm hover:bg-slate-50"
+             >
+               <Printer size={14} /> Reporte de Caducidad
              </button>
-             <button className="bg-[#0b5156] text-white px-8 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 tracking-widest shadow-lg shadow-green-900/20 hover:bg-[#083a3d]">
-               <Filter size={16} /> Ver Vencidos
+             <button
+               onClick={() => setOnlyExpired((v) => !v)}
+               className={`px-8 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 tracking-widest shadow-lg transition-all ${
+                 onlyExpired ? 'bg-red-600 text-white shadow-red-900/20 hover:bg-red-700' : 'bg-[#0b5156] text-white shadow-green-900/20 hover:bg-[#083a3d]'
+               }`}
+             >
+               <Filter size={16} /> {onlyExpired ? 'Ver Todos' : 'Ver Vencidos'}
              </button>
           </div>
         </div>
@@ -63,15 +149,20 @@ const LotExpiry = () => {
               <div className="flex gap-3">
                  <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-                    <input 
-                      type="text" 
-                      placeholder="Buscar lote o producto..." 
+                    <input
+                      type="text"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="Buscar lote o producto..."
                       className="pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-[#0b5156] w-56"
                     />
                  </div>
-                 <button className="p-2 bg-slate-50 text-slate-400 rounded-xl border border-slate-200 hover:bg-white transition-all"><Filter size={14} /></button>
               </div>
            </div>
+
+           {error && (
+             <p className="text-xs font-black text-red-600 uppercase">{error}</p>
+           )}
 
            <div className="overflow-x-auto no-scrollbar">
               <table className="w-full text-left">
@@ -80,37 +171,52 @@ const LotExpiry = () => {
                        <th className="py-4 px-6">Lote / Producto</th>
                        <th className="py-4 px-4 text-center">Vencimiento</th>
                        <th className="py-4 px-4 text-center">Stock</th>
-                       <th className="py-4 px-4">Almacén</th>
                        <th className="py-4 px-4 text-center">Días Rest.</th>
                        <th className="py-4 px-4 text-center">Estado</th>
                        <th className="py-4 px-6 text-right">Acción</th>
                     </tr>
                  </thead>
                  <tbody className="divide-y divide-slate-50">
-                    {lots.map((l, i) => (
-                      <tr key={i} className={`group hover:bg-slate-50 transition-colors border-l-4 ${l.color}`}>
-                         <td className="py-5 px-6">
-                            <div className="flex flex-col">
-                               <span className="text-xs font-black text-[#0b5156] uppercase">{l.id}</span>
-                               <span className="text-[9px] font-bold text-slate-800 uppercase tracking-tighter">{l.name}</span>
-                            </div>
-                         </td>
-                         <td className="py-5 px-4 text-center font-black text-slate-900">{l.expiry}</td>
-                         <td className="py-5 px-4 text-center font-bold text-slate-500">{l.stock}</td>
-                         <td className="py-5 px-4 text-xs font-bold text-slate-400 uppercase">{l.warehouse}</td>
-                         <td className={`py-5 px-4 text-center font-black ${l.days < 10 ? 'text-red-600' : 'text-slate-900'}`}>
-                            {l.days}
-                         </td>
-                         <td className="py-5 px-4 text-center">
-                            <span className={`${l.badge} text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-tighter`}>{l.status}</span>
-                         </td>
-                         <td className="py-5 px-6 text-right">
-                            <button className="bg-slate-50 text-slate-400 px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest border border-slate-200 hover:bg-white transition-all flex items-center gap-2 ml-auto">
-                               Ver Kardex
-                            </button>
-                         </td>
+                    {isLoading ? (
+                      <tr>
+                        <td colSpan={6} className="py-10 text-center text-xs font-black text-slate-400 uppercase tracking-widest">
+                          Cargando lotes...
+                        </td>
                       </tr>
-                    ))}
+                    ) : filteredLotes.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-10 text-center text-xs font-black text-slate-400 uppercase tracking-widest">
+                          No hay lotes registrados.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredLotes.map((l, i) => (
+                        <tr key={`${l.lote}-${i}`} className={`group hover:bg-slate-50 transition-colors border-l-4 ${l.color}`}>
+                           <td className="py-5 px-6">
+                              <div className="flex flex-col">
+                                 <span className="text-xs font-black text-[#0b5156] uppercase">{l.lote}</span>
+                                 <span className="text-[9px] font-bold text-slate-800 uppercase tracking-tighter">{l.producto}</span>
+                              </div>
+                           </td>
+                           <td className="py-5 px-4 text-center font-black text-slate-900">{l.vence}</td>
+                           <td className="py-5 px-4 text-center font-bold text-slate-500">{l.cantidad}</td>
+                           <td className={`py-5 px-4 text-center font-black ${l.days !== null && l.days < 10 ? 'text-red-600' : 'text-slate-900'}`}>
+                              {l.days === null ? '—' : l.days}
+                           </td>
+                           <td className="py-5 px-4 text-center">
+                              <span className={`${l.badge} text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-tighter`}>{l.status}</span>
+                           </td>
+                           <td className="py-5 px-6 text-right">
+                              <Link
+                                to="/inventario/kardex"
+                                className="bg-slate-50 text-slate-400 px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest border border-slate-200 hover:bg-white transition-all inline-flex items-center gap-2"
+                              >
+                                 Ver Kardex
+                              </Link>
+                           </td>
+                        </tr>
+                      ))
+                    )}
                  </tbody>
               </table>
            </div>
@@ -124,9 +230,8 @@ const LotExpiry = () => {
               </div>
               <div className="space-y-4">
                  {[
-                   { l: 'Lotes Vencidos', v: '3 casos', d: 'Retirar de inventario real.', c: 'bg-red-500/10 text-red-500' },
-                   { l: 'Próximos a Vencer', v: '8 lotes', d: 'Priorizar despacho (FEFO).', c: 'bg-amber-500/10 text-amber-500' },
-                   { l: 'Garantía Fresh', v: '92%', d: 'Cumplimiento de rotación.', c: 'bg-[#0b5156]/10 text-green-500' }
+                   { l: 'Lotes Vencidos', v: `${stats[2].value} casos`, d: 'Retirar de inventario real.', c: 'bg-red-500/10 text-red-500' },
+                   { l: 'Próximos a Vencer', v: `${stats[1].value} lotes`, d: 'Priorizar despacho (FEFO).', c: 'bg-amber-500/10 text-amber-500' },
                  ].map((alert, i) => (
                    <div key={i} className="p-4 bg-white/5 rounded-2xl border border-white/10 space-y-1">
                       <div className="flex justify-between items-start">
@@ -139,22 +244,21 @@ const LotExpiry = () => {
               </div>
            </article>
 
-
-
-           <article className="bg-[#0b5156] p-8 rounded-3xl text-white space-y-4 shadow-xl relative overflow-hidden group">
-              <Activity size={140} className="absolute bottom-[-30px] right-[-30px] text-white/5 group-hover:text-white/10 transition-all" />
-              <div className="relative z-10 space-y-4">
-                 <div className="flex items-center gap-2">
-                    <CheckCircle2 size={18} className="text-green-400" />
-                    <h4 className="text-sm font-black uppercase tracking-tight">Estrategia Logística</h4>
-                 </div>
-                 <p className="text-xs font-bold opacity-80 leading-relaxed uppercase">
-                    Se recomienda realizar una <strong className="text-white underline">promoción de salida</strong> para los 8 lotes próximos a vencer para evitar pérdidas por merma.
-                 </p>
-                 <button className="w-full bg-white text-[#0b5156] font-black py-4 rounded-2xl uppercase text-xs tracking-widest flex items-center justify-center gap-2 hover:bg-slate-50 transition-all shadow-2xl">
-                    Ver Plan de Remate <ArrowRight size={14} />
-                 </button>
+           <article className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-3">
+              <div className="flex items-center gap-2">
+                 <Calendar size={18} className="text-[#0b5156]" />
+                 <h4 className="text-sm font-black uppercase tracking-tight text-slate-800">Plan de Remate</h4>
               </div>
+              <p className="text-xs font-bold text-slate-400 leading-relaxed uppercase">
+                 Próximamente: generación automática de un plan de promoción/salida para los lotes cercanos a vencer.
+              </p>
+              <button
+                disabled
+                title="Función próximamente disponible."
+                className="w-full bg-slate-100 text-slate-400 font-black py-4 rounded-2xl uppercase text-xs tracking-widest flex items-center justify-center gap-2 cursor-not-allowed"
+              >
+                 Próximamente
+              </button>
            </article>
         </aside>
       </div>
