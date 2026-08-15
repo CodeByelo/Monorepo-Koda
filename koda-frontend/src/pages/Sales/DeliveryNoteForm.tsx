@@ -1,12 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Truck, X, User, Calendar, Plus, Trash2, AlertTriangle, CheckCircle2, MapPin, Hash, PlusCircle } from 'lucide-react';
 import { api } from '@/api/client';
+
+interface ProductoCatalogo {
+  id: number;
+  sku: string;
+  nombre: string;
+  stock: number;
+}
 
 interface DeliveryItem {
   id: number;
   description: string;
   quantity: number;
-  stockAvailable: number; // Mock stock to show validation
+  productoId: number | null; // Producto real del catálogo (null = aún no seleccionado / no encontrado)
+  stockAvailable: number; // Stock REAL tomado de /productos (Producto.stock). 0 hasta que se seleccione un producto válido.
 }
 
 interface CustomField {
@@ -34,15 +42,20 @@ export const DeliveryNoteForm: React.FC<DeliveryNoteFormProps> = ({ onCancel, on
   // Campos personalizados (para el dueño)
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
 
-  // Productos
+  // Productos: se crean SIN stock hasta que se seleccione un producto real
+  // del catálogo (ver `productCatalog`). Ya no se fabrica un stock aleatorio:
+  // si el ítem viene de una Orden de Venta sin `producto_id` resoluble,
+  // queda bloqueado (stockAvailable: 0) hasta que el usuario elija un
+  // producto válido en el picker.
   const [items, setItems] = useState<DeliveryItem[]>(
     initialData?.items?.map((item: any, idx: number) => ({
       id: Date.now() + idx,
       description: item.description || '',
       quantity: item.quantity || 1,
-      stockAvailable: item.stock || Math.floor(Math.random() * 100) + 10 // Mock stock para validación visual
+      productoId: typeof item.producto_id === 'number' ? item.producto_id : null,
+      stockAvailable: 0
     })) || [
-      { id: Date.now(), description: '', quantity: 1, stockAvailable: 50 } // Por defecto 50 en stock para la prueba
+      { id: Date.now(), description: '', quantity: 1, productoId: null, stockAvailable: 0 }
     ]
   );
 
@@ -51,6 +64,9 @@ export const DeliveryNoteForm: React.FC<DeliveryNoteFormProps> = ({ onCancel, on
   const [clientesList, setClientesList] = useState<any[]>([]);
   const [vehiclesList, setVehiclesList] = useState<any[]>([]);
   const [driversList, setDriversList] = useState<any[]>([]);
+  const [productCatalog, setProductCatalog] = useState<ProductoCatalogo[]>([]);
+  const [isCatalogLoading, setIsCatalogLoading] = useState(true);
+  const initialStockBackfilled = useRef(false);
 
   useEffect(() => {
     const fetchClientes = async () => {
@@ -63,22 +79,86 @@ export const DeliveryNoteForm: React.FC<DeliveryNoteFormProps> = ({ onCancel, on
     };
     const fetchLogistica = async () => {
       try {
-        const [vResp, dResp] = await Promise.all([
-          api.get('/api/logistica/vehiculos'),
-          api.get('/api/logistica/choferes')
-        ]) as [any, any];
-        setVehiclesList(vResp.data || []);
-        setDriversList(dResp.data || []);
+        // api.get devuelve arreglos "pelados" (no envueltos en { data: [...] }),
+        // igual que en Quotations.tsx / QuotationForm.tsx.
+        const [vList, dList] = await Promise.all([
+          api.get<any[]>('/api/logistica/vehiculos'),
+          api.get<any[]>('/api/logistica/choferes')
+        ]);
+        setVehiclesList(vList || []);
+        setDriversList(dList || []);
       } catch (err) {
         console.error("Error cargando datos de logística:", err);
       }
     };
+    const fetchProductos = async () => {
+      setIsCatalogLoading(true);
+      try {
+        const data = await api.get<any[]>('/productos');
+        const mapped: ProductoCatalogo[] = (data || []).map((p: any) => ({
+          id: p.id,
+          sku: p.sku || `PRD-00${p.id}`,
+          nombre: p.nombre || p.name,
+          stock: Number(p.stock ?? p.cantidad ?? 0)
+        }));
+        setProductCatalog(mapped);
+      } catch (err) {
+        console.error("Error cargando catálogo de productos:", err);
+      } finally {
+        setIsCatalogLoading(false);
+      }
+    };
     fetchClientes();
     fetchLogistica();
+    fetchProductos();
   }, []);
 
+  // Cuando el catálogo real llega, intentamos resolver (una sola vez) los
+  // ítems que vinieron de una Orden de Venta por descripción/nombre, para
+  // completar su stock real. Si no hay match, el ítem queda bloqueado
+  // (productoId null / stockAvailable 0) y el usuario debe elegir un
+  // producto válido manualmente — nunca se rellena con un número inventado.
+  useEffect(() => {
+    if (initialStockBackfilled.current) return;
+    if (productCatalog.length === 0) return;
+    if (!initialData?.items?.length) {
+      initialStockBackfilled.current = true;
+      return;
+    }
+    setItems(prev => prev.map(item => {
+      if (item.productoId !== null) {
+        const match = productCatalog.find(p => p.id === item.productoId);
+        return match ? { ...item, stockAvailable: match.stock } : item;
+      }
+      const byName = productCatalog.find(p => p.nombre.toLowerCase() === item.description.trim().toLowerCase());
+      if (byName) {
+        return { ...item, productoId: byName.id, stockAvailable: byName.stock };
+      }
+      return item;
+    }));
+    initialStockBackfilled.current = true;
+  }, [productCatalog, initialData]);
+
   const handleAddItem = () => {
-    setItems([...items, { id: Date.now(), description: '', quantity: 1, stockAvailable: Math.floor(Math.random() * 100) + 5 }]);
+    setItems([...items, { id: Date.now(), description: '', quantity: 1, productoId: null, stockAvailable: 0 }]);
+  };
+
+  // Selección de producto real desde el picker (datalist ligado al catálogo
+  // de /productos, igual patrón que POS.tsx usa para su grilla de productos).
+  // Si el texto no corresponde a ningún producto real, se limpia el stock a
+  // 0 y se bloquea el envío en validateForm() en vez de mostrar un número
+  // fabricado.
+  const handleProductPick = (id: number, value: string) => {
+    const match = productCatalog.find(
+      p => p.nombre.toLowerCase() === value.trim().toLowerCase() || p.sku.toLowerCase() === value.trim().toLowerCase()
+    );
+    setItems(items.map(item => {
+      if (item.id !== id) return item;
+      if (match) {
+        return { ...item, description: match.nombre, productoId: match.id, stockAvailable: match.stock };
+      }
+      return { ...item, description: value, productoId: null, stockAvailable: 0 };
+    }));
   };
 
   const handleRemoveItem = (id: number) => {
@@ -129,12 +209,16 @@ export const DeliveryNoteForm: React.FC<DeliveryNoteFormProps> = ({ onCancel, on
         setErrorMsg(`La línea ${i + 1} no tiene descripción de producto.`);
         return false;
       }
+      if (item.productoId === null) {
+        setErrorMsg(`La línea ${i + 1} ("${item.description}") no corresponde a ningún producto real del catálogo. Seleccione un producto existente para poder validar su stock real.`);
+        return false;
+      }
       if (item.quantity > item.stockAvailable) {
         setErrorMsg(`Stock Insuficiente: Estás intentando despachar ${item.quantity} unidades de "${item.description}", pero solo hay ${item.stockAvailable} en inventario. La operación ha sido bloqueada.`);
         return false;
       }
     }
-    
+
     return true;
   };
 
@@ -216,6 +300,11 @@ export const DeliveryNoteForm: React.FC<DeliveryNoteFormProps> = ({ onCancel, on
             />
             <datalist id="clientes-list">
               {clientesList.map((c, i) => <option key={i} value={c.nombre} />)}
+            </datalist>
+            <datalist id="productos-list">
+              {productCatalog.map((p) => (
+                <option key={p.id} value={p.nombre}>{p.sku} · Stock: {p.stock}</option>
+              ))}
             </datalist>
           </div>
 
@@ -367,11 +456,21 @@ export const DeliveryNoteForm: React.FC<DeliveryNoteFormProps> = ({ onCancel, on
                         <input
                           type="text"
                           required
-                          placeholder="Código o descripción..."
+                          placeholder={isCatalogLoading ? 'Cargando catálogo...' : 'Buscar producto por nombre o SKU...'}
                           value={item.description}
-                          onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
-                          className="w-full bg-transparent border-0 border-b border-transparent focus:border-[#0b5156]/30 focus:ring-0 px-0 py-1 text-xs font-bold text-slate-700 placeholder:text-slate-400 transition-colors"
+                          list="productos-list"
+                          onChange={(e) => handleProductPick(item.id, e.target.value)}
+                          className={`w-full bg-transparent border-0 border-b focus:ring-0 px-0 py-1 text-xs font-bold placeholder:text-slate-400 transition-colors ${
+                            item.description && item.productoId === null
+                              ? 'border-rose-300 text-rose-600 focus:border-rose-500'
+                              : 'border-transparent text-slate-700 focus:border-[#0b5156]/30'
+                          }`}
                         />
+                        {item.description && item.productoId === null && (
+                          <p className="text-[9px] font-black text-rose-500 uppercase tracking-wide mt-1">
+                            Producto no encontrado en el catálogo
+                          </p>
+                        )}
                       </td>
                       <td className="py-4 px-5 text-center">
                         <div className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-black font-mono

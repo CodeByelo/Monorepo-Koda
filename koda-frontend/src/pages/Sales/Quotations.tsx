@@ -11,6 +11,8 @@ const Quotations = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [activeDropdownId, setActiveDropdownId] = useState<any | null>(null);
+  const [clientFilter, setClientFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('Todos');
 
   const toggleDropdown = (cotId: any) => {
     if (activeDropdownId === cotId) {
@@ -22,6 +24,12 @@ const Quotations = () => {
 
   const handleUpdateStatus = async (cot: any, newStatus: string) => {
     setActiveDropdownId(null);
+    if (newStatus === 'Anulada') {
+      const ok = window.confirm(
+        `¿Seguro que desea anular la cotización ${cot.numero_cotizacion || cot.id}? Esta acción no se puede deshacer.`
+      );
+      if (!ok) return;
+    }
     try {
       const targetId = cot.id_db || cot.id;
       const response = await api.patch<any>(`/ventas/cotizaciones/${targetId}/estado`, { estado: newStatus });
@@ -103,6 +111,32 @@ const Quotations = () => {
     }
   };
 
+  const handleConvertToOrder = async (cot: any) => {
+    setActiveDropdownId(null);
+    try {
+      const targetId = cot.id_db || cot.id;
+      const response = await api.post<any>(`/ventas/cotizaciones/${targetId}/orden`, {});
+
+      alert(`¡Cotización convertida a Orden de Venta! N. de Orden: ${response.numero_orden}`);
+
+      setQuotations(prev => prev.map(q => {
+        const qId = q.id_db || q.id;
+        if (qId === targetId) {
+          return {
+            ...q,
+            estado: 'Convertida',
+            status: 'Convertida',
+            statusColor: 'bg-teal-50 text-teal-700 border border-teal-100'
+          };
+        }
+        return q;
+      }));
+    } catch (error: any) {
+      console.error("Error converting quotation to sales order:", error);
+      alert(error.message || "Error al convertir la cotización a Orden de Venta");
+    }
+  };
+
   const fetchQuotations = async () => {
     setIsLoading(true);
     try {
@@ -119,7 +153,16 @@ const Quotations = () => {
     fetchQuotations();
   }, []);
 
+  // KPIs se calculan sobre el total real (sin filtrar); la tabla usa la
+  // vista filtrada por cliente/estado.
   const displayQuotations = quotations;
+  const filteredQuotations = displayQuotations.filter(cot => {
+    const clientName = (cot.client || cot.cliente || '').toLowerCase();
+    const matchesClient = clientFilter.trim() === '' || clientName.includes(clientFilter.trim().toLowerCase());
+    const status = cot.status || cot.estado || '';
+    const matchesStatus = statusFilter === 'Todos' || status === statusFilter;
+    return matchesClient && matchesStatus;
+  });
 
   // Cómputo dinámico de KPIs
   const computeKPIs = () => {
@@ -139,7 +182,10 @@ const Quotations = () => {
     displayQuotations.forEach(q => {
       const status = (q.estado || q.status || '').toLowerCase();
       const isOpen = status === 'borrador' || status === 'enviada' || status === 'pendiente';
-      const isConverted = status === 'facturada' || status === 'procesada' || status === 'aceptada';
+      // "Tasa de Conversion (Cot. -> Orden de Venta)": cuenta tanto la
+      // conversión real a Orden de Venta ("convertida") como los estados
+      // previos que ya implicaban cierre del ciclo comercial.
+      const isConverted = status === 'convertida' || status === 'facturada' || status === 'procesada' || status === 'aceptada';
       const isNotCancelled = status !== 'rechazada' && status !== 'anulada';
       
       if (isOpen) {
@@ -268,9 +314,27 @@ const Quotations = () => {
             <p className="text-xs font-bold text-slate-400 mt-1 uppercase tracking-widest">Propuestas enviadas a clientes con seguimiento de estado y vencimiento.</p>
           </div>
           <div className="flex gap-2">
-            <input type="text" placeholder="Buscar cliente..." className="pl-4 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-[#0b5156]/30" />
-            <select className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-xs font-black uppercase text-slate-500">
+            <input
+              type="text"
+              placeholder="Buscar cliente..."
+              value={clientFilter}
+              onChange={(e) => setClientFilter(e.target.value)}
+              className="pl-4 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-[#0b5156]/30"
+            />
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-xs font-black uppercase text-slate-500"
+            >
               <option>Todos</option>
+              <option value="Borrador">Borrador</option>
+              <option value="Enviada">Enviada</option>
+              <option value="Aceptada">Aceptada</option>
+              <option value="Convertida">Convertida</option>
+              <option value="Facturada">Facturada</option>
+              <option value="Rechazada">Rechazada</option>
+              <option value="Vencida">Vencida</option>
+              <option value="Anulada">Anulada</option>
             </select>
           </div>
         </div>
@@ -291,11 +355,11 @@ const Quotations = () => {
                 <tr>
                   <td colSpan={6} className="py-10 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">Cargando cotizaciones...</td>
                 </tr>
-              ) : displayQuotations.length === 0 ? (
+              ) : filteredQuotations.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="py-10 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">No hay cotizaciones</td>
                 </tr>
-              ) : displayQuotations.map((cot, i) => (
+              ) : filteredQuotations.map((cot, i) => (
                 <tr key={i} className="group hover:bg-slate-50/50 transition-colors">
                   <td className="py-5 px-4 text-sm font-black text-slate-800 uppercase">{cot.numero_cotizacion || cot.id}</td>
                   <td className="py-5 px-4 text-xs font-bold text-slate-600 uppercase">{cot.client || cot.cliente}</td>
@@ -342,11 +406,20 @@ const Quotations = () => {
                         </button>
                         {(cot.status === 'Aceptada' || cot.estado === 'Aceptada') && (
                           <button
+                            onClick={() => handleConvertToOrder(cot)}
+                            className="w-full px-4 py-2 text-xs font-black text-slate-600 hover:bg-slate-50 hover:text-cyan-700 transition-colors flex items-center gap-2 uppercase tracking-wider"
+                          >
+                            <div className="w-1.5 h-1.5 rounded-full bg-cyan-500"></div>
+                            Convertir a Orden de Venta
+                          </button>
+                        )}
+                        {(cot.status === 'Aceptada' || cot.estado === 'Aceptada') && (
+                          <button
                             onClick={() => handleConvertToInvoice(cot)}
                             className="w-full px-4 py-2 text-xs font-black text-slate-600 hover:bg-slate-50 hover:text-teal-700 transition-colors flex items-center gap-2 uppercase tracking-wider"
                           >
                             <div className="w-1.5 h-1.5 rounded-full bg-teal-500"></div>
-                            Convertir a Factura
+                            Convertir a Factura (Directo)
                           </button>
                         )}
                         <button

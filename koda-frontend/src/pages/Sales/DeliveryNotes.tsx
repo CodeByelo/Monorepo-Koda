@@ -47,6 +47,15 @@ const DeliveryNotes = () => {
 
   const displayNotes = deliveryNotes;
 
+  // KPIs reales derivados del propio listado (estado + fecha), en vez de
+  // literales fijos en '0'.
+  const todayStr = new Date().toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const despachadasHoy = displayNotes.filter(n => {
+    const estado = (n.estado || '').toUpperCase();
+    return estado === 'ENTREGADO' && n.fecha === todayStr;
+  }).length;
+  const pendientesDespacho = displayNotes.filter(n => (n.estado || '').toUpperCase() === 'PENDIENTE').length;
+
   const refetchNotes = async () => {
     try {
       const data = await api.get<any[]>('/ventas/notas-entrega');
@@ -124,9 +133,9 @@ const DeliveryNotes = () => {
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
         {[
           { t: 'Notas Abiertas', v: displayNotes.length.toString(), desc: 'Sin factura emitida', c: 'text-amber-500' },
-          { t: 'Despachadas Hoy', v: '0', desc: 'Salida confirmada', c: 'text-green-600' },
-          { t: 'Pendientes de Despacho', v: '0', desc: 'En almacen', c: 'text-slate-800' },
-          { t: 'Para Facturar', v: displayNotes.length.toString(), desc: 'Entrega confirmada', c: 'text-green-600' }
+          { t: 'Despachadas Hoy', v: despachadasHoy.toString(), desc: 'Salida confirmada', c: 'text-green-600' },
+          { t: 'Pendientes de Despacho', v: pendientesDespacho.toString(), desc: 'En almacen', c: 'text-slate-800' },
+          { t: 'Para Facturar', v: (displayNotes.length - pendientesDespacho).toString(), desc: 'Entrega confirmada', c: 'text-green-600' }
         ].map((kpi, i) => (
           <div key={i} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
             <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">{kpi.t}</p>
@@ -146,19 +155,20 @@ const DeliveryNotes = () => {
               <tr className="text-xs font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
                 <th className="pb-4 px-4">N. Nota</th>
                 <th className="pb-4 px-4">Orden Venta</th>
+                <th className="pb-4 px-4 text-center">Estado</th>
                 <th className="pb-4 px-4 text-right">Accion</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
               {isLoading ? (
                 <tr>
-                  <td colSpan={3} className="py-10 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  <td colSpan={4} className="py-10 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                     Cargando notas de entrega...
                   </td>
                 </tr>
               ) : displayNotes.length === 0 ? (
                 <tr>
-                  <td colSpan={3} className="py-10 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  <td colSpan={4} className="py-10 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                     No se encontraron notas de entrega
                   </td>
                 </tr>
@@ -167,8 +177,34 @@ const DeliveryNotes = () => {
                   <tr key={i} className="hover:bg-slate-50/50 transition-colors">
                     <td className="py-5 px-4 text-sm font-black text-slate-800 uppercase">{note.id || note.numero_nota}</td>
                     <td className="py-5 px-4 text-xs font-bold text-slate-400 uppercase tracking-widest">{note.ov || note.orden_venta_id || 'N/A'}</td>
+                    <td className="py-5 px-4 text-center">
+                      <span className={`px-2 py-1 rounded text-[9px] font-black uppercase ${(note.estado || '').toUpperCase() === 'ENTREGADO' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-amber-50 text-amber-700 border border-amber-100'}`}>
+                        {note.estado || 'PENDIENTE'}
+                      </span>
+                    </td>
                     <td className="py-5 px-4 text-right">
-                       <Link to="/nueva" className="text-xs font-black text-[#0b5156] uppercase hover:text-[#083a3d] hover:underline transition-colors">Facturar</Link>
+                      <div className="flex items-center justify-end gap-4">
+                        {(note.estado || '').toUpperCase() !== 'ENTREGADO' && (
+                          <button
+                            onClick={() => handleMarcarEntregado(note.id)}
+                            className="text-xs font-black text-emerald-600 uppercase hover:text-emerald-800 hover:underline transition-colors"
+                          >
+                            Marcar Entregado
+                          </button>
+                        )}
+                        <Link
+                          to="/nueva"
+                          state={{
+                            fromDeliveryNoteId: note.id,
+                            fromDeliveryNoteNumber: note.numero_nota,
+                            client: note.cliente,
+                            orderId: note.orden_venta_id || note.ov || null
+                          }}
+                          className="text-xs font-black text-[#0b5156] uppercase hover:text-[#083a3d] hover:underline transition-colors"
+                        >
+                          Facturar
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))

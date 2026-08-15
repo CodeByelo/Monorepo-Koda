@@ -1,14 +1,16 @@
 import { useState, useMemo, useEffect } from 'react';
-import { 
+import { useLocation } from 'react-router-dom';
+import {
   FileText,
   ShoppingBag,
-  Calculator, 
-  ShieldCheck, 
+  Calculator,
+  ShieldCheck,
   AlertCircle,
   DollarSign,
   ArrowRight,
   Info,
-  Trash2
+  Trash2,
+  Truck
 } from 'lucide-react';
 import { api } from '@/api/client';
 
@@ -34,6 +36,17 @@ interface ItemDetalle {
 }
 
 const InvoiceForm = () => {
+  // Estado de origen (opcional): cuando se llega desde DeliveryNotes.tsx
+  // ("Facturar" sobre una Nota de Entrega ya despachada), viaja vía
+  // `location.state` en vez de perderse silenciosamente.
+  const location = useLocation();
+  const incomingState = (location.state || null) as {
+    fromDeliveryNoteId?: number;
+    fromDeliveryNoteNumber?: string;
+    client?: string;
+    orderId?: number | null;
+  } | null;
+
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [productos, setProductos] = useState<Producto[]>([]);
   const [tasaBcv, setTasaBcv] = useState(0);
@@ -63,7 +76,16 @@ const InvoiceForm = () => {
       try {
         const clientsData = await api.get<Cliente[]>('/clientes').catch(() => []);
         setClientes(clientsData || []);
-        if (clientsData && clientsData.length > 0) setSelectedCliente(clientsData[0]);
+        // Si venimos de una Nota de Entrega, intentamos preseleccionar el
+        // mismo cliente por nombre; si no hay match, caemos al primero.
+        const preselected = incomingState?.client
+          ? clientsData?.find(c => c.nombre.toLowerCase() === incomingState.client!.toLowerCase())
+          : null;
+        if (preselected) {
+          setSelectedCliente(preselected);
+        } else if (clientsData && clientsData.length > 0) {
+          setSelectedCliente(clientsData[0]);
+        }
 
         const productsData = await api.get<Producto[]>('/productos').catch(() => []);
         setProductos(productsData || []);
@@ -141,7 +163,9 @@ const InvoiceForm = () => {
         }))
       };
 
-      const result = await api.post<{ numero_factura: string }>('/ventas', payload);
+      const result = await api.post<{ numero_factura: string }>('/ventas/facturar', payload, {
+        headers: { 'X-Idempotency-Key': crypto.randomUUID() }
+      });
       alert(`Factura emitida exitosamente: ${result.numero_factura}`);
       setItems([]);
     } catch (err: any) {
@@ -168,6 +192,16 @@ const InvoiceForm = () => {
            </button>
         </div>
       </header>
+
+      {incomingState?.fromDeliveryNoteId && (
+        <div className="bg-[#0b5156]/5 border border-[#0b5156]/20 rounded-2xl p-4 flex items-center gap-3">
+          <Truck size={16} className="text-[#0b5156] shrink-0" />
+          <p className="text-xs font-bold text-[#0b5156] uppercase tracking-tight">
+            Facturando a partir de la Nota de Entrega {incomingState.fromDeliveryNoteNumber || `#${incomingState.fromDeliveryNoteId}`}
+            {incomingState.orderId ? ` (Orden #${incomingState.orderId})` : ''}. Verifique cliente y agregue los productos despachados.
+          </p>
+        </div>
+      )}
 
       {/* BANNER TASA BCV */}
       <article className="bg-white border border-[#bdafa1] rounded-3xl p-8 flex items-center justify-between shadow-sm relative overflow-hidden group">

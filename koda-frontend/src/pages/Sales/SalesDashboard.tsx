@@ -32,13 +32,23 @@ const SalesDashboard = () => {
     fetchData();
   }, []);
 
-  const getClientNameForInvoice = (invId: number) => {
-    // Aquí deberíamos buscar el cliente real basado en la factura.
-    // Como simplificación por ahora, tomaremos el cliente del listado de la DB.
-    if (clientes && clientes.length > 0) {
-      return clientes[invId % clientes.length].nombre;
+  const getClientNameForInvoice = (inv: any) => {
+    // GET /ventas ya trae el cliente real embebido con joinedload(Venta.cliente)
+    // (ver backend/routers/sales.py -> VentaResponse.cliente). Se usa ese
+    // dato directamente en vez de indexar el listado de clientes por el id
+    // de la factura (que no tenía ninguna relación con el cliente real).
+    return inv.cliente?.nombre || "Cliente no registrado";
+  };
+
+  const handleDownloadPdf = async (invId: number) => {
+    try {
+      // Mismo patrón que BillingDashboard.tsx: api.download crea un
+      // <a download> oculto en vez de intentar navegar a una URL con Link.
+      await api.download(`/ventas/${invId}/pdf`, `Factura-${invId}.pdf`);
+    } catch (error: any) {
+      console.error("Error downloading invoice PDF:", error);
+      alert(error?.message || 'Error al descargar el PDF de la factura.');
     }
-    return "Consumidor Final"; // O dejarlo en blanco si se prefiere: "Cliente no registrado"
   };
 
   const formatDate = (dateStr: string) => {
@@ -223,7 +233,7 @@ const SalesDashboard = () => {
                         <tr key={idx} className="group hover:bg-slate-50/50 transition-colors">
                           <td className="py-5 px-4 text-xs font-bold text-slate-500 uppercase">{formatDate(inv.fecha)}</td>
                           <td className="py-5 px-4 text-sm font-black text-slate-800 uppercase">{inv.numero_factura}</td>
-                          <td className="py-5 px-4 text-xs font-bold text-slate-600 uppercase">{getClientNameForInvoice(inv.id)}</td>
+                          <td className="py-5 px-4 text-xs font-bold text-slate-600 uppercase">{getClientNameForInvoice(inv)}</td>
                           <td className="py-5 px-4 text-sm font-black text-slate-800">
                             <div>${Number(inv.total_usd || inv.total || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                             <div className="text-[10px] text-slate-400 font-bold">
@@ -236,7 +246,10 @@ const SalesDashboard = () => {
                             </span>
                           </td>
                           <td className="py-5 px-4 text-right">
-                            <button className="text-xs font-black text-slate-400 uppercase hover:text-[#0b5156]">
+                            <button
+                              onClick={() => handleDownloadPdf(inv.id)}
+                              className="text-xs font-black text-slate-400 uppercase hover:text-[#0b5156]"
+                            >
                                Ver PDF
                             </button>
                           </td>

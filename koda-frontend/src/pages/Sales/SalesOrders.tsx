@@ -1,20 +1,25 @@
 import { useState, useEffect } from 'react';
-import { FileText, Ban, X, BookOpen } from 'lucide-react';
+import { FileText, X, BookOpen } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '@/api/client';
 
 const SalesOrders = () => {
-  const [isClientBlocked, setIsClientBlocked] = useState(false);
   const [orders, setOrders] = useState<any[]>([]);
+  const [deliveryNotes, setDeliveryNotes] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showManualModal, setShowManualModal] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
 
   useEffect(() => {
     const fetchOrders = async () => {
       setIsLoading(true);
       try {
-        const data = await api.get<any[]>('/ventas/ordenes');
-        setOrders(data || []);
+        const [ordersData, notesData] = await Promise.all([
+          api.get<any[]>('/ventas/ordenes'),
+          api.get<any[]>('/ventas/notas-entrega').catch(() => [])
+        ]);
+        setOrders(ordersData || []);
+        setDeliveryNotes(notesData || []);
       } catch (error) {
         console.error("Error fetching sales orders:", error);
       } finally {
@@ -25,6 +30,17 @@ const SalesOrders = () => {
   }, []);
 
   const displayOrders = orders;
+
+  // Cruce real contra las Notas de Entrega ya emitidas para cada orden
+  // (order.id_db / orden_venta_id), en vez de KPIs fijos en '0'.
+  const dispatchedOrderIds = new Set(
+    deliveryNotes.map(n => n.orden_venta_id || n.ov).filter((id): id is number => id != null)
+  );
+  const pendientesEntrega = displayOrders.filter(o => {
+    const estado = (o.estado || o.status || '').toUpperCase();
+    return estado !== 'ANULADA' && estado !== 'RECHAZADA' && !dispatchedOrderIds.has(o.id_db);
+  }).length;
+  const paraFacturar = displayOrders.filter(o => dispatchedOrderIds.has(o.id_db)).length;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-20">
@@ -51,32 +67,13 @@ const SalesOrders = () => {
              </Link>
           </div>
         </div>
-
-        {isClientBlocked && (
-          <div className="bg-[#e11d48] text-white rounded-2xl p-6 flex items-center gap-6 shadow-xl shadow-red-900/20 mb-2 relative group">
-            <div className="w-12 h-12 bg-white text-[#e11d48] rounded-full flex items-center justify-center flex-shrink-0">
-               <Ban size={24} strokeWidth={3} />
-            </div>
-            <div>
-               <h3 className="text-lg font-black uppercase tracking-tight">CLIENTE BLOQUEADO POR MOROSIDAD: Farmacia Central</h3>
-               <p className="text-xs font-bold opacity-90 uppercase">Exceso de Limite Critico ({">"}10%): Saldo $6200 / Limite $5000</p>
-               <p className="text-xs font-bold opacity-75 mt-1 uppercase">Se ha inhabilitado la creacion de nuevas Ordenes de Venta. Dirija al cliente al modulo de Cobranzas para regularizar su situacion.</p>
-            </div>
-            <button 
-              onClick={() => setIsClientBlocked(false)}
-              className="ml-auto bg-white/10 hover:bg-white/20 text-white text-xs font-black px-4 py-2 rounded-lg uppercase transition-all"
-            >
-              Simular Desbloqueo
-            </button>
-          </div>
-        )}
       </header>
 
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
         {[
           { t: 'Ordenes Abiertas', v: displayOrders.length.toString(), desc: 'En proceso', c: 'text-white bg-koda-main' },
-          { t: 'Pendientes Entrega', v: '0', desc: 'Con Nota de Entrega', c: 'text-[#43584b] bg-white' },
-          { t: 'Para Facturar', v: '0', desc: 'Listas para facturar', c: 'text-[#0b5156] bg-white' },
+          { t: 'Pendientes Entrega', v: pendientesEntrega.toString(), desc: 'Sin Nota de Entrega', c: 'text-[#43584b] bg-white' },
+          { t: 'Para Facturar', v: paraFacturar.toString(), desc: 'Con Nota de Entrega emitida', c: 'text-[#0b5156] bg-white' },
           { t: 'Monto en Ordenes', v: `$${displayOrders.reduce((sum, o) => sum + Number(o.total || o.amount || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`, desc: 'Ventas comprometidas', c: 'text-slate-800 bg-white' }
         ].map((kpi, i) => (
           <div key={i} className={`p-8 rounded-3xl border border-slate-200 shadow-sm ${kpi.c.includes('bg-koda-main') ? 'bg-koda-main text-white' : 'bg-white'}`}>
@@ -126,7 +123,7 @@ const SalesOrders = () => {
                     </span>
                   </td>
                   <td className="py-5 px-4 text-right">
-                    <button className="text-xs font-black text-[#0b5156] uppercase hover:underline">Ver detalle</button>
+                    <button onClick={() => setSelectedOrder(order)} className="text-xs font-black text-[#0b5156] uppercase hover:underline">Ver detalle</button>
                   </td>
                 </tr>
               ))}
@@ -166,24 +163,9 @@ const SalesOrders = () => {
                    <div className="bg-rose-200 text-rose-700 w-8 h-8 rounded-full flex items-center justify-center font-black shrink-0">2</div>
                    <div className="flex-1">
                      <h3 className="text-sm font-black text-rose-800 uppercase mb-1">Auditoría de Riesgo Crediticio</h3>
-                     <p className="text-xs text-rose-700/90 font-medium leading-relaxed mb-3">
+                     <p className="text-xs text-rose-700/90 font-medium leading-relaxed">
                        El sistema verifica en tiempo real si el cliente tiene facturas vencidas o superó su límite de crédito. De ser así, <strong>bloquea la creación de órdenes</strong> automáticamente para proteger las finanzas.
                      </p>
-                     
-                     <div className="flex justify-end">
-                       {!isClientBlocked ? (
-                         <button 
-                           onClick={() => { setIsClientBlocked(true); setShowManualModal(false); }}
-                           className="bg-white text-rose-600 hover:bg-rose-500 hover:text-white border-rose-200 px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 transition-all border shadow-sm"
-                         >
-                           Simular Bloqueo
-                         </button>
-                       ) : (
-                         <div className="text-[9px] font-black text-rose-500 bg-white px-4 py-2 rounded-xl border border-rose-200 uppercase shadow-sm">
-                           Simulación Activa
-                         </div>
-                       )}
-                     </div>
                    </div>
                  </div>
                </div>
@@ -206,6 +188,64 @@ const SalesOrders = () => {
                  Entendido
                </button>
              </div>
+          </div>
+        </div>
+      )}
+
+      {selectedOrder && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-md rounded-3xl p-8 border border-slate-200 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-start mb-6">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-[#43584b] text-white rounded-2xl">
+                  <FileText size={20} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-black text-slate-800 uppercase tracking-tighter">
+                    {selectedOrder.id || selectedOrder.numero_orden}
+                  </h2>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Detalle de la Orden de Venta</p>
+                </div>
+              </div>
+              <button onClick={() => setSelectedOrder(null)} className="p-2 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors">
+                <X size={16} className="text-slate-500" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Cliente</span>
+                <span className="text-xs font-black text-slate-800 uppercase">{selectedOrder.client || selectedOrder.cliente || 'No especificado'}</span>
+              </div>
+              <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Monto</span>
+                <span className="text-xs font-black text-slate-800">{selectedOrder.amount || `$${Number(selectedOrder.total || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`}</span>
+              </div>
+              <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Estado</span>
+                <span className={`${selectedOrder.statusColor || 'bg-slate-100 text-slate-700'} px-2 py-1 rounded text-[9px] font-black uppercase`}>
+                  {selectedOrder.status || selectedOrder.estado}
+                </span>
+              </div>
+              {selectedOrder.fecha && (
+                <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Fecha</span>
+                  <span className="text-xs font-bold text-slate-600">{new Date(selectedOrder.fecha).toLocaleDateString('es-VE')}</span>
+                </div>
+              )}
+              <div className="flex justify-between items-center">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Despacho</span>
+                <span className="text-xs font-bold text-slate-600 uppercase">
+                  {dispatchedOrderIds.has(selectedOrder.id_db) ? 'Nota de Entrega emitida' : 'Pendiente de despacho'}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-8 text-right">
+              <button onClick={() => setSelectedOrder(null)} className="bg-slate-900 text-white px-8 py-3 rounded-xl text-xs font-black uppercase hover:bg-slate-800 transition-colors shadow-lg">
+                Cerrar
+              </button>
+            </div>
           </div>
         </div>
       )}

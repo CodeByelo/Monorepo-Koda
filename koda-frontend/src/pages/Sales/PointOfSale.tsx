@@ -1,16 +1,18 @@
 import { useState, useEffect, useMemo } from 'react';
-import { 
-  Search, 
-  ShoppingCart, 
-  Plus, 
-  Minus, 
-  Trash2, 
-  Banknote, 
+import {
+  Search,
+  ShoppingCart,
+  Plus,
+  Minus,
+  Trash2,
+  Banknote,
   ArrowLeft,
   CheckCircle2,
   MonitorSmartphone,
   CreditCard,
-  SmartphoneNfc
+  SmartphoneNfc,
+  User,
+  PackageX
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '@/api/client';
@@ -28,6 +30,12 @@ interface CartItem extends Product {
   qty: number;
 }
 
+interface Cliente {
+  id: number;
+  nombre: string;
+  rif?: string;
+}
+
 const PointOfSale = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [catalog, setCatalog] = useState<Product[]>([]);
@@ -35,21 +43,29 @@ const PointOfSale = () => {
   const [paymentMethod, setPaymentMethod] = useState('Divisa');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  
+
   const [bcvRate, setBcvRate] = useState(36.52);
+
+  // Cliente real de la venta. Por defecto ninguno seleccionado: solo se
+  // usa "Consumidor Final" (si existe en el maestro de clientes) cuando el
+  // cajero no elige explícitamente otro cliente.
+  const [clientesList, setClientesList] = useState<Cliente[]>([]);
+  const [clienteSearch, setClienteSearch] = useState('');
+  const [selectedClienteId, setSelectedClienteId] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        const [tasaRes, prodRes] = await Promise.all([
+        const [tasaRes, prodRes, clientesRes] = await Promise.all([
           api.get<any>('/tasas/bcv'),
-          api.get<any[]>('/productos')
+          api.get<any[]>('/productos'),
+          api.get<any[]>('/clientes').catch(() => [])
         ]);
         if (tasaRes && tasaRes.tasa) {
           setBcvRate(Number(tasaRes.tasa));
         }
-        
+
         const mappedProducts = (prodRes || []).map(p => ({
           id: p.id,
           sku: p.sku || `PRD-00${p.id}`,
@@ -59,6 +75,7 @@ const PointOfSale = () => {
           exempt: Boolean(p.es_exento || p.exempt)
         }));
         setCatalog(mappedProducts);
+        setClientesList(clientesRes || []);
       } catch (error) {
         console.error("Error fetching POS data:", error);
       } finally {
@@ -68,21 +85,19 @@ const PointOfSale = () => {
     fetchData();
   }, []);
 
-  const displayCatalog = catalog.length > 0 ? catalog : [
-    { id: 1, sku: 'PRD-001', name: 'Harina de Maíz Precocida 1Kg', price: 1.15, stock: 140, exempt: true },
-    { id: 2, sku: 'PRD-002', name: 'Aceite Vegetal Mezcla 1L', price: 2.25, stock: 85, exempt: false },
-    { id: 3, sku: 'PRD-003', name: 'Café Molido Premium 500g', price: 4.80, stock: 32, exempt: false },
-    { id: 4, sku: 'PRD-004', name: 'Arroz Blanco Grano Largo 1Kg', price: 1.20, stock: 210, exempt: true },
-    { id: 5, sku: 'PRD-005', name: 'Azúcar Refinada 1Kg', price: 1.35, stock: 95, exempt: true },
-    { id: 6, sku: 'PRD-006', name: 'Queso Blanco Pasteurizado 1Kg', price: 5.50, stock: 14, exempt: false },
-    { id: 7, sku: 'PRD-007', name: 'Mantequilla 500g', price: 3.10, stock: 45, exempt: false },
-    { id: 8, sku: 'PRD-008', name: 'Pasta Alimenticia 500g', price: 0.90, stock: 180, exempt: true },
-  ];
-
-  const filteredCatalog = displayCatalog.filter(p => 
-    p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+  // Catálogo real únicamente. Ya no se muestra un catálogo demo (Harina,
+  // Aceite, etc.) cuando /productos viene vacío: se muestra un empty-state
+  // real más abajo en su lugar.
+  const filteredCatalog = catalog.filter(p =>
+    p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     p.sku.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const consumidorFinal = clientesList.find(c => c.nombre.trim().toLowerCase() === 'consumidor final') || null;
+  const selectedCliente = clientesList.find(c => c.id === selectedClienteId) || null;
+  const filteredClientes = clienteSearch.trim()
+    ? clientesList.filter(c => c.nombre.toLowerCase().includes(clienteSearch.toLowerCase())).slice(0, 8)
+    : [];
 
   const addToCart = (prod: Product) => {
     setCart(prev => {
@@ -140,31 +155,55 @@ const PointOfSale = () => {
     };
   }, [cart, paymentMethod, bcvRate]);
 
+  // El backend solo acepta metodo_pago en {Efectivo, Divisa, Transferencia,
+  // PagoMovil} (ver VentaCreate en backend/schemas/operations.py). El POS no
+  // tiene todavía un rail dedicado para "Tarjeta/Punto", así que se mapea al
+  // más cercano (Transferencia) hasta que el backend agregue ese enum.
+  const METODO_PAGO_BACKEND: Record<string, string> = {
+    Divisa: 'Divisa',
+    PagoMovil: 'PagoMovil',
+    Punto: 'Transferencia'
+  };
+
   const handleProcessSale = async () => {
     if (cart.length === 0) return;
+
+    // Cliente: el que eligió el cajero, o "Consumidor Final" si existe en
+    // el maestro. Si no hay ninguno de los dos, se bloquea la venta en vez
+    // de inventar un cliente_id fijo.
+    const clienteId = selectedClienteId ?? consumidorFinal?.id ?? null;
+    if (clienteId === null) {
+      alert('❌ No se encontró un cliente para asociar a la venta. Seleccione un cliente o registre "Consumidor Final" en el módulo de Clientes.');
+      return;
+    }
+
     setIsProcessing(true);
-    
+
     try {
-      await api.post('/ventas', {
-        cliente_id: 1, // Consumidor Final default
-        metodo_pago: paymentMethod,
-        subtotal,
-        iva,
-        igtf,
-        total: totalUsd,
-        tasa_bcv: bcvRate,
+      // NOTA: no se envían montos calculados en el cliente (subtotal, iva,
+      // igtf, total). El servidor los deriva 100% desde `detalles` (precio
+      // real del catálogo, exención real del producto e IGTF derivado del
+      // método de pago), el mismo endpoint ya usado por InvoiceForm.tsx y
+      // corregido en backend/services/facturacion_service.py.
+      const result = await api.post<{ numero_factura: string }>('/ventas/facturar', {
+        cliente_id: clienteId,
+        metodo_pago: METODO_PAGO_BACKEND[paymentMethod] || 'Efectivo',
+        moneda_pago: paymentMethod === 'Divisa' ? 'USD' : 'Bs',
+        dias_credito: 0,
         detalles: cart.map(c => ({
           producto_id: c.id,
-          cantidad: c.qty,
-          precio_unitario: c.price,
-          exento: c.exempt
+          cantidad: c.qty
         }))
+      }, {
+        headers: { 'X-Idempotency-Key': crypto.randomUUID() }
       });
-      alert('✅ Venta procesada exitosamente. Factura electrónica generada. Kardex actualizado.');
+      alert(`✅ Venta procesada exitosamente. Factura ${result.numero_factura} generada. Kardex actualizado.`);
       setCart([]);
-    } catch (error) {
+      setSelectedClienteId(null);
+      setClienteSearch('');
+    } catch (error: any) {
       console.error("Error al procesar venta:", error);
-      alert('❌ Error al procesar la venta.');
+      alert(`❌ Error al procesar la venta. ${error?.message || ''}`);
     } finally {
       setIsProcessing(false);
     }
@@ -215,6 +254,12 @@ const PointOfSale = () => {
               {isLoading ? (
                 <div className="col-span-full py-10 text-center text-xs font-black text-slate-400 uppercase tracking-widest">
                   Cargando catálogo...
+                </div>
+              ) : catalog.length === 0 ? (
+                <div className="col-span-full py-16 flex flex-col items-center gap-3 text-center text-xs font-black text-slate-400 uppercase tracking-widest">
+                  <PackageX size={32} className="text-slate-300" />
+                  <span>No hay productos registrados en el catálogo.</span>
+                  <span className="text-[10px] font-bold normal-case tracking-normal text-slate-400">Registre productos en el módulo de Inventario para poder venderlos aquí.</span>
                 </div>
               ) : filteredCatalog.length === 0 ? (
                 <div className="col-span-full py-10 text-center text-xs font-black text-slate-400 uppercase tracking-widest">
@@ -289,6 +334,46 @@ const PointOfSale = () => {
 
            {/* Ticket Footer / Checkout */}
            <div className="p-5 border-t border-slate-200 bg-white space-y-4">
+              <div className="space-y-2 relative">
+                 <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                   <User size={11} /> Cliente
+                 </label>
+                 {selectedCliente ? (
+                   <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                      <span className="text-xs font-black text-slate-700 uppercase truncate">{selectedCliente.nombre}</span>
+                      <button
+                        onClick={() => { setSelectedClienteId(null); setClienteSearch(''); }}
+                        className="text-slate-400 hover:text-rose-500 shrink-0 ml-2"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                   </div>
+                 ) : (
+                   <>
+                     <input
+                       type="text"
+                       value={clienteSearch}
+                       onChange={(e) => setClienteSearch(e.target.value)}
+                       placeholder={consumidorFinal ? `Buscar cliente (def. ${consumidorFinal.nombre})...` : 'Buscar cliente por nombre...'}
+                       className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-bold text-slate-700 focus:outline-none focus:border-koda-main"
+                     />
+                     {filteredClientes.length > 0 && (
+                       <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                         {filteredClientes.map(c => (
+                           <button
+                             key={c.id}
+                             onClick={() => { setSelectedClienteId(c.id); setClienteSearch(''); }}
+                             className="w-full text-left px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 uppercase truncate"
+                           >
+                             {c.nombre}
+                           </button>
+                         ))}
+                       </div>
+                     )}
+                   </>
+                 )}
+              </div>
+
               <div className="space-y-1.5 text-[11px] font-mono">
                  <div className="flex justify-between text-slate-500 font-bold">
                     <span className="uppercase font-sans">Subtotal</span>
