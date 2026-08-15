@@ -15,6 +15,23 @@ print(f"📁 Existe: {env_path.exists()}\n")
 
 load_dotenv(dotenv_path=env_path)
 print("DATABASE_URL cargada: " + (os.getenv("SUPABASE_DB_URL") or "Vacio/None"))
+
+# --- Sentry (monitoreo de errores) ---
+# Desactivado por defecto: sólo se inicializa si SENTRY_DSN está definida en el
+# entorno. Sin DSN, esto es un no-op silencioso (no imprime nada, no falla).
+_SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()
+if _SENTRY_DSN:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.starlette import StarletteIntegration
+
+    sentry_sdk.init(
+        dsn=_SENTRY_DSN,
+        integrations=[StarletteIntegration(), FastApiIntegration()],
+        traces_sample_rate=0.1,
+        environment=os.getenv("ENVIRONMENT", "development"),
+    )
+
 DEV_ROLE_MASTER_PASSWORD = os.getenv("DEV_ROLE_MASTER_PASSWORD", "")
 
 # JWT_SECRET es obligatorio: sin fallback hardcodeado. La app se niega a arrancar sin él.
