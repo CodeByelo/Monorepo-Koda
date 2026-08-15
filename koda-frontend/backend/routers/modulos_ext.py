@@ -14,9 +14,13 @@ from backend.models.erp_extended import (
     Compra, CuentaPorCobrar, CuentaPorPagar, CuentaBancaria, MovimientoBancario,
     Cotizacion, CotizacionItem, OrdenVenta, RequisicionCompra, TransferenciaInventario,
     RetencionIVA, RetencionISLR, Vendedor, Almacen, RecepcionStock, DevolucionProveedor, LoteProducto,
-    NotaCredito, AnticipoCliente, Cheque, FondoCajaChica, GastoCajaChica, StockPorAlmacen
+    NotaCredito, AnticipoCliente, Cheque, FondoCajaChica, GastoCajaChica, StockPorAlmacen,
+    NotaEntrega, NotaEntregaItem
 )
-from backend.schemas.operations import CotizacionCreate, CotizacionStatusUpdate, CompraCreate, RecepcionStockCreate, RecepcionStockResponse, DevolucionProveedorCreate
+from backend.schemas.operations import (
+    CotizacionCreate, CotizacionStatusUpdate, CompraCreate, RecepcionStockCreate, RecepcionStockResponse,
+    DevolucionProveedorCreate, NotaEntregaCreate, NotaEntregaEstadoUpdate
+)
 from backend.core.security import get_current_user
 from backend.models.core import TasaCambio
 from backend.utils.helpers import to_float, periodo_rango, ventas_periodo, tasa_actual, margen_bruto_pct
@@ -4572,6 +4576,141 @@ def descargar_factura_pdf(
     )
 
 
+@ventas_ext_router.get("/{id}/ticket")
+def descargar_factura_ticket_pdf(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Genera un TICKET compacto (formato 80mm, estilo impresora térmica de
+    punto de venta) para una factura ya emitida — documento visualmente
+    distinto a la factura formal de `descargar_factura_pdf` (usada por
+    NuevaFactura.tsx), pensado para POS.tsx.
+
+    No duplica ningún cálculo fiscal: IVA/IGTF/totales ya fueron calculados
+    y congelados en `Venta` por `facturacion_service` al momento de emitir
+    (ver `routers/facturacion.py`). Esta función solo LEE esos mismos campos
+    persistidos y cambia el layout/tamaño de página; es una función nueva e
+    independiente para no chocar con ediciones en paralelo sobre
+    `descargar_factura_pdf` (p. ej. el fix del logo).
+    """
+    import io
+    from fastapi.responses import StreamingResponse
+    from backend.models.operations import Venta
+    from backend.routers.entidades import _get_or_create_empresa
+
+    venta = (
+        db.query(Venta)
+        .filter(Venta.id == id, Venta.tenant_id == current_user.tenant_id)
+        .first()
+    )
+    if not venta:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+
+    # Mismos datos reales del emisor que usa la factura formal
+    # (descargar_factura_pdf) — nunca hardcodear el nombre/RIF de la empresa.
+    empresa = _get_or_create_empresa(db, current_user)
+
+    try:
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.units import mm
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Librería reportlab no instalada.")
+
+    ancho = 80 * mm
+    alto = max(230 + len(venta.detalles) * 11, 260)
+
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=(ancho, alto))
+    y = alto - 18
+
+    c.setFont("Helvetica-Bold", 10)
+    c.drawCentredString(ancho / 2, y, empresa.razon_social)
+    y -= 11
+    c.setFont("Helvetica", 7)
+    c.drawCentredString(ancho / 2, y, f"R.I.F.: {empresa.rif}")
+    y -= 14
+    c.setFont("Helvetica-Bold", 9)
+    c.drawCentredString(ancho / 2, y, "TICKET DE VENTA")
+    y -= 11
+    c.setFont("Helvetica", 7)
+    c.drawCentredString(ancho / 2, y, f"Control: {venta.numero_factura}")
+    y -= 9
+    c.drawCentredString(ancho / 2, y, venta.fecha.strftime('%d/%m/%Y %H:%M'))
+    y -= 10
+    c.line(6, y, ancho - 6, y)
+    y -= 12
+
+    cliente_nombre = venta.cliente.nombre if venta.cliente else "CLIENTE GENERAL"
+    c.setFont("Helvetica", 7)
+    c.drawString(6, y, f"Cliente: {cliente_nombre[:28]}")
+    y -= 10
+    c.drawString(6, y, f"Pago: {venta.metodo_pago}")
+    y -= 10
+    c.line(6, y, ancho - 6, y)
+    y -= 12
+
+    c.setFont("Helvetica-Bold", 7)
+    c.drawString(6, y, "CANT DESCRIPCION")
+    c.drawRightString(ancho - 6, y, "TOTAL")
+    y -= 9
+    c.setFont("Helvetica", 7)
+    for item in venta.detalles:
+        prod_nombre = (item.producto.nombre if item.producto else "Producto")[:22]
+        cantidad = float(item.cantidad)
+        precio = float(item.precio_usd_capturado)
+        sub_total_linea = precio * cantidad
+        c.drawString(6, y, f"{cantidad:.0f}x {prod_nombre}")
+        c.drawRightString(ancho - 6, y, f"${sub_total_linea:.2f}")
+        y -= 10
+
+    y -= 3
+    c.line(6, y, ancho - 6, y)
+    y -= 11
+
+    subtotal = float(venta.subtotal_usd)
+    iva = float(venta.iva_usd)
+    igtf = float(venta.igtf_usd)
+    total_usd = float(venta.total_usd)
+    total_bs = total_usd * float(venta.tasa_cambio_bs)
+
+    c.setFont("Helvetica", 7)
+    c.drawString(6, y, "Subtotal:")
+    c.drawRightString(ancho - 6, y, f"${subtotal:.2f}")
+    y -= 9
+    c.drawString(6, y, "IVA (16%):")
+    c.drawRightString(ancho - 6, y, f"${iva:.2f}")
+    y -= 9
+    if igtf > 0:
+        c.drawString(6, y, "IGTF (3%):")
+        c.drawRightString(ancho - 6, y, f"${igtf:.2f}")
+        y -= 9
+
+    c.setFont("Helvetica-Bold", 8)
+    c.drawString(6, y, "TOTAL USD:")
+    c.drawRightString(ancho - 6, y, f"${total_usd:.2f}")
+    y -= 10
+    c.drawString(6, y, "TOTAL BS:")
+    c.drawRightString(ancho - 6, y, f"Bs. {total_bs:.2f}")
+    y -= 15
+
+    c.setFont("Helvetica-Oblique", 6)
+    c.drawCentredString(ancho / 2, y, "Representación tipo ticket de la Factura Fiscal emitida.")
+    y -= 8
+    c.drawCentredString(ancho / 2, y, "Gracias por su compra.")
+
+    c.showPage()
+    c.save()
+
+    buffer.seek(0)
+    filename = f"Ticket-{venta.numero_factura}.pdf"
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
 @ventas_ext_router.get("/cotizaciones")
 def cotizaciones(
     db: Session = Depends(get_db),
@@ -5083,9 +5222,134 @@ def ordenes_venta(db: Session = Depends(get_db)):
 
 
 @ventas_ext_router.get("/notas-entrega")
-def notas_entrega(db: Session = Depends(get_db)):
-    ventas = db.query(Venta).filter(Venta.estado == "ACTIVA").limit(20).all()
-    return [{"numero": v.numero_factura, "fecha": v.fecha.strftime("%d/%m/%Y"), "total": to_float(v.total)} for v in ventas]
+def notas_entrega(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Lista las Notas de Entrega (remisiones) reales del tenant actual."""
+    notas = (
+        db.query(NotaEntrega)
+        .filter(NotaEntrega.tenant_id == current_user.tenant_id)
+        .order_by(NotaEntrega.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    return [
+        {
+            "id": n.id,
+            "numero_nota": n.numero_nota,
+            "cliente": n.cliente_nombre,
+            "fecha": n.fecha_emision.strftime("%d/%m/%Y"),
+            "transportista": n.transportista,
+            "vehiculo_placa": n.vehiculo_placa,
+            "destino": n.destino,
+            "estado": n.estado,
+            "ov": n.orden_venta_id,
+            "orden_venta_id": n.orden_venta_id,
+        }
+        for n in notas
+    ]
+
+
+@ventas_ext_router.post("/notas-entrega", status_code=201)
+def crear_nota_entrega(
+    nota_in: NotaEntregaCreate,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Crea una Nota de Entrega real (despacho directo o desde Orden de Venta).
+
+    No exige que el cliente ya exista en el maestro (a diferencia de
+    Cotización): el despacho de almacén no debe bloquearse por eso, así que
+    se guarda siempre el nombre tal como se escribió (`cliente_nombre`) y,
+    adicionalmente, se enlaza `cliente_id` si hay un match.
+    """
+    tenant_id = current_user.tenant_id
+    client_name = nota_in.client.strip()
+
+    cliente = (
+        db.query(Cliente)
+        .filter(Cliente.tenant_id == tenant_id, Cliente.nombre.ilike(client_name))
+        .first()
+    )
+
+    if nota_in.sourceOrder is not None:
+        orden = (
+            db.query(OrdenVenta)
+            .filter(OrdenVenta.id == nota_in.sourceOrder, OrdenVenta.tenant_id == tenant_id)
+            .first()
+        )
+        if not orden:
+            raise HTTPException(status_code=404, detail="Orden de venta de origen no encontrada.")
+
+    count = db.query(NotaEntrega).filter(NotaEntrega.tenant_id == tenant_id).count()
+    numero_nota = f"NE-{datetime.now(timezone.utc).year}-{str(count + 1).zfill(4)}"
+
+    custom_fields_data = [cf.model_dump() for cf in nota_in.logistics.customFields]
+
+    nueva_nota = NotaEntrega(
+        tenant_id=tenant_id,
+        numero_nota=numero_nota,
+        cliente_id=cliente.id if cliente else None,
+        cliente_nombre=client_name,
+        orden_venta_id=nota_in.sourceOrder,
+        fecha_emision=nota_in.emissionDate,
+        transportista=nota_in.logistics.carrier,
+        vehiculo_placa=nota_in.logistics.vehiclePlate,
+        destino=nota_in.logistics.destination,
+        notas=nota_in.logistics.notes,
+        campos_personalizados=custom_fields_data,
+        estado="PENDIENTE",
+        creado_por=getattr(current_user, "id", None),
+    )
+    for item in nota_in.items:
+        nueva_nota.items.append(NotaEntregaItem(
+            descripcion=item.description,
+            cantidad=item.quantity,
+        ))
+
+    try:
+        db.add(nueva_nota)
+        db.commit()
+        db.refresh(nueva_nota)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al crear la nota de entrega: {str(e)}")
+
+    return {
+        "id": nueva_nota.id,
+        "numero_nota": nueva_nota.numero_nota,
+        "cliente": nueva_nota.cliente_nombre,
+        "fecha": nueva_nota.fecha_emision.strftime("%d/%m/%Y"),
+        "estado": nueva_nota.estado,
+        "orden_venta_id": nueva_nota.orden_venta_id,
+    }
+
+
+@ventas_ext_router.patch("/notas-entrega/{id}/estado")
+def actualizar_estado_nota_entrega(
+    id: int,
+    body: NotaEntregaEstadoUpdate,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Actualiza el estado de despacho de una Nota de Entrega (PENDIENTE/ENTREGADO/ANULADA)."""
+    nota = (
+        db.query(NotaEntrega)
+        .filter(NotaEntrega.id == id, NotaEntrega.tenant_id == current_user.tenant_id)
+        .first()
+    )
+    if not nota:
+        raise HTTPException(status_code=404, detail="Nota de entrega no encontrada")
+
+    estados_validos = {"PENDIENTE", "ENTREGADO", "ANULADA"}
+    if body.estado not in estados_validos:
+        raise HTTPException(status_code=400, detail=f"Estado inválido. Use uno de: {', '.join(sorted(estados_validos))}")
+
+    nota.estado = body.estado
+    db.commit()
+    db.refresh(nota)
+    return {"id": nota.id, "estado": nota.estado}
 
 
 # --- INVENTARIO EXTENDIDO ---

@@ -47,18 +47,36 @@ const DeliveryNotes = () => {
 
   const displayNotes = deliveryNotes;
 
+  const refetchNotes = async () => {
+    try {
+      const data = await api.get<any[]>('/ventas/notas-entrega');
+      setDeliveryNotes(data || []);
+    } catch (error) {
+      console.error("Error fetching delivery notes:", error);
+    }
+  };
+
+  const handleMarcarEntregado = async (id: number) => {
+    try {
+      await api.patch(`/ventas/notas-entrega/${id}/estado`, { estado: 'ENTREGADO' });
+      await refetchNotes();
+    } catch (error) {
+      console.error("Error updating delivery note status:", error);
+    }
+  };
+
   if (showNewForm) {
     return (
-      <DeliveryNoteForm 
+      <DeliveryNoteForm
         initialData={selectedOrder}
         onCancel={() => {
           setShowNewForm(false);
           setSelectedOrder(null);
         }}
-        onSubmit={(formData) => {
-          console.log('Nota de Entrega Generada:', formData);
+        onSubmit={async () => {
           setShowNewForm(false);
           setSelectedOrder(null);
+          await refetchNotes();
         }}
       />
     );

@@ -159,12 +159,11 @@ export const DeliveryNoteForm: React.FC<DeliveryNoteFormProps> = ({ onCancel, on
         items: items.map(i => ({ description: i.description, quantity: i.quantity })),
         sourceOrder: initialData?.orderId || null
       };
-      
-      // Simulando llamada API
-      await new Promise(resolve => setTimeout(resolve, 800));
-      onSubmit(formData);
+
+      const created = await api.post<any>('/ventas/notas-entrega', formData);
+      onSubmit(created);
     } catch (err: any) {
-      setErrorMsg('Error al generar la nota de entrega. Intente de nuevo.');
+      setErrorMsg(err?.message || 'Error al generar la nota de entrega. Intente de nuevo.');
     } finally {
       setIsSaving(false);
     }

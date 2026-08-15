@@ -199,6 +199,35 @@ class CotizacionStatusUpdate(BaseModel):
     estado: str = Field(..., min_length=1)
 
 # ==========================================
+# ESQUEMAS PARA NOTAS DE ENTREGA (REMISIONES)
+# ==========================================
+
+class NotaEntregaItemCreate(BaseModel):
+    description: str = Field(..., min_length=1)
+    quantity: Decimal = Field(..., gt=0)
+
+class NotaEntregaCustomField(BaseModel):
+    key: str = ""
+    value: str = ""
+
+class NotaEntregaLogistics(BaseModel):
+    carrier: Optional[str] = None
+    vehiclePlate: Optional[str] = None
+    destination: Optional[str] = None
+    notes: Optional[str] = None
+    customFields: List[NotaEntregaCustomField] = Field(default_factory=list)
+
+class NotaEntregaCreate(BaseModel):
+    client: str = Field(..., min_length=1)
+    emissionDate: date
+    logistics: NotaEntregaLogistics = Field(default_factory=NotaEntregaLogistics)
+    items: List[NotaEntregaItemCreate] = Field(..., min_length=1)
+    sourceOrder: Optional[int] = None
+
+class NotaEntregaEstadoUpdate(BaseModel):
+    estado: str = Field(..., min_length=1)
+
+# ==========================================
 # ESQUEMAS PARA COMPRAS
 # ==========================================
 

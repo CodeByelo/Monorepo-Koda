@@ -237,6 +237,7 @@ def emitir_factura_fiscal(
         )
 
     return {
+        "id": resultado.venta.id,
         "numero_factura": resultado.numero_factura,
         "numero_control": resultado.numero_control,
         "hash_integridad": hash_integridad,

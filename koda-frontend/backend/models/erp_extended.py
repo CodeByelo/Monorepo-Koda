@@ -1,7 +1,7 @@
 from sqlalchemy import ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 """Modelos extendidos para módulos ERP (cobranzas, compras, tesorería, empresa)."""
-from sqlalchemy import Column, Integer, String, Numeric, Boolean, DateTime, ForeignKey, Text, Date, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Numeric, Boolean, DateTime, ForeignKey, Text, Date, UniqueConstraint, JSON
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from backend.core.database import Base
@@ -967,4 +967,54 @@ class TelegramCommand(Base):
     response_text = Column(Text, nullable=False)
     internal_action = Column(String(100), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
+
+
+class NotaEntrega(Base):
+    """Nota de Entrega (remisión): comprobante de despacho físico de mercancía.
+
+    Es una entidad real, independiente de `Venta`/`OrdenVenta` — antes el
+    endpoint de listado solo re-etiquetaba facturas (`Venta`) como si fueran
+    notas de entrega, y el formulario nunca persistía nada (solo hacía un
+    `console.log`). No genera cuentas por cobrar fiscales; puede originarse
+    desde una Orden de Venta (`orden_venta_id`) o registrarse como despacho
+    directo de inventario (ambos campos de origen nullable).
+    """
+    __tablename__ = "notas_entrega"
+    __table_args__ = {'schema': 'public'}
+    tenant_id = Column(UUID(as_uuid=True))
+
+    id = Column(Integer, primary_key=True, index=True)
+    numero_nota = Column(String(50), unique=True, nullable=False)
+    cliente_id = Column(Integer, ForeignKey("public.clientes.id"), nullable=True)
+    # Snapshot del nombre del cliente tal como se escribió en el formulario:
+    # el despacho de almacén no debe bloquearse si el nombre no calza
+    # exactamente con el maestro de clientes (a diferencia de Cotización).
+    cliente_nombre = Column(String(150), nullable=False)
+    orden_venta_id = Column(Integer, ForeignKey("public.ordenes_venta.id"), nullable=True)
+    venta_id = Column(Integer, ForeignKey("public.ventas.id"), nullable=True)
+    fecha_emision = Column(Date, default=lambda: datetime.now(timezone.utc).date(), nullable=False)
+    transportista = Column(String(150), nullable=True)
+    vehiculo_placa = Column(String(20), nullable=True)
+    destino = Column(String(250), nullable=True)
+    notas = Column(Text, nullable=True)
+    campos_personalizados = Column(JSON, nullable=True)
+    estado = Column(String(20), default="PENDIENTE", nullable=False)  # PENDIENTE, ENTREGADO, ANULADA
+    creado_por = Column(UUID(as_uuid=True), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    cliente = relationship("Cliente")
+    items = relationship("NotaEntregaItem", back_populates="nota_entrega", cascade="all, delete-orphan")
+
+
+class NotaEntregaItem(Base):
+    __tablename__ = "nota_entrega_items"
+    __table_args__ = {'schema': 'public'}
+
+    id = Column(Integer, primary_key=True, index=True)
+    nota_entrega_id = Column(Integer, ForeignKey("public.notas_entrega.id", ondelete="CASCADE"), nullable=False)
+    producto_id = Column(Integer, ForeignKey("public.productos.id"), nullable=True)
+    descripcion = Column(Text, nullable=False)
+    cantidad = Column(Numeric(15, 2), default=1.00, nullable=False)
+
+    nota_entrega = relationship("NotaEntrega", back_populates="items")
 
