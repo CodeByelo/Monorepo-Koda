@@ -211,5 +211,15 @@ def main():
     finally:
         session.close()
 
+def test_billing_math_and_igtf():
+    """Pytest entrypoint for the billing/IVA/IGTF math + anti-tampering checks above.
+
+    `main()` contains real assertions (tax math, stock deduction, server-side
+    price recalculation) but was never wired to a `test_` function, so pytest
+    collected zero items from this file. This just gives pytest a real entrypoint.
+    """
+    main()
+
+
 if __name__ == "__main__":
     main()
