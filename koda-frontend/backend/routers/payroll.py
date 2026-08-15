@@ -416,7 +416,26 @@ def confirm_payroll(
     period = _get_period_or_404(db, period_id, tenant_id)
     if period.status == "procesado":
         raise HTTPException(status_code=400, detail="Este período ya fue procesado y contabilizado.")
-        
+
+    # GUARD: routers/hr.py expone OTRO motor de nómina independiente y paralelo
+    # (POST /rrhh/nomina/procesar) que también puede generar una fila de Nomina +
+    # AsientoContable para el mismo tenant/período, arriesgando doble
+    # contabilización silenciosa. Ambos motores pueblan fecha_inicio/fecha_fin en
+    # la MISMA tabla `nominas`, así que consultamos esa tabla compartida aquí para
+    # detectar si el OTRO motor (o este mismo) ya proceso un período solapado.
+    solapamiento = db.query(Nomina).filter(
+        Nomina.tenant_id == tenant_id,
+        Nomina.fecha_inicio.isnot(None),
+        Nomina.fecha_fin.isnot(None),
+        Nomina.fecha_inicio <= period.fecha_fin,
+        Nomina.fecha_fin >= period.fecha_inicio,
+    ).first()
+    if solapamiento:
+        raise HTTPException(
+            status_code=409,
+            detail="Ya existe una nómina procesada para este período en el sistema. Verifique antes de continuar.",
+        )
+
     tasa_activa = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
     if not tasa_activa:
         raise HTTPException(status_code=400, detail="Se requiere una Tasa BCV activa para valorizar la nómina.")
@@ -426,8 +445,10 @@ def confirm_payroll(
     
     nueva_nomina = Nomina(
         tenant_id=tenant_id,
-        periodo=f"{report.tipo_periodo.capitalize()} - {report.nombre_periodo}", 
-        total_asignaciones_usd=report.total_base, 
+        periodo=f"{report.tipo_periodo.capitalize()} - {report.nombre_periodo}",
+        fecha_inicio=period.fecha_inicio,
+        fecha_fin=period.fecha_fin,
+        total_asignaciones_usd=report.total_base,
         total_bonos_usd=report.total_asignaciones, 
         total_deducciones_usd=report.total_deducciones,
         total_inces_usd=Decimal("0.00"),

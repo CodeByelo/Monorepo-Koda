@@ -28,6 +28,14 @@ class Nomina(Base):
     id = Column(Integer, primary_key=True, index=True)
     periodo = Column(String(100), nullable=False) # Ej. Quincena 1 - Mayo 2026
     fecha_emision = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    # fecha_inicio/fecha_fin: rango real del período pagado (distinto de fecha_emision,
+    # que es solo el timestamp de creación del registro). Nullable porque las filas
+    # históricas no lo tenían. Este es el campo compartido que permite detectar
+    # solapamientos entre los DOS motores de nómina independientes (routers/hr.py y
+    # routers/payroll.py) que escriben en esta misma tabla — ver guardias en ambos
+    # routers y el EXCLUDE constraint en sql/013_nomina_period_overlap_guard.sql.
+    fecha_inicio = Column(Date, nullable=True)
+    fecha_fin = Column(Date, nullable=True)
     total_asignaciones_usd = Column(Numeric(15, 2), default=0.00, nullable=False)
     total_bonos_usd = Column(Numeric(15, 2), default=0.00, nullable=False) # Bonos no sujetos a deducción
     total_deducciones_usd = Column(Numeric(15, 2), default=0.00, nullable=False)
