@@ -4586,7 +4586,11 @@ async def update_ticket(
         is_admin = role_norm in {"administrativo", "admin", "administrador"}
         is_ceo = role_norm == "ceo"
 
-        current_row = await conn.fetchrow("SELECT solicitante_id, titulo, prioridad FROM tickets WHERE id = $1", ticket_id)
+        tenant_id = current_user.get("tenant_id")
+        current_row = await conn.fetchrow(
+            "SELECT solicitante_id, titulo, prioridad FROM tickets WHERE id = $1 AND tenant_id = $2::uuid",
+            ticket_id, tenant_id
+        )
         owner_id = current_row["solicitante_id"] if current_row else None
         if not owner_id:
             raise HTTPException(status_code=404, detail="Ticket no encontrado")
@@ -4597,7 +4601,6 @@ async def update_ticket(
 
         is_tech = await _is_tech_user(conn, user_id)
         can_manage_ticket = is_dev or is_admin or is_tech
-        tenant_id = current_user.get("tenant_id")
         next_priority = payload.prioridad if can_manage_ticket else None
         username = await conn.fetchval("SELECT username FROM profiles WHERE id = $1::uuid", user_id)
         obs_value = _clean_observation(payload.observaciones) if can_manage_ticket else None
@@ -4616,9 +4619,9 @@ async def update_ticket(
                     COALESCE($7::text, 'tecnico') || ': ' || $5::text
                     ELSE observaciones
                 END
-            WHERE id = $1
+            WHERE id = $1 AND tenant_id = $8::uuid
             RETURNING id, titulo, descripcion, area, prioridad, estado, solicitante_id, tecnico_id, observaciones, fecha_creacion
-        """, ticket_id, payload.titulo, payload.descripcion, next_priority, obs_value, can_manage_ticket, username)
+        """, ticket_id, payload.titulo, payload.descripcion, next_priority, obs_value, can_manage_ticket, username, tenant_id)
 
         try:
             await _ensure_security_events_table(conn)
@@ -4677,7 +4680,11 @@ async def update_ticket_status(
         is_admin = role_norm in {"administrativo", "admin", "administrador"}
         is_ceo = role_norm == "ceo"
 
-        current = await conn.fetchrow("SELECT id, estado, solicitante_id FROM tickets WHERE id = $1", ticket_id)
+        tenant_id = current_user.get("tenant_id")
+        current = await conn.fetchrow(
+            "SELECT id, estado, solicitante_id FROM tickets WHERE id = $1 AND tenant_id = $2::uuid",
+            ticket_id, tenant_id
+        )
         if not current:
             raise HTTPException(status_code=404, detail="Ticket no encontrado")
 
@@ -4695,7 +4702,6 @@ async def update_ticket_status(
             raise HTTPException(status_code=403, detail="No autorizado para registrar observaciones")
 
         tecnico_id = user_id if next_status in {"en-proceso", "resuelto"} else None
-        tenant_id = current_user.get("tenant_id")
         username = await conn.fetchval("SELECT username FROM profiles WHERE id = $1::uuid", user_id)
         obs_value = _clean_observation(payload.observaciones) if can_manage_ticket else None
         updated = await conn.fetchrow("""
@@ -4711,9 +4717,9 @@ async def update_ticket_status(
                     COALESCE($5::text, 'tecnico') || ': ' || $4::text
                     ELSE observaciones
                 END
-            WHERE id = $1
+            WHERE id = $1 AND tenant_id = $6::uuid
             RETURNING id, titulo, descripcion, area, prioridad, estado, solicitante_id, tecnico_id, observaciones, fecha_creacion
-        """, ticket_id, next_status, tecnico_id, obs_value, username)
+        """, ticket_id, next_status, tecnico_id, obs_value, username, tenant_id)
 
         try:
             await _ensure_security_events_table(conn)
@@ -4817,13 +4823,16 @@ async def delete_ticket(
     is_ceo = role_norm == "ceo"
     is_tech = await _is_tech_user(conn, user_id)
 
-    owner_id = await conn.fetchval("SELECT solicitante_id FROM tickets WHERE id = $1", ticket_id)
+    tenant_id = current_user.get("tenant_id")
+    owner_id = await conn.fetchval(
+        "SELECT solicitante_id FROM tickets WHERE id = $1 AND tenant_id = $2::uuid",
+        ticket_id, tenant_id
+    )
     if not owner_id:
         raise HTTPException(status_code=404, detail="Ticket no encontrado")
     if str(owner_id) != str(user_id) and not (is_admin or is_dev or is_ceo or is_tech):
         raise HTTPException(status_code=403, detail="No autorizado para eliminar este ticket")
 
-    tenant_id = current_user.get("tenant_id")
     username = await conn.fetchval("SELECT username FROM profiles WHERE id = $1::uuid", user_id)
     deleted = await conn.fetchrow(
         """
@@ -4834,11 +4843,12 @@ async def delete_ticket(
                 WHEN COALESCE(observaciones, '') = '' THEN ''
                 ELSE E'\n'
             END || 'Eliminado por ' || COALESCE($2, 'usuario') || ' el ' || to_char(NOW(), 'DD/MM/YYYY HH24:MI')
-        WHERE id = $1
+        WHERE id = $1 AND tenant_id = $3::uuid
         RETURNING id, titulo, estado
         """,
         ticket_id,
         username or "usuario",
+        tenant_id,
     )
     if not deleted:
         raise HTTPException(status_code=404, detail="Ticket no encontrado")
