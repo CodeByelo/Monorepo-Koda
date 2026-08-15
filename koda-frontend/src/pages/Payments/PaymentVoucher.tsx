@@ -1,12 +1,23 @@
-import { 
-  Printer, 
-  Mail, 
-  QrCode
+import {
+  Printer,
+  Mail,
+  QrCode,
+  AlertTriangle
 } from 'lucide-react';
 
 const PaymentVoucher = () => {
   return (
     <div className="space-y-4 animate-in fade-in duration-500 pb-20">
+      {/* Demo notice: this page is not yet wired to a real voucher/pago id,
+          all fields below are placeholders. Kept visible on print too so a
+          printed copy can never be mistaken for a real comprobante. */}
+      <div className="bg-amber-100 border-2 border-amber-400 rounded-2xl p-4 flex items-center gap-3">
+        <AlertTriangle size={20} className="text-amber-700 shrink-0" />
+        <p className="text-xs font-black text-amber-800 uppercase tracking-wide">
+          Plantilla de ejemplo — este comprobante no está conectado a un pago real. No representa una transacción efectiva.
+        </p>
+      </div>
+
       {/* Header */}
       <header className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden flex justify-between items-center print:hidden">
         <div className="space-y-1">
@@ -21,7 +32,11 @@ const PaymentVoucher = () => {
           <button onClick={() => window.print()} className="bg-slate-50 text-slate-600 px-6 py-2.5 rounded-xl text-xs font-black uppercase border border-slate-200 hover:bg-white transition-all flex items-center gap-2">
             <Printer size={14} /> Imprimir PDF
           </button>
-          <button className="bg-[#0b5156] text-white px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all">
+          <button
+            disabled
+            title="Envío al proveedor aún no implementado. Próximamente disponible."
+            className="bg-[#0b5156]/40 text-white px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 cursor-not-allowed opacity-60"
+          >
             <Mail size={14} /> Enviar al Proveedor
           </button>
         </div>

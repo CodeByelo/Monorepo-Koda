@@ -9,6 +9,10 @@ import {
 import { Link } from 'react-router-dom';
 
 const CashFlowMapping = () => {
+  // NOTE: This page is not yet wired to a backend endpoint. The table below
+  // shows illustrative example rows only — nothing here is persisted or
+  // read from real accounting data. Keep the banner and disabled state
+  // until a real /contabilidad/flujo-caja-mapeo endpoint exists.
   const rows = [
     { code: '1.1.02.01', name: 'Cuentas por Cobrar Clientes', category: 'OP', impact: 'Variación de Capital de Trabajo', impactColor: 'bg-blue-100 text-blue-700' },
     { code: '1.2.01.01', name: 'Maquinaria y Equipos', category: 'INV', impact: 'Adquisición de Activos', impactColor: 'bg-amber-100 text-amber-700' },
@@ -34,12 +38,24 @@ const CashFlowMapping = () => {
             <p className="text-slate-500 text-xs font-bold uppercase tracking-tight">Defina el impacto de cada cuenta en el Estado de Flujo de Efectivo.</p>
           </div>
           <div className="flex gap-2">
-             <button className="bg-[#0b5156] text-white px-8 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all">
+             <button
+               disabled
+               title="Esta función aún no está conectada al backend. Próximamente disponible."
+               className="bg-[#0b5156]/40 text-white px-8 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 cursor-not-allowed opacity-60"
+             >
                 <Save size={14} /> Guardar Mapeo
              </button>
           </div>
         </div>
       </header>
+
+      {/* Dev-only notice */}
+      <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-center gap-3">
+         <Info size={18} className="text-amber-600 shrink-0" />
+         <p className="text-[10px] font-black text-amber-800 uppercase tracking-wide">
+           Módulo en desarrollo — la tabla muestra cuentas de ejemplo, sin conexión al backend real. Próximamente disponible.
+         </p>
+      </div>
 
       {/* Mapping Matrix */}
       <article className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden flex flex-col">

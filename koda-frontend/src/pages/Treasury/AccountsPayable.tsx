@@ -8,7 +8,8 @@ import {
   Download,
   ShieldCheck,
   FileSpreadsheet,
-  Clock
+  Clock,
+  AlertTriangle
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -46,15 +47,31 @@ const AccountsPayable = () => {
             </p>
           </div>
           <div className="flex gap-2">
-             <button className="bg-white text-slate-500 px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 border border-slate-200 hover:bg-slate-50 transition-all tracking-widest shadow-sm">
+             <button
+               disabled
+               title="Próximamente disponible."
+               className="bg-white text-slate-400 px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 border border-slate-200 tracking-widest shadow-sm cursor-not-allowed opacity-60"
+             >
                 <Clock size={14} /> Proyección de Pagos
              </button>
-             <button className="bg-koda-main text-white px-8 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-koda-mainHover transition-all tracking-widest">
+             <button
+               disabled
+               title="Próximamente disponible."
+               className="bg-koda-main/40 text-white px-8 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 tracking-widest cursor-not-allowed opacity-60"
+             >
                 <FileText size={16} /> Cargar Factura Compra
              </button>
           </div>
         </div>
       </header>
+
+      {/* Dev-only notice */}
+      <div className="bg-amber-100 border-2 border-amber-400 rounded-2xl p-4 flex items-center gap-3">
+        <AlertTriangle size={20} className="text-amber-700 shrink-0" />
+        <p className="text-xs font-black text-amber-800 uppercase tracking-wide">
+          Módulo en desarrollo — cifras y facturas de ejemplo, sin conexión al backend real de cuentas por pagar.
+        </p>
+      </div>
 
       {/* KPIs */}
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
@@ -118,7 +135,11 @@ const AccountsPayable = () => {
                             <span className={`${p.statusColor} text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-tighter`}>{p.status}</span>
                          </td>
                          <td className="py-5 px-6 text-right">
-                            <button className="bg-slate-50 text-slate-500 px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest border border-slate-200 hover:bg-white transition-all">
+                            <button
+                              disabled
+                              title="Próximamente disponible."
+                              className="bg-slate-50 text-slate-400 px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest border border-slate-200 cursor-not-allowed"
+                            >
                                Liquidar
                             </button>
                          </td>
@@ -155,7 +176,11 @@ const AccountsPayable = () => {
                     </div>
                  </div>
 
-                 <button className="w-full bg-white text-koda-main font-black py-4 rounded-2xl uppercase text-xs tracking-widest shadow-lg hover:scale-105 transition-all flex items-center justify-center gap-2 mt-4">
+                 <button
+                   disabled
+                   title="Próximamente disponible."
+                   className="w-full bg-white/40 text-koda-main font-black py-4 rounded-2xl uppercase text-xs tracking-widest flex items-center justify-center gap-2 mt-4 cursor-not-allowed opacity-70"
+                 >
                     <Download size={16} /> Descargar Archivo TXT
                  </button>
               </div>
