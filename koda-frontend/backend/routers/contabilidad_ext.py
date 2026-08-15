@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from backend.core.database import get_db
 from backend.models.accounting import AsientoContable, AsientoDetalle, CierrePeriodo
 from backend.models.erp_extended import CuentaContable
-from backend.utils.helpers import ventas_periodo, to_float
+from backend.utils.helpers import ventas_periodo, to_float, verificar_periodo_abierto
 from backend.core.security import get_current_user
 
 router = APIRouter(prefix="/contabilidad", tags=["Contabilidad"])
@@ -556,13 +556,7 @@ def monitor_forense(db: Session = Depends(get_db), current_user = Depends(get_cu
 
 @router.post("/asientos")
 def crear_asiento(body: AsientoCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    periodo_asiento = datetime.now(timezone.utc).strftime("%Y-%m")
-    cierre = db.query(CierrePeriodo).filter(
-        CierrePeriodo.periodo == periodo_asiento,
-        CierrePeriodo.tenant_id == current_user.tenant_id
-    ).first()
-    if cierre:
-        raise HTTPException(403, detail=f"No se pueden registrar asientos en el período {periodo_asiento} porque está CERRADO.")
+    verificar_periodo_abierto(db, current_user.tenant_id, datetime.now(timezone.utc), contexto="asientos")
 
     total_debe = sum(float(l.debe) for l in body.lineas)
     total_haber = sum(float(l.haber) for l in body.lineas)

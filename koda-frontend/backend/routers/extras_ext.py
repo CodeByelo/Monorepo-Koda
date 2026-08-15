@@ -23,7 +23,10 @@ from backend.models.erp_extended import (
     RetencionIVA, FondoCajaChica, GastoCajaChica, ColocacionInversion, AuditoriaLog,
     MovimientoBancario, StockPorAlmacen,
 )
-from backend.utils.helpers import to_float, tasa_actual, ventas_periodo, margen_bruto_pct
+from backend.utils.helpers import (
+    to_float, tasa_actual, ventas_periodo, margen_bruto_pct,
+    TASA_CAMBIO_FALLBACK_DEFAULT,
+)
 from backend.core.security import get_current_user
 
 router = APIRouter(tags=["Extras ERP"], dependencies=[Depends(get_current_user)])
@@ -196,9 +199,16 @@ def listar_notas_credito(db: Session = Depends(get_db), current_user: Profile = 
     ]
 
 
+# Tope defensivo de monto por nota: no hay razón de negocio para que una sola
+# nota de crédito/débito supere este monto; evita entradas absurdas (typos con
+# decimales corridos, montos negativos, etc.) además de la validación puntual
+# contra el saldo de la factura relacionada que se hace en crear_nota_credito.
+NOTA_CREDITO_MONTO_MAXIMO = Decimal("1000000")
+
+
 class NotaCreditoCreate(BaseModel):
     numero_factura: str
-    monto: Decimal
+    monto: Decimal = Field(..., ge=0, le=NOTA_CREDITO_MONTO_MAXIMO, decimal_places=2)
     motivo: str
     tipo: str = "CREDITO"  # CREDITO o DEBITO
 
@@ -225,14 +235,39 @@ def crear_nota_credito(payload: NotaCreditoCreate, db: Session = Depends(get_db)
     else:
         cliente_id = clientes[0].id
 
+    tipo_str_check = payload.tipo.upper() if payload.tipo else "CREDITO"
+    if "DEBIT" not in tipo_str_check:
+        # Nota de crédito: no puede exceder el saldo pendiente real de la
+        # factura relacionada. Antes esto se "clamp"eaba silenciosamente al
+        # aplicar el monto a la CxC (el exceso simplemente desaparecía del
+        # balance por cobrar); ahora se rechaza explícitamente para que el
+        # usuario corrija el monto.
+        if cxc:
+            saldo_pendiente = Decimal(str(cxc.monto_total)) - Decimal(str(cxc.monto_pagado))
+        else:
+            # Sin CxC asociada (ya liquidada/eliminada o nunca generada):
+            # el tope de referencia es el total facturado.
+            saldo_pendiente = Decimal(str(venta.total_usd))
+
+        if saldo_pendiente < 0:
+            saldo_pendiente = Decimal("0")
+
+        if payload.monto > saldo_pendiente:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"El monto de la nota de crédito (${payload.monto:.2f}) excede el saldo "
+                    f"pendiente de la factura {payload.numero_factura} (${saldo_pendiente:.2f})."
+                ),
+            )
+
     cant_notas = db.query(NotaCredito).filter(NotaCredito.tenant_id == current_user.tenant_id).count()
     tipo_str = payload.tipo.upper() if payload.tipo else "CREDITO"
     # Determinar prefijo según tipo de nota
     prefijo = "ND" if "DEBIT" in tipo_str else "NC"
     nuevo_numero = f"{prefijo}-{str(cant_notas + 1).zfill(8)}"
 
-    tasa_obj = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
-    tasa_bs = tasa_obj.valor_ves if tasa_obj else Decimal("36.52")
+    tasa_bs = Decimal(str(tasa_actual(db, current_user.tenant_id)))
     nota = NotaCredito(
         numero=nuevo_numero,
         venta_id=venta.id,
@@ -575,18 +610,43 @@ def crear_conteo(body: ConteoCreate, db: Session = Depends(get_db), current_user
 
 @router.post("/inventario/conteos/{conteo_id}/cerrar")
 def cerrar_conteo(conteo_id: int, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    # Bloqueamos la fila del conteo para evitar cierres concurrentes del
+    # mismo conteo (mismo patrón que recibir_transferencia).
     conteo = db.query(ConteoFisico).filter(
         ConteoFisico.id == conteo_id, ConteoFisico.tenant_id == current_user.tenant_id
-    ).first()
+    ).with_for_update().first()
     if not conteo:
         raise HTTPException(status_code=404, detail="Conteo no encontrado")
     if conteo.estado == "CERRADO":
         raise HTTPException(status_code=400, detail="El conteo ya está cerrado")
 
-    producto = db.query(Producto).filter(Producto.id == conteo.producto_id, Producto.tenant_id == current_user.tenant_id).first()
+    # Bloqueamos también la fila del producto antes de mutar su stock.
+    producto = db.query(Producto).filter(
+        Producto.id == conteo.producto_id, Producto.tenant_id == current_user.tenant_id
+    ).with_for_update().first()
     if producto:
         producto.stock = conteo.cantidad_fisica
-    
+
+        # Reflejar la conciliación en StockPorAlmacen del almacén contado,
+        # aplicando la misma diferencia (delta) que ya se usó para el stock
+        # global, en vez de dejar la tabla por-almacén sin actualizar.
+        almacen_stock = db.query(StockPorAlmacen).filter(
+            StockPorAlmacen.producto_id == conteo.producto_id,
+            StockPorAlmacen.almacen_id == conteo.almacen_id,
+            StockPorAlmacen.tenant_id == current_user.tenant_id
+        ).with_for_update().first()
+
+        if almacen_stock:
+            almacen_stock.cantidad = max(almacen_stock.cantidad + conteo.diferencia, Decimal("0.00"))
+        else:
+            almacen_stock = StockPorAlmacen(
+                producto_id=conteo.producto_id,
+                almacen_id=conteo.almacen_id,
+                cantidad=max(conteo.diferencia, Decimal("0.00")),
+                tenant_id=current_user.tenant_id
+            )
+            db.add(almacen_stock)
+
     conteo.estado = "CERRADO"
     db.commit()
     return {"message": "Conteo conciliado y stock actualizado correctamente"}
@@ -1249,10 +1309,17 @@ def confirmar_transferencia(id: int, db: Session = Depends(get_db), current_user
 @router.get("/tesoreria/prestamos/resumen")
 def resumen_prestamos_uvc(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     loans = db.query(PrestamoUVC).filter(PrestamoUVC.tenant_id == current_user.tenant_id).all()
-    
-    tasa_uvc_hoy = 42.15
-    tasa_uvc_ayer = 42.12
-    var_24h = ((tasa_uvc_hoy - tasa_uvc_ayer) / tasa_uvc_ayer) * 100
+
+    tasa_uvc_hoy = to_float(tasa_actual(db, current_user.tenant_id))
+    tasas_recientes = (
+        db.query(TasaCambio)
+        .filter(TasaCambio.tenant_id == current_user.tenant_id)
+        .order_by(TasaCambio.fecha.desc())
+        .limit(2)
+        .all()
+    )
+    tasa_uvc_ayer = to_float(tasas_recientes[1].valor_ves) if len(tasas_recientes) > 1 else tasa_uvc_hoy
+    var_24h = ((tasa_uvc_hoy - tasa_uvc_ayer) / tasa_uvc_ayer) * 100 if tasa_uvc_ayer else 0.0
     
     total_uvc = 0.0
     total_reval_bs = 0.0
@@ -1301,9 +1368,10 @@ def registrar_prestamo_uvc(body: dict, db: Session = Depends(get_db), current_us
     desc = body.get("descripcion", "Préstamo Comercial UVC")
     monto_uvc = float(body.get("monto_uvc", 0.0))
     tasa = float(body.get("tasa", 12.0))
-    tasa_cambio_bs = float(body.get("tasa_cambio_bs", 42.15))
-    
-    saldo_usd = (monto_uvc * tasa_cambio_bs) / 36.42
+    tasa_ref = to_float(tasa_actual(db, current_user.tenant_id))
+    tasa_cambio_bs = float(body.get("tasa_cambio_bs", tasa_ref))
+
+    saldo_usd = (monto_uvc * tasa_cambio_bs) / tasa_ref if tasa_ref else 0.0
     
     nuevo_prestamo = PrestamoUVC(
         descripcion=desc,
@@ -1341,11 +1409,11 @@ def desviacion_presupuestaria(periodo: str = None, db: Session = Depends(get_db)
     
     # tasa_plan: the oldest/initial rate for this period
     oldest_mov = db.query(MovimientoBancario).filter(MovimientoBancario.tenant_id == current_user.tenant_id).order_by(MovimientoBancario.fecha.asc()).first()
-    tasa_plan = to_float(oldest_mov.tasa_cambio_bs) if oldest_mov else 36.42
-    
+    tasa_plan = to_float(oldest_mov.tasa_cambio_bs) if oldest_mov else to_float(tasa_actual(db, current_user.tenant_id))
+
     # tasa_real: the most recent rate available
     newest_mov = db.query(MovimientoBancario).filter(MovimientoBancario.tenant_id == current_user.tenant_id).order_by(MovimientoBancario.fecha.desc()).first()
-    tasa_real_raw = to_float(newest_mov.tasa_cambio_bs) if newest_mov else 42.15
+    tasa_real_raw = to_float(newest_mov.tasa_cambio_bs) if newest_mov else to_float(tasa_actual(db, current_user.tenant_id))
     # If tasa_real is 1.0 (likely a placeholder), fallback to 1.16x of plan to simulate realistic deviation
     tasa_real = tasa_real_raw if tasa_real_raw > 5.0 else tasa_plan * 1.16
     
@@ -1423,8 +1491,8 @@ def desviacion_presupuestaria(periodo: str = None, db: Session = Depends(get_db)
 def resumen_inversiones(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     from backend.models.erp_extended import ColocacionInversion
     placements = db.query(ColocacionInversion).filter(ColocacionInversion.estado == "ACTIVO", ColocacionInversion.tenant_id == current_user.tenant_id).all()
-    
-    tasa_real = 42.15
+
+    tasa_real = to_float(tasa_actual(db, current_user.tenant_id))
     
     total_gain_bs = 0.0
     total_capital_bs = 0.0
@@ -1463,7 +1531,7 @@ def resumen_inversiones(db: Session = Depends(get_db), current_user = Depends(ge
     avg_interest = sum(to_float(p.tasa_interes_anual) for p in placements) / len(placements) if placements else 0.0
     bcv_dev_pct = 15.7
     
-    eff_real_pct = (total_net_real_usd / (total_capital_bs / 36.42) * 100) if total_capital_bs > 0 else 0.0
+    eff_real_pct = (total_net_real_usd / (total_capital_bs / tasa_real) * 100) if total_capital_bs > 0 and tasa_real else 0.0
     
     return {
         "metricas": {
@@ -1503,45 +1571,103 @@ def registrar_inversion(body: dict, db: Session = Depends(get_db), current_user 
 
 @router.post("/tesoreria/importar")
 def importar_extracto_bancario(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """Importa un extracto bancario (filas ya parseadas en el cliente, ver
+    ImportStatement.tsx) y es el mecanismo REAL de conciliación: cada fila del
+    extracto se intenta cruzar contra un movimiento interno pendiente
+    (creado por pagos, compras, etc.) por monto + fecha + tipo (reforzado por
+    referencia cuando ambas la traen). Sólo si hay un match real se marca ese
+    movimiento como CONCILIADO; si ninguna fila coincide no se marca nada en
+    masa. Las filas del extracto sin contraparte interna se insertan como
+    movimientos nuevos en estado ACTIVO, quedando disponibles para conciliar
+    manualmente (endpoints /conciliacion/relacionar y /conciliacion/marcar)."""
     from backend.models.erp_extended import MovimientoBancario, CuentaBancaria
-    
+
     cuenta_id = body.get("cuenta_id")
     movs = body.get("movimientos", [])
-    
+
     cuenta = db.query(CuentaBancaria).filter(CuentaBancaria.id == cuenta_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
     if not cuenta:
         return {"ok": False, "message": "Cuenta bancaria no encontrada"}
-        
-    tasa_cambio = 42.15
-    
+
+    tasa_cambio = to_float(tasa_actual(db, current_user.tenant_id)) or 36.42
+
+    # Movimientos internos de esta cuenta aún no conciliados: son los únicos
+    # candidatos válidos a cruzar contra el extracto.
+    candidatos_pendientes = db.query(MovimientoBancario).filter(
+        MovimientoBancario.cuenta_id == cuenta_id,
+        MovimientoBancario.tenant_id == current_user.tenant_id,
+        MovimientoBancario.estado != "CONCILIADO"
+    ).all()
+
+    TOLERANCIA_USD = 0.02
+    TOLERANCIA_DIAS = 3
+
     total_monto_usd = 0.0
+    conciliados_count = 0
+    nuevos_count = 0
+
     for m in movs:
         fecha_str = m.get("fecha", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
-        ref = m.get("referencia", "")
+        ref = str(m.get("referencia") or "").strip()
         concepto = m.get("concepto", "Movimiento de extracto importado")
         monto_val = float(m.get("monto", 0.0))
-        
-        monto_usd = monto_val / tasa_cambio
-        total_monto_usd += monto_usd
-        
+
+        try:
+            fecha_mov = datetime.strptime(fecha_str, "%Y-%m-%d") if "-" in fecha_str else datetime.now(timezone.utc)
+        except Exception:
+            fecha_mov = datetime.now(timezone.utc)
+
+        monto_usd = monto_val / tasa_cambio if tasa_cambio else 0.0
         tipo = "INGRESO" if monto_usd >= 0 else "EGRESO"
-        
-        nuevo_mov = MovimientoBancario(
-            cuenta_id=cuenta_id,
-            fecha=datetime.strptime(fecha_str, "%Y-%m-%d") if "-" in fecha_str else datetime.now(timezone.utc),
-            concepto=concepto,
-            monto_usd=abs(monto_usd),
-            tasa_cambio_bs=tasa_cambio,
-            tipo=tipo,
-            referencia=ref,
-            estado="ACTIVO",
-            tenant_id=current_user.tenant_id
-        )
-        db.add(nuevo_mov)
-        
+
+        # Buscar un movimiento interno pendiente que coincida por monto+fecha
+        # (+referencia si ambos la traen); nunca se concilia "en masa".
+        match = None
+        for cand in candidatos_pendientes:
+            if cand.tipo != tipo:
+                continue
+            if abs(to_float(cand.monto_usd) - abs(monto_usd)) > TOLERANCIA_USD:
+                continue
+            if cand.fecha and abs((cand.fecha - fecha_mov).days) > TOLERANCIA_DIAS:
+                continue
+            if ref and cand.referencia and ref.lower() != cand.referencia.strip().lower():
+                continue
+            match = cand
+            break
+
+        if match:
+            match.estado = "CONCILIADO"
+            if ref and not match.referencia:
+                match.referencia = ref[:100]
+            candidatos_pendientes.remove(match)
+            conciliados_count += 1
+            # El monto de este movimiento ya fue reflejado en saldo_actual_usd
+            # cuando se creó el movimiento interno original; no se vuelve a sumar.
+        else:
+            nuevo_mov = MovimientoBancario(
+                cuenta_id=cuenta_id,
+                fecha=fecha_mov,
+                concepto=concepto,
+                monto_usd=abs(monto_usd),
+                tasa_cambio_bs=tasa_cambio,
+                tipo=tipo,
+                referencia=ref,
+                estado="ACTIVO",
+                tenant_id=current_user.tenant_id
+            )
+            db.add(nuevo_mov)
+            total_monto_usd += monto_usd
+            nuevos_count += 1
+
     cuenta.saldo_actual_usd = to_float(cuenta.saldo_actual_usd) + total_monto_usd
     db.commit()
-    return {"ok": True, "count": len(movs)}
+    return {
+        "ok": True,
+        "count": len(movs),
+        "conciliados": conciliados_count,
+        "nuevos": nuevos_count,
+        "message": f"Se procesaron {len(movs)} movimientos del extracto: {conciliados_count} conciliados contra registros existentes, {nuevos_count} nuevos sin coincidencia."
+    }
 
 @router.get("/tesoreria/movimientos-caja")
 def movimientos_caja(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
@@ -1896,17 +2022,30 @@ def resumen_conciliacion(periodo: str = None, db: Session = Depends(get_db), cur
     conciliados = [m for m in movs if m.estado == "CONCILIADO"]
     pendientes = [m for m in movs if m.estado != "CONCILIADO"]
 
+    tasa_act = to_float(tasa_actual(db, current_user.tenant_id)) or 36.42
+
+    movs_by_cuenta = {}
+    for m in movs:
+        movs_by_cuenta.setdefault(m.cuenta_id, []).append(m)
+
     cuentas = db.query(CuentaBancaria).filter(CuentaBancaria.activa == True, CuentaBancaria.tenant_id == current_user.tenant_id).all()
     saldos_bancos = []
     for c in cuentas:
         saldo_usd = to_float(c.saldo_actual_usd)
+        pendientes_cuenta = [m for m in movs_by_cuenta.get(c.id, []) if m.estado != "CONCILIADO"]
+        # Diferencia real: neto de los movimientos del período que aún no han
+        # sido conciliados individualmente contra el extracto bancario real
+        # (antes esto era un valor fijo "Bs. 0.00" / "Cuadrado").
+        diferencia_usd = sum(to_float(m.monto_usd) for m in pendientes_cuenta)
+        cuadrado = abs(diferencia_usd) < 0.01
+        signo = "-" if diferencia_usd < 0 else ""
         saldos_bancos.append({
             "banco": c.banco,
             "numero": c.numero_cuenta[-4:] if c.numero_cuenta else "????",
-            "saldo_bs": f"Bs. {saldo_usd * 36.42:,.2f}",
+            "saldo_bs": f"Bs. {saldo_usd * tasa_act:,.2f}",
             "moneda": c.moneda,
-            "diferencia": "Bs. 0.00",
-            "estado": "Cuadrado",
+            "diferencia": f"{signo}Bs. {abs(diferencia_usd) * tasa_act:,.2f}",
+            "estado": "Cuadrado" if cuadrado else f"{len(pendientes_cuenta)} pendiente(s)",
         })
 
     return {
@@ -1978,31 +2117,51 @@ def cerrar_conciliacion(payload: dict, db: Session = Depends(get_db), current_us
         anio, mes = periodo.split("-")
     except Exception:
         return {"ok": False, "message": "Periodo inválido"}
-    
-    movs = db.query(MovimientoBancario).filter(
+
+    pendientes = db.query(MovimientoBancario).filter(
         extract('year', MovimientoBancario.fecha) == int(anio),
         extract('month', MovimientoBancario.fecha) == int(mes),
         MovimientoBancario.estado != "CONCILIADO",
         MovimientoBancario.tenant_id == current_user.tenant_id
-    ).all()
-    
-    for m in movs:
-        m.estado = "CONCILIADO"
-    db.commit()
-    
-    return {"ok": True, "periodo": periodo, "cerrados": len(movs), "message": f"Conciliación del período {periodo} cerrada. {len(movs)} movimientos marcados."}
+    ).count()
+
+    # No se permite cerrar el período si quedan movimientos sin conciliar
+    # individualmente: cerrar NO debe forzar el estado de todo lo pendiente,
+    # sólo debe confirmar un cierre real de movimientos ya cruzados.
+    if pendientes > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede cerrar: {pendientes} movimientos aún no conciliados."
+        )
+
+    total_movs = db.query(MovimientoBancario).filter(
+        extract('year', MovimientoBancario.fecha) == int(anio),
+        extract('month', MovimientoBancario.fecha) == int(mes),
+        MovimientoBancario.tenant_id == current_user.tenant_id
+    ).count()
+
+    return {
+        "ok": True,
+        "periodo": periodo,
+        "cerrados": total_movs,
+        "message": f"Conciliación del período {periodo} cerrada. Los {total_movs} movimientos del período ya estaban conciliados."
+    }
 
 
 @router.post("/tesoreria/conciliacion/marcar")
 def marcar_movimiento_revisado(payload: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     mov_id = payload.get("id") or payload.get("movimiento_id")
-    estado = payload.get("estado", "CONCILIADO")
-    
+    # Normalizado a mayúsculas: el resto del módulo (resumen, pendientes,
+    # cierre) compara siempre contra el literal "CONCILIADO" en mayúsculas,
+    # así que un valor como "Conciliado" desde el frontend no debía romper
+    # esos filtros silenciosamente.
+    estado = str(payload.get("estado", "CONCILIADO")).upper()
+
     mov = db.query(MovimientoBancario).filter(MovimientoBancario.id == mov_id, MovimientoBancario.tenant_id == current_user.tenant_id).first()
     if not mov:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Movimiento no encontrado")
-    
+
     mov.estado = estado
     db.commit()
     return {"ok": True, "id": mov_id, "estado": estado}
@@ -2010,24 +2169,34 @@ def marcar_movimiento_revisado(payload: dict, db: Session = Depends(get_db), cur
 
 # ---- D. ARQUEO DE CAJA ----
 
+def _saldo_esperado_caja(db: Session, tenant_id, caja: str) -> float:
+    """Saldo esperado por el sistema para una caja, calculado SIEMPRE desde
+    los movimientos reales (nunca desde un valor que el cliente afirme haber
+    contado). Mismo espíritu que ConteoFisico en inventario: `cantidad_sistema`
+    se lee del campo vivo (`producto.stock`) que los movimientos reales van
+    manteniendo, en vez de confiar en lo que declara quien hace el conteo.
+
+    `fondo.disponible_usd` es justamente ese campo vivo para caja chica: sólo
+    lo tocan flujos de movimiento real (gasto, reposición, ajuste de fondo) en
+    este mismo router; nunca el conteo físico en sí.
+    """
+    fondo = db.query(FondoCajaChica).filter(FondoCajaChica.nombre.ilike(f"%{caja[:10]}%"), FondoCajaChica.tenant_id == tenant_id).first()
+    if fondo:
+        return to_float(fondo.disponible_usd)
+    # Fallback: no existe un Fondo formal para esta caja, se reconstruye desde
+    # el histórico de gastos (asumiendo una asignación inicial de $1000).
+    gastos = db.query(GastoCajaChica).filter(GastoCajaChica.tenant_id == tenant_id).all()
+    total_gastos_usd = sum(to_float(g.monto_usd) for g in gastos)
+    return max(0.0, 1000.0 - total_gastos_usd)
+
+
 @router.get("/tesoreria/arqueo")
 def obtener_arqueo(fecha: str = None, caja: str = "Caja Principal USD", db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     fecha = fecha or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    
-    fondo = db.query(FondoCajaChica).filter(FondoCajaChica.nombre.ilike(f"%{caja[:10]}%"), FondoCajaChica.tenant_id == current_user.tenant_id).first()
-    
-    saldo_usd = 0.0
-    saldo_ves = 0.0
-    
-    if fondo:
-        saldo_usd = to_float(fondo.disponible_usd)
-        saldo_ves = saldo_usd * 36.42
-    else:
-        # Fallback: calculate from GastoCajaChica
-        gastos = db.query(GastoCajaChica).filter(GastoCajaChica.tenant_id == current_user.tenant_id).all()
-        total_gastos_usd = sum(to_float(g.monto_usd) for g in gastos)
-        saldo_usd = max(0.0, 1000.0 - total_gastos_usd)  # Assume $1000 starting fund
-        saldo_ves = saldo_usd * 36.42
+    tasa_act = to_float(tasa_actual(db, current_user.tenant_id)) or 36.42
+
+    saldo_usd = _saldo_esperado_caja(db, current_user.tenant_id, caja)
+    saldo_ves = saldo_usd * tasa_act
 
     return {
         "caja": caja,
@@ -2044,22 +2213,42 @@ def obtener_arqueo(fecha: str = None, caja: str = "Caja Principal USD", db: Sess
 @router.post("/tesoreria/arqueo/cerrar")
 def cerrar_arqueo(payload: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     caja = payload.get("caja", "Caja Principal USD")
-    diferencia_usd = float(payload.get("diferencia_usd", 0))
     fisico_usd = float(payload.get("fisico_usd", 0))
     fisico_ves = float(payload.get("fisico_ves", 0))
     justificacion = payload.get("justificacion", "")
     auditor = payload.get("auditor", "Sistema")
     accion_contable = payload.get("accion_contable", "Descuento Nómina")
-    
+
+    # El "diferencia_usd" que mandara el cliente NUNCA se usa para nada: se
+    # recalcula aquí mismo contra el saldo que el sistema mantiene a partir de
+    # los movimientos reales de la caja (gastos, reposiciones, ajustes).
+    esperado_usd = _saldo_esperado_caja(db, current_user.tenant_id, caja)
+    diferencia_real_usd = fisico_usd - esperado_usd
+
+    # Tolerancia alineada con el umbral "crítico" que ya usa el frontend
+    # (CashAudit.tsx: CRITICAL_THRESHOLD = 50.00) para exigir justificación.
+    # Por debajo de esto se asume vuelto/redondeo normal de caja.
+    TOLERANCIA_USD = 50.0
+    if abs(diferencia_real_usd) > TOLERANCIA_USD and not str(justificacion).strip():
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Descuadre de ${diferencia_real_usd:,.2f} entre el conteo físico (${fisico_usd:,.2f}) "
+                f"y el saldo esperado por el sistema (${esperado_usd:,.2f}). "
+                "Debe indicar una justificación para cerrar con un descuadre de esta magnitud."
+            )
+        )
+
     import json
     log = AuditoriaLog(
         usuario=auditor or "Sistema",
         accion="CIERRE_ARQUEO",
         modulo="TESORERIA",
         detalle=json.dumps({
-            "diferencia": diferencia_usd,
             "caja": caja,
-            "fisico": fisico_usd,
+            "fisico_usd": fisico_usd,
+            "esperado_usd": esperado_usd,
+            "diferencia_real_usd": diferencia_real_usd,
             "resolucion": accion_contable,
             "justificacion": justificacion,
         }),
@@ -2067,20 +2256,23 @@ def cerrar_arqueo(payload: dict, db: Session = Depends(get_db), current_user = D
         tenant_id=current_user.tenant_id
     )
     db.add(log)
-    
-    # Adjust Fondo available balance to match physical
+
+    # Ajustar el disponible del Fondo al físico contado, ya validado arriba
+    # contra el saldo esperado (antes se sobreescribía sin comparar con nada).
     fondo = db.query(FondoCajaChica).filter(FondoCajaChica.nombre.ilike(f"%{caja[:10]}%"), FondoCajaChica.tenant_id == current_user.tenant_id).first()
     if fondo:
         fondo.disponible_usd = fisico_usd
 
     db.commit()
-    
+
     return {
         "ok": True,
         "caja": caja,
-        "diferencia_usd": diferencia_usd,
+        "fisico_usd": fisico_usd,
+        "esperado_usd": esperado_usd,
+        "diferencia_usd": diferencia_real_usd,
         "accion": accion_contable,
-        "message": f"Arqueo de {caja} cerrado correctamente. Diferencia: ${diferencia_usd:.2f}. Acción: {accion_contable}."
+        "message": f"Arqueo de {caja} cerrado. Físico: ${fisico_usd:,.2f} vs. Sistema: ${esperado_usd:,.2f} (diferencia ${diferencia_real_usd:,.2f}). Acción: {accion_contable}."
     }
 
 

@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
-import { 
-  CheckCircle2, 
-  Search, 
-  Filter, 
+import {
+  CheckCircle2,
+  Search,
+  Filter,
   ChevronRight,
   Upload,
   Zap,
@@ -13,14 +14,17 @@ import {
 import { api } from '@/api/client';
 
 const BankReconciliation = () => {
+  const navigate = useNavigate();
   const [showQuickReg, setShowQuickReg] = useState(false);
   const [selectedMov, setSelectedMov] = useState<any>(null);
+  const [tipoOperacion, setTipoOperacion] = useState('Egreso por Comisión Bancaria');
+  const [cuentaContable, setCuentaContable] = useState('5.1.01.01 - Gastos Bancarios');
+  const [observacionQuickReg, setObservacionQuickReg] = useState('');
   const [movements, setMovements] = useState<any[]>([]);
   const [accountsSummary, setAccountsSummary] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  
-  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+
   const [isClosePeriodModalOpen, setIsClosePeriodModalOpen] = useState(false);
   const [isRelacionarModalOpen, setIsRelacionarModalOpen] = useState(false);
   const [selectedMovement, setSelectedMovement] = useState<any>(null);
@@ -116,21 +120,57 @@ const BankReconciliation = () => {
 
   const handleQuickReg = (mov: any) => {
     setSelectedMov(mov);
+    setTipoOperacion('Egreso por Comisión Bancaria');
+    setCuentaContable('5.1.01.01 - Gastos Bancarios');
+    setObservacionQuickReg(`Auto-registro de ${mov?.doc || mov?.documento || 'Movimiento'} REF: ${mov?.ref || mov?.referencia || ''}`);
     setShowQuickReg(true);
   };
 
   const submitQuickReg = async () => {
+    if (!selectedMov) return;
+
+    const rawMonto = selectedMov?.amount ?? selectedMov?.monto ?? '0';
+    const monto = Math.abs(Number(String(rawMonto).replace(/[^0-9.-]+/g, '')) || 0);
+    if (monto <= 0) {
+      showToast('No se pudo determinar el monto del movimiento.', 'error');
+      return;
+    }
+
+    const esIngreso = tipoOperacion.toLowerCase().startsWith('ingreso');
+    const [cuentaCodigo, ...cuentaNombreParts] = cuentaContable.split(' - ');
+    const cuentaNombre = cuentaNombreParts.join(' - ').trim() || cuentaContable;
+    const montoStr = monto.toFixed(2);
+
     try {
+      // 1. Generar el documento contable real (asiento de partida doble)
+      //    que la copia de este modal promete: Caja y Bancos vs. la cuenta
+      //    contable seleccionada, por el monto detectado del movimiento.
+      await api.post('/contabilidad/asientos', {
+        concepto: `${tipoOperacion}${observacionQuickReg ? ' — ' + observacionQuickReg : ''}`,
+        referencia: `CONC-${selectedMov?.id ?? selectedMov?.ref ?? Date.now()}`,
+        lineas: esIngreso
+          ? [
+              { cuenta_codigo: '1.1.01', cuenta_nombre: 'Caja y Bancos', debe: montoStr, haber: '0' },
+              { cuenta_codigo: cuentaCodigo.trim(), cuenta_nombre: cuentaNombre, debe: '0', haber: montoStr },
+            ]
+          : [
+              { cuenta_codigo: cuentaCodigo.trim(), cuenta_nombre: cuentaNombre, debe: montoStr, haber: '0' },
+              { cuenta_codigo: '1.1.01', cuenta_nombre: 'Caja y Bancos', debe: '0', haber: montoStr },
+            ],
+      });
+
+      // 2. Marcar el movimiento bancario como conciliado.
       await api.post('/tesoreria/conciliacion/marcar', {
         movimiento_id: selectedMov?.id,
-        estado: 'Conciliado'
+        estado: 'CONCILIADO'
       });
-      showToast('Movimiento conciliado exitosamente.', 'success');
+
+      showToast('Documento contable generado y movimiento conciliado.', 'success');
       setShowQuickReg(false);
       fetchData();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error conciliando movimiento:", error);
-      showToast('Error al conciliar.', 'error');
+      showToast(error?.response?.data?.detail || 'Error al generar el asiento contable.', 'error');
     }
   };
 
@@ -167,7 +207,7 @@ const BankReconciliation = () => {
             <p className="text-slate-500 text-xs font-bold uppercase tracking-tight">Cruce de bancos, cobros, pagos y diferencias pendientes.</p>
           </div>
           <div className="flex gap-3">
-             <button onClick={() => setIsImportModalOpen(true)} className="bg-white text-[#0b5156] px-6 py-2.5 rounded-xl text-xs font-black uppercase border border-[#0b5156]/20 flex items-center gap-2 hover:bg-[#0b5156]/5 transition-all">
+             <button onClick={() => navigate('/tesoreria/importar')} className="bg-white text-[#0b5156] px-6 py-2.5 rounded-xl text-xs font-black uppercase border border-[#0b5156]/20 flex items-center gap-2 hover:bg-[#0b5156]/5 transition-all">
                 <Upload size={14} /> Importar Extracto
              </button>
              <button onClick={() => setIsClosePeriodModalOpen(true)} className="bg-[#0b5156] text-white px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all">
@@ -378,7 +418,11 @@ const BankReconciliation = () => {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <label className="text-xs font-black text-slate-500 uppercase tracking-widest block pl-1">Tipo de Operación</label>
-                  <select className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-xs font-black text-[#0b5156] outline-none focus:border-[#0b5156] uppercase">
+                  <select
+                    value={tipoOperacion}
+                    onChange={(e) => setTipoOperacion(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-xs font-black text-[#0b5156] outline-none focus:border-[#0b5156] uppercase"
+                  >
                     <option>Egreso por Comisión Bancaria</option>
                     <option>Egreso por IGTF / ITF</option>
                     <option>Ingreso por Intereses Ganados</option>
@@ -387,7 +431,11 @@ const BankReconciliation = () => {
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-black text-slate-500 uppercase tracking-widest block pl-1">Cuenta Contable (Destino)</label>
-                  <select className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-xs font-black text-[#0b5156] outline-none focus:border-[#0b5156] uppercase">
+                  <select
+                    value={cuentaContable}
+                    onChange={(e) => setCuentaContable(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-xs font-black text-[#0b5156] outline-none focus:border-[#0b5156] uppercase"
+                  >
                     <option>5.1.01.01 - Gastos Bancarios</option>
                     <option>5.1.01.05 - Impuestos Transaccionales</option>
                     <option>4.1.02.01 - Ingresos Financieros</option>
@@ -395,7 +443,12 @@ const BankReconciliation = () => {
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-black text-slate-500 uppercase tracking-widest block pl-1">Observación</label>
-                  <input type="text" defaultValue={`Auto-registro de ${selectedMov?.doc || selectedMov?.documento || 'Movimiento'} REF: ${selectedMov?.ref || selectedMov?.referencia}`} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-xs font-bold text-[#0b5156] outline-none focus:border-[#0b5156]" />
+                  <input
+                    type="text"
+                    value={observacionQuickReg}
+                    onChange={(e) => setObservacionQuickReg(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-xs font-bold text-[#0b5156] outline-none focus:border-[#0b5156]"
+                  />
                 </div>
               </div>
 
@@ -412,35 +465,6 @@ const BankReconciliation = () => {
             </div>
           </div>
         </div>
-      )}
-
-      {/* Import Modal */}
-      {isImportModalOpen && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-[#0b5156]/10 rounded-xl flex items-center justify-center text-[#0b5156]">
-                  <Upload size={20} />
-                </div>
-                <div>
-                  <h3 className="text-lg font-black text-[#0b5156] uppercase tracking-tighter leading-none">Importar Extracto</h3>
-                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Sube el CSV del banco</p>
-                </div>
-              </div>
-              <button onClick={() => setIsImportModalOpen(false)} className="text-slate-400 hover:text-slate-600 bg-white p-2 rounded-xl shadow-sm border border-slate-100"><X size={16} /></button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="border-2 border-dashed border-slate-200 rounded-xl p-8 text-center hover:bg-slate-50 transition-colors cursor-pointer">
-                 <Upload size={24} className="mx-auto text-slate-400 mb-2" />
-                 <p className="text-xs font-black text-slate-600 uppercase">Haz clic para buscar o arrastra el archivo aquí</p>
-                 <p className="text-[10px] font-bold text-slate-400 mt-1">Soporta formato .CSV o .TXT MT940</p>
-              </div>
-              <button onClick={() => setIsImportModalOpen(false)} className="w-full bg-[#0b5156] text-white py-3 rounded-xl text-xs font-black uppercase shadow-lg hover:bg-[#083a3d] transition-all">Subir y Procesar</button>
-            </div>
-          </div>
-        </div>,
-        document.body
       )}
 
       {/* Close Period Modal */}

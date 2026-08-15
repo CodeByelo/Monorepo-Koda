@@ -282,6 +282,15 @@ def libro_compras(periodo: str = Query(...), db: Session = Depends(get_db), curr
     valid_controls = sum(1 for m in movimientos if m["control"] != "FALTA")
     pct_val = (valid_controls / len(movimientos) * 100) if movimientos else 0
 
+    # Retenciones de IVA que practicamos realmente a nuestros proveedores en este período
+    # (registros reales en RetencionIVA, no una fórmula estimada sobre el total de IVA)
+    retenciones_practicadas = db.query(RetencionIVA).filter(
+        RetencionIVA.periodo == periodo,
+        RetencionIVA.tipo == "PRACTICADA",
+        RetencionIVA.tenant_id == current_user.tenant_id,
+    ).all()
+    retenciones_por_pagar = sum(to_float(r.monto_usd) for r in retenciones_practicadas)
+
     return {
         "movimientos": movimientos,
         "resumen": {
@@ -289,7 +298,7 @@ def libro_compras(periodo: str = Query(...), db: Session = Depends(get_db), curr
             "exento": 0,
             "credito_perdido": 0,
             "credito_fiscal_iva": total_iva,
-            "retenciones_por_pagar": total_iva * 0.75, # Ejemplo
+            "retenciones_por_pagar": retenciones_por_pagar,
             "porcentaje_validacion": round(pct_val),
             "total_base": total_base,
             "total_iva": total_iva,
@@ -341,6 +350,91 @@ def declaracion_iva(periodo: str = Query(...), db: Session = Depends(get_db), cu
             {"libro": "Compras", "estado": "OK" if compras else "VACÍO"},
         ],
     }
+
+@router.get("/libro-compras/exportar")
+def exportar_libro_compras(periodo: str, formato: str = "txt", db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    """Genera el archivo del Libro de Compras SENIAT para el período dado.
+    Espejo de exportar_libro_ventas, adaptado a Compra/Proveedor."""
+    inicio, fin = periodo_rango(periodo)
+    compras = db.query(Compra).filter(
+        Compra.fecha >= inicio,
+        Compra.fecha < fin,
+        Compra.estado == "ACTIVA",
+        Compra.tenant_id == current_user.tenant_id,
+    ).order_by(Compra.fecha).all()
+
+    if formato == "txt":
+        output = io.StringIO()
+        writer = csv.writer(output, delimiter='\t')
+        writer.writerow(["FECHA", "RIF", "PROVEEDOR", "FACTURA", "CONTROL", "BASE", "IVA", "TOTAL"])
+        for c in compras:
+            prov = c.proveedor
+            fact_num = c.numero_factura or ""
+            numero_control = c.numero_control or "FALTA"
+            writer.writerow([
+                c.fecha.strftime("%d/%m/%Y"),
+                prov.rif if prov else "J-00000000-0",
+                prov.nombre if prov else "PROVEEDOR DESCONOCIDO",
+                fact_num,
+                numero_control,
+                f"{to_float(c.subtotal):.2f}",
+                f"{to_float(c.iva):.2f}",
+                f"{to_float(c.total):.2f}"
+            ])
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/plain",
+            headers={"Content-Disposition": f"attachment; filename=Libro_Compras_{periodo}.txt"}
+        )
+    elif formato == "xlsx" or formato == "csv":
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["FECHA", "RIF", "PROVEEDOR", "FACTURA", "NRO CONTROL", "BASE IMPONIBLE", "IVA", "TOTAL"])
+        for c in compras:
+            prov = c.proveedor
+            writer.writerow([
+                c.fecha.strftime("%d/%m/%Y"),
+                prov.rif if prov else "J-00000000-0",
+                prov.nombre if prov else "PROVEEDOR DESCONOCIDO",
+                c.numero_factura or "",
+                c.numero_control or "FALTA",
+                to_float(c.subtotal),
+                to_float(c.iva),
+                to_float(c.total)
+            ])
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=Libro_Compras_{periodo}.csv"}
+        )
+
+    # Default a PDF
+    output = io.BytesIO()
+    p = canvas.Canvas(output, pagesize=landscape(letter))
+    p.setFont("Helvetica-Bold", 14)
+    p.drawString(50, 570, f"LIBRO DE COMPRAS - PERIODO {periodo}")
+    p.setFont("Helvetica", 10)
+    y = 540
+    p.drawString(50, y, "FECHA | RIF | PROVEEDOR | FACTURA | BASE | IVA | TOTAL")
+    y -= 20
+    for c in compras:
+        if y < 50:
+            p.showPage()
+            y = 570
+        prov = c.proveedor
+        line = f"{c.fecha.strftime('%d/%m/%Y')} | {prov.rif if prov else 'N/A'} | {(prov.nombre[:20] if prov else 'N/A')} | {c.numero_factura} | {to_float(c.subtotal):.2f} | {to_float(c.iva):.2f} | {to_float(c.total):.2f}"
+        p.drawString(50, y, line)
+        y -= 15
+    p.save()
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=Libro_Compras_{periodo}.pdf"}
+    )
+
 
 @router.patch("/libro-compras/{compra_id}/control")
 async def actualizar_control_compra(compra_id: int, request: Request, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
@@ -606,13 +700,62 @@ def exportar_retenciones(periodo: str, db: Session = Depends(get_db), current_us
 
 
 @router.post("/retenciones-iva/comprobante")
-def crear_comprobante(body: dict):
-    return {"ok": True}
+def crear_comprobante(body: dict, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    periodo = body.get("periodo")
+    if not periodo:
+        raise HTTPException(status_code=400, detail="El campo 'periodo' es requerido.")
+
+    alicuota_pct = body.get("alicuota")
+    ret = RetencionIVA(
+        tenant_id=current_user.tenant_id,
+        tipo=body.get("tipo", "RECIBIDA"),
+        agente_rif=body.get("agente_rif", ""),
+        agente_nombre=body.get("agente_nombre", ""),
+        numero_factura=body.get("numero_factura", ""),
+        numero_comprobante=body.get("numero_comprobante", ""),
+        fecha_comprobante=(
+            datetime.strptime(body.get("fecha_comprobante"), "%Y-%m-%d")
+            if body.get("fecha_comprobante") else datetime.now()
+        ),
+        base_usd=body.get("base", 0) or 0,
+        alicuota=(alicuota_pct / 100.0) if alicuota_pct else 0,
+        monto_usd=body.get("iva_retenido", 0) or 0,
+        tasa_cambio_bs=tasa_actual(db, current_user.tenant_id) or 1.0,
+        periodo=periodo,
+        estado="VALIDADO",
+    )
+    db.add(ret)
+    db.commit()
+    db.refresh(ret)
+    return {"ok": True, "id": ret.id, "mensaje": "Comprobante cargado exitosamente"}
 
 
 @router.get("/retencion-iva/detalle")
-def detalle_retencion(id: int = Query(...)):
-    return {"id": id, "proveedor": "", "monto": 0}
+def detalle_retencion(id: int = Query(...), db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    r = db.query(RetencionIVA).filter(
+        RetencionIVA.id == id,
+        RetencionIVA.tenant_id == current_user.tenant_id,
+    ).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Retención de IVA no encontrada.")
+
+    return {
+        "id": r.id,
+        "tipo": r.tipo,
+        "proveedor": r.agente_nombre,
+        "agente_rif": r.agente_rif,
+        "agente_nombre": r.agente_nombre,
+        "numero_factura": r.numero_factura,
+        "numero_comprobante": r.numero_comprobante,
+        "fecha_comprobante": r.fecha_comprobante.strftime("%d/%m/%Y") if r.fecha_comprobante else None,
+        "base": to_float(r.base_usd),
+        "alicuota": float(r.alicuota) * 100,
+        "monto": to_float(r.monto_usd),
+        "monto_usd": to_float(r.monto_usd),
+        "tasa_cambio_bs": to_float(r.tasa_cambio_bs),
+        "periodo": r.periodo,
+        "estado": r.estado,
+    }
 
 
 @router.get("/igtf")
@@ -801,20 +944,28 @@ def arc(anio: int, sujeto: str, db: Session = Depends(get_db), current_user: Pro
 @router.get("/arc/exportar")
 def exportar_arc(formato: str, anio: int, sujeto: str, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     from backend.utils.helpers import to_float
+    from backend.models.erp_extended import Empresa
+    import re
     import io
 
     res = arc(anio, sujeto, db, current_user)
-    
+
+    # Obtener los datos reales de la Empresa emisora (agente de retención)
+    empresa = db.query(Empresa).filter(Empresa.tenant_id == current_user.tenant_id).first()
+    emisor_nombre = empresa.razon_social if empresa else "N/A"
+    emisor_rif = empresa.rif if empresa else "N/A"
+    rif_agente_xml = re.sub(r'[\s\-]', '', empresa.rif.upper()) if empresa else "J300000000"
+
     if formato == "pdf":
         buffer = io.BytesIO()
         c = canvas.Canvas(buffer, pagesize=letter)
         c.setTitle(f"Comprobante ARC - {sujeto}")
-        
+
         # Header
         c.setFont("Helvetica-Bold", 14)
-        c.drawString(50, 750, "KODA ERP SOLUTIONS")
+        c.drawString(50, 750, emisor_nombre)
         c.setFont("Helvetica", 10)
-        c.drawString(50, 735, f"R.I.F.: J-30000000-1")
+        c.drawString(50, 735, f"R.I.F.: {emisor_rif}")
         
         c.setFont("Helvetica-Bold", 16)
         c.drawCentredString(300, 700, "COMPROBANTE DE RETENCIONES ARC")
@@ -863,7 +1014,7 @@ def exportar_arc(formato: str, anio: int, sujeto: str, db: Session = Depends(get
         
     elif formato == "xml":
         # Generate SENIAT ISLR XML
-        root = ET.Element("RelacionRetencionesISLR", Anio=str(anio), RifAgente="J-30000000-1")
+        root = ET.Element("RelacionRetencionesISLR", Anio=str(anio), RifAgente=rif_agente_xml)
         for d in res["detalles"]:
             elem = ET.SubElement(root, "Retencion", Mes=d["mes"])
             ET.SubElement(elem, "RifRetenido").text = sujeto
@@ -882,8 +1033,36 @@ def exportar_arc(formato: str, anio: int, sujeto: str, db: Session = Depends(get
 
 
 @router.get("/retenciones-practicadas/exportar")
-def exportar_ret_practicadas(formato: str, periodo: str):
-    return {"ok": True}
+def exportar_ret_practicadas(formato: str, periodo: str, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    rows = db.query(RetencionIVA).filter(
+        RetencionIVA.periodo == periodo,
+        RetencionIVA.tipo != "RECIBIDA",
+        RetencionIVA.tenant_id == current_user.tenant_id,
+    ).order_by(RetencionIVA.fecha_comprobante).all()
+
+    if formato in ("txt", "csv"):
+        output = io.StringIO()
+        writer = csv.writer(output, delimiter='\t' if formato == "txt" else ',')
+        writer.writerow(["RIF AGENTE", "AGENTE", "FACTURA", "COMPROBANTE", "BASE", "IVA RETENIDO", "ESTADO"])
+        for r in rows:
+            writer.writerow([
+                r.agente_rif,
+                r.agente_nombre,
+                r.numero_factura,
+                r.numero_comprobante or "",
+                f"{to_float(r.base_usd):.2f}",
+                f"{to_float(r.monto_usd):.2f}",
+                r.estado,
+            ])
+        output.seek(0)
+        media_type = "text/plain" if formato == "txt" else "text/csv"
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type=media_type,
+            headers={"Content-Disposition": f"attachment; filename=retenciones_practicadas_{periodo}.{formato}"}
+        )
+
+    raise HTTPException(status_code=501, detail="Formato de exportación no soportado para retenciones practicadas.")
 
 
 import re
@@ -925,39 +1104,34 @@ def validar_rif(rif: str, db: Session = Depends(get_db), current_user: Profile =
             "nombre": existing_supplier.nombre,
             "contribuyente_especial": getattr(existing_supplier, "contribuyente_especial", False),
             "valido": True,
-            "origen": "Base de Datos Interna (Proveedor)"
+            "origen": "Base de datos local de KODA"
         }
-    
-    # Registro espejo para simulación de consulta SENIAT
-    registro_espejo = {
-        "J-30000000-0": ("SENIAT (ADMINISTRACION ADUANERA Y TRIBUTARIA)", True),
-        "J-00000000-0": ("CONSUMIDOR FINAL", False),
-        "J-31234567-8": ("DISTRIBUIDORA ALIMENTOS POLAR, C.A.", True),
-        "J-41234567-9": ("SERVICIOS Y TECNOLOGIA KODA, C.A.", False),
-        "V-12345678-9": ("JUAN VICENTE GOMEZ", False),
-        "J-50012345-6": ("INVERSIONES EL SOL, S.A.", True),
-        "G-20000062-0": ("GOBIERNO DEL DISTRITO CAPITAL", True),
-    }
-    
-    if formatted_rif in registro_espejo:
-        nombre, especial = registro_espejo[formatted_rif]
+
+    from backend.models.erp_extended import Empresa
+    existing_empresa = db.query(Empresa).filter(
+        Empresa.rif == formatted_rif,
+        Empresa.tenant_id == current_user.tenant_id,
+    ).first()
+    if existing_empresa:
         return {
             "rif": formatted_rif,
-            "nombre": nombre,
-            "contribuyente_especial": especial,
+            "nombre": existing_empresa.razon_social,
+            "contribuyente_especial": getattr(existing_empresa, "tipo_contribuyente", None) == "ESPECIAL",
             "valido": True,
-            "origen": "Registro Nacional de Contribuyentes (SENIAT)"
+            "origen": "Base de datos local de KODA"
         }
-    
-    # Si es válido pero no está registrado, generamos una respuesta genérica de contribuyente ordinario
-    tipo = "Persona Natural" if clean_rif[0] in ['V', 'E'] else "Empresa/Organismo"
-    nombre_sugerido = f"CONTRIBUYENTE {formatted_rif} ({tipo})"
+
+    # KODA no tiene integración con el SENIAT para validar RIFs externos. Este RIF
+    # tiene un formato correcto, pero no existe ningún registro (Cliente, Proveedor
+    # o Empresa) asociado a él en esta base de datos, así que no se puede confirmar
+    # ni fabricar información sobre el contribuyente real.
     return {
         "rif": formatted_rif,
-        "nombre": nombre_sugerido,
+        "nombre": None,
         "contribuyente_especial": False,
-        "valido": True,
-        "origen": "Registro Nacional de Contribuyentes (SENIAT)"
+        "valido": False,
+        "origen": "Base de datos local de KODA",
+        "mensaje": "Este RIF no está registrado en su base de datos. KODA no tiene integración con el SENIAT para validar RIFs externos."
     }
 
 
@@ -1016,12 +1190,19 @@ def retenciones_islr_list(periodo: str = Query(...), db: Session = Depends(get_d
 
 @router.get("/retenciones-islr/exportar")
 def exportar_retenciones_islr(periodo: str = Query(...), db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    from backend.models.erp_extended import Empresa
+    import re
+
     rows = db.query(RetencionISLR).filter(
         RetencionISLR.periodo == periodo,
         RetencionISLR.tenant_id == current_user.tenant_id,
     ).all()
-    
-    root = ET.Element("RelacionRetencionesISLR", RifAgente="J000000000", Periodo=periodo.replace("-", ""))
+
+    # Obtener el RIF real de la Empresa emisora (agente de retención)
+    empresa = db.query(Empresa).filter(Empresa.tenant_id == current_user.tenant_id).first()
+    rif_agente = re.sub(r'[\s\-]', '', empresa.rif.upper()) if empresa else "J300000000"
+
+    root = ET.Element("RelacionRetencionesISLR", RifAgente=rif_agente, Periodo=periodo.replace("-", ""))
     
     for r in rows:
         detalle = ET.SubElement(root, "DetalleRetencion")
@@ -1192,10 +1373,10 @@ def calendario_fiscal(db: Session = Depends(get_db), current_user: Profile = Dep
     
     return {
         "vencimientos": vencimientos,
-        "metricas": {
-            "al_dia": True,
-            "porcentaje_cumplimiento": "100%",
-            "sanciones": 0
-        }
+        # NOTA: KODA no calcula el estado real de cumplimiento fiscal ante el SENIAT
+        # (no tiene integración con el ente ni datos de sanciones/multas). Antes se
+        # devolvía aquí un resumen fijo ("100% al día, 0 sanciones") sin verificación
+        # alguna. Se omite deliberadamente para no reportar un cumplimiento falso;
+        # el frontend debe mostrar un estado vacío/"--" ante la ausencia de "metricas".
     }
 

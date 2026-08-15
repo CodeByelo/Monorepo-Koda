@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, status, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List
@@ -17,28 +17,15 @@ from backend.core.security import get_current_user, require_role
 def _obtener_empresa_emisor(db: Session, tenant_id) -> dict:
     emp = db.query(Empresa).filter(Empresa.tenant_id == tenant_id).first()
     if not emp:
-        try:
-            emp = Empresa(
-                rif="J-40000000-0",
-                razon_social="KODA ERP SOLUTIONS, C.A.",
-                nombre_comercial="KODA ERP",
-                email="admin@koda.com",
-                telefono="+58 212 000-0000",
-                direccion="Av. Principal, Torre Financiera, Piso 4.",
-                tipo_contribuyente="ORDINARIO",
-                tenant_id=tenant_id,
-            )
-            db.add(emp)
-            db.commit()
-            db.refresh(emp)
-        except Exception:
-            db.rollback()
-            emp = db.query(Empresa).filter(Empresa.tenant_id == tenant_id).first()
+        raise HTTPException(
+            status_code=400,
+            detail="Debe configurar el perfil de su Empresa (razón social, RIF) en Admin > Perfil de Empresa antes de emitir documentos fiscales."
+        )
 
     return {
-        "rif": emp.rif if emp else "J-40000000-0",
-        "razon_social": emp.razon_social if emp else "KODA ERP SOLUTIONS, C.A.",
-        "direccion": emp.direccion if (emp and emp.direccion) else "Av. Principal, Torre Financiera, Piso 4."
+        "rif": emp.rif,
+        "razon_social": emp.razon_social,
+        "direccion": emp.direccion if emp.direccion else "Dirección no registrada"
     }
 
 router = APIRouter(prefix="/fiscal", tags=["Configuración Fiscal"])
@@ -119,31 +106,12 @@ def generar_pdf_arc(
         Proveedor.tenant_id == current_user.tenant_id,
     ).first()
     if not proveedor:
-        try:
-            ret_exists = db.query(RetencionISLR).filter(
-                RetencionISLR.proveedor_rif == proveedor_id,
-                RetencionISLR.tenant_id == current_user.tenant_id,
-            ).first()
-            p_name = ret_exists.proveedor_nombre if ret_exists else "CONSULTORES DELTA C.A."
-            proveedor = Proveedor(
-                rif=proveedor_id,
-                nombre=p_name,
-                telefono="0212-0000000",
-                email="proveedor@example.com",
-                direccion="Dirección del Proveedor",
-                tenant_id=current_user.tenant_id,
-            )
-            db.add(proveedor)
-            db.commit()
-            db.refresh(proveedor)
-        except Exception:
-            db.rollback()
-            proveedor = db.query(Proveedor).filter(
-                Proveedor.rif == proveedor_id,
-                Proveedor.tenant_id == current_user.tenant_id,
-            ).first()
-            
-    nombre_proveedor = proveedor.nombre if proveedor else "CONSULTORES DELTA C.A."
+        raise HTTPException(
+            status_code=404,
+            detail="Proveedor no encontrado. Debe registrar el proveedor real antes de emitir este comprobante."
+        )
+
+    nombre_proveedor = proveedor.nombre
 
     # Creamos un buffer en memoria RAM para no llenar el disco duro del servidor
     buffer = io.BytesIO()
@@ -283,32 +251,12 @@ def generar_pdf_retencion_iva(
         Proveedor.tenant_id == current_user.tenant_id,
     ).first()
     if not proveedor:
-        try:
-            # Buscar en retenciones de ISLR para tener un fallback inteligente de nombre
-            ret_exists = db.query(RetencionISLR).filter(
-                RetencionISLR.proveedor_rif == proveedor_id,
-                RetencionISLR.tenant_id == current_user.tenant_id,
-            ).first()
-            p_name = ret_exists.proveedor_nombre if ret_exists else "CONSULTORES DELTA C.A."
-            proveedor = Proveedor(
-                rif=proveedor_id,
-                nombre=p_name,
-                telefono="0212-0000000",
-                email="proveedor@example.com",
-                direccion="Dirección del Proveedor",
-                tenant_id=current_user.tenant_id,
-            )
-            db.add(proveedor)
-            db.commit()
-            db.refresh(proveedor)
-        except Exception:
-            db.rollback()
-            proveedor = db.query(Proveedor).filter(
-                Proveedor.rif == proveedor_id,
-                Proveedor.tenant_id == current_user.tenant_id,
-            ).first()
-            
-    nombre_proveedor = proveedor.nombre if proveedor else "CONSULTORES DELTA C.A."
+        raise HTTPException(
+            status_code=404,
+            detail="Proveedor no encontrado. Debe registrar el proveedor real antes de emitir este comprobante."
+        )
+
+    nombre_proveedor = proveedor.nombre
 
     buffer = io.BytesIO()
     # Usamos orientación apaisada (landscape) porque la tabla de IVA tiene muchas columnas
