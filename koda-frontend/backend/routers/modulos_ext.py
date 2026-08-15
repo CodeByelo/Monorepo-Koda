@@ -34,6 +34,51 @@ def _as_aware(dt):
     return dt
 
 
+# --- ISLR automatic withholding on purchase registration ---
+#
+# Venezuelan ISLR withholding (Decreto 1808) is triggered by the specific
+# *concepto* being paid (honorarios profesionales, fletes, servicios en
+# general, arrendamientos, etc.) — each concepto has its own concepto_codigo
+# and alicuota, several of which already appear (inconsistently) elsewhere in
+# this codebase: fiscal_ext.py's ARC report labels "002"/"003" as
+# COMISIONES/SERVICIOS TÉCNICOS in one place and FLETES in another, and the
+# seed data uses "001" (Honorarios Profesionales, 3%) and "003" (a natural
+# person rate, 34%). None of that is a settled, single source of truth.
+#
+# `Compra.categoria` (BIENES_INVENTARIO / LOGISTICA / SERVICIOS / OTROS) is a
+# coarse expense-classification field for dashboards — it does NOT by itself
+# tell us which concepto_codigo/alicuota applies. Picking a rate for a wrong
+# concepto is a real tax-compliance mistake, so this table only encodes the
+# one mapping we can state with full confidence and leaves everything else
+# for manual entry until Contabilidad/Legal confirms the exact rate table:
+#
+#   - BIENES_INVENTARIO -> None (confirmed no withholding): ISLR withholding
+#     under Decreto 1808 applies to services/fees/rents, not to purchases of
+#     physical goods/inventory.
+#   - LOGISTICA -> None (manual-only): could be "fletes" (which IS subject to
+#     ISLR) or purely internal logistics costs with no supplier withholding
+#     angle; the category alone can't tell them apart.
+#   - SERVICIOS -> None (manual-only): could be "honorarios profesionales"
+#     (3%), "servicios generales" (a different, lower rate under Venezuelan
+#     law), or a non-withholding-eligible supplier; too broad to automate
+#     safely.
+#   - OTROS -> None (manual-only): catch-all, no assumption possible.
+#
+# To activate automation for a category once the business confirms the rate,
+# add an entry here as {"categoria": (concepto_codigo, Decimal("alicuota"))}.
+ISLR_WITHHOLDING_TABLE = {
+    "BIENES_INVENTARIO": None,
+}
+
+
+def _resolver_islr_automatico(categoria):
+    """Returns (concepto_codigo, alicuota) if `categoria` maps to a confirmed
+    automatic ISLR withholding rule, or None if it should remain manual-only
+    (either because no withholding applies, or because the mapping isn't
+    confirmed yet)."""
+    return ISLR_WITHHOLDING_TABLE.get(categoria)
+
+
 def calcular_reserva_fiscal(db: Session, tenant_id) -> float:
     """Single source of truth for 'Reserva Fiscal': sum of pending IVA/ISLR
     withholdings owed to SENIAT. Used by both the Pagos and Tesorería
@@ -488,7 +533,30 @@ def crear_compra(
             tenant_id=current_user.tenant_id
         )
         db.add(nueva_cxp)
-        
+
+        # Retención de ISLR automática (si la categoría tiene una regla confirmada)
+        islr_rule = _resolver_islr_automatico(nueva_compra.categoria)
+        if islr_rule:
+            concepto_codigo, alicuota = islr_rule
+            base_usd = nueva_compra.subtotal_usd
+            monto_usd = (Decimal(str(base_usd)) * Decimal(str(alicuota))).quantize(Decimal("0.01"))
+            periodo = fecha_emision_dt.strftime("%Y-%m")
+            nueva_retencion_islr = RetencionISLR(
+                proveedor_rif=proveedor.rif,
+                proveedor_nombre=proveedor.nombre,
+                numero_factura=compra_in.numero_factura,
+                numero_control=compra_in.numero_control,
+                base_usd=base_usd,
+                concepto_codigo=concepto_codigo,
+                alicuota=alicuota,
+                monto_usd=monto_usd,
+                tasa_cambio_bs=compra_in.tasa_cambio_bs,
+                periodo=periodo,
+                estado="PENDIENTE",
+                tenant_id=current_user.tenant_id,
+            )
+            db.add(nueva_retencion_islr)
+
         # Conciliar Recepcion
         if compra_in.recepcion_id:
             recepcion = db.query(RecepcionStock).filter(
