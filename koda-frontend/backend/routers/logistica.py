@@ -18,7 +18,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
 from backend.core.database import get_db
-from backend.core.security import get_current_user, require_role
+from backend.core.security import get_current_user, require_role, verify_logistics_forward_key
 from backend.models.erp_extended import Vehiculo, Chofer, TurnoDespacho, RegistroMantenimiento, TurnoVentaAsociacion, TurnoGasto, LogisticaLedger, CuarentenaLogistica
 from backend.models.operations import Venta, VentaDetalle, Producto
 
@@ -644,12 +644,49 @@ def listar_turnos(fecha: Optional[str] = None, db: Session = Depends(get_db), cu
 @router.post("/turnos", status_code=201)
 async def crear_turno(data: TurnoCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """Crea un turno, asocia múltiples ventas y dispara notificaciones Telegram."""
-    vehiculo = db.query(Vehiculo).filter(Vehiculo.id == data.vehiculo_id, Vehiculo.tenant_id == current_user.tenant_id).first()
+    # Se bloquean las filas de vehículo/chofer con SELECT ... FOR UPDATE para
+    # que la verificación de disponibilidad y la creación del turno ocurran de
+    # forma atómica: sin esto, dos solicitudes concurrentes podrían pasar
+    # ambas la verificación antes de que cualquiera haga COMMIT, asignando el
+    # mismo vehículo/chofer a dos turnos activos (doble reserva).
+    vehiculo = db.query(Vehiculo).filter(
+        Vehiculo.id == data.vehiculo_id, Vehiculo.tenant_id == current_user.tenant_id
+    ).with_for_update().first()
     if not vehiculo:
         raise HTTPException(status_code=404, detail="Vehículo no encontrado.")
-    chofer = db.query(Chofer).filter(Chofer.id == data.chofer_id, Chofer.tenant_id == current_user.tenant_id).first()
+    chofer = db.query(Chofer).filter(
+        Chofer.id == data.chofer_id, Chofer.tenant_id == current_user.tenant_id
+    ).with_for_update().first()
     if not chofer:
         raise HTTPException(status_code=404, detail="Chofer no encontrado.")
+
+    if vehiculo.estado != "DISPONIBLE":
+        raise HTTPException(
+            status_code=409,
+            detail=f"El vehículo {vehiculo.placa} no está disponible (estado actual: {vehiculo.estado})."
+        )
+    if chofer.estado != "DISPONIBLE":
+        raise HTTPException(
+            status_code=409,
+            detail=f"El chofer {chofer.nombre} no está disponible (estado actual: {chofer.estado})."
+        )
+
+    # Un turno en estado PROGRAMADO o EN_RUTA representa una asignación activa
+    # (mismo criterio que usa el frontend en Logistics.tsx para calcular
+    # turnosActivos). El mismo vehículo o chofer no puede tener dos turnos
+    # activos simultáneos: se bloquean las filas candidatas para cerrar la
+    # ventana de carrera frente a creaciones concurrentes.
+    turno_conflicto = db.query(TurnoDespacho).filter(
+        TurnoDespacho.tenant_id == current_user.tenant_id,
+        TurnoDespacho.estado.in_(["PROGRAMADO", "EN_RUTA"]),
+        (TurnoDespacho.vehiculo_id == data.vehiculo_id) | (TurnoDespacho.chofer_id == data.chofer_id)
+    ).with_for_update().first()
+    if turno_conflicto:
+        recurso = "vehículo" if turno_conflicto.vehiculo_id == data.vehiculo_id else "chofer"
+        raise HTTPException(
+            status_code=409,
+            detail=f"Ya existe un turno activo ({turno_conflicto.numero_turno}) que usa este {recurso}."
+        )
 
     numero = _generar_numero_turno(db)
     
@@ -997,8 +1034,26 @@ def obtener_mercancia_turno(turno_id: int, db: Session = Depends(get_db), curren
 # ─── FASE 2 AVANZADA: TELEGRAM WEBHOOK, CENTRO DE COSTOS, LEDGER Y CUARENTENA ───
 
 @router.post("/telegram-webhook")
-async def telegram_webhook(update: dict, db: Session = Depends(get_db)):
-    """Webhook de comunicación bidireccional para choferes."""
+async def telegram_webhook(
+    update: dict,
+    db: Session = Depends(get_db),
+    _forward_auth: bool = Depends(verify_logistics_forward_key),
+):
+    """
+    Webhook de comunicación bidireccional para choferes.
+
+    Este backend NO registra su propio webhook con Telegram: recibe
+    únicamente updates reenviados por
+    KODA_Remaster/sistema-corporativo/backend/routers/telegram_router.py,
+    que ya validó el secret_token real de Telegram antes de reenviar. La
+    dependencia `verify_logistics_forward_key` exige la clave compartida
+    `X-Internal-Forward-Key` en cada petición — fail closed: sin ella (o
+    inválida) se rechaza con 401 antes de tocar `update`. Gracias a esto,
+    `chat_id` (extraído más abajo de `message.chat.id`, igual que
+    `update.message.chat.id` en el webhook ya corregido de KODA_Remaster) es
+    confiable: solo llega aquí como parte de un update que Telegram realmente
+    envió y que el otro backend ya autenticó.
+    """
     message = update.get("message")
     if not message:
         return {"status": "ignored"}
@@ -1662,6 +1717,36 @@ def create_plan(payload: PlanCreateSchema, db: Session = Depends(get_db), curren
     except Exception:
         raise HTTPException(status_code=400, detail="Formato de fecha inválido. Usar YYYY-MM-DD.")
     
+    # Igual que en /turnos: una tripulación (crew = vehículo + chofer fijos)
+    # con un despacho activo sin cerrar no debe recibir otro despacho hasta
+    # que el anterior se marque DELIVERED/CANCELLED, para no doblar-reservar
+    # el mismo vehículo/chofer detrás de un segundo NewCrew. Se valida y
+    # bloquea ANTES de crear el plan para no dejar un plan a medio construir
+    # si una tripulación falla la verificación.
+    crew_ids_en_payload = set()
+    for d in payload.despachos:
+        crew = db.query(NewCrew).filter(NewCrew.id == d.crew_id, NewCrew.tenant_id == current_user.tenant_id).first()
+        if not crew:
+            continue
+        if d.crew_id in crew_ids_en_payload:
+            raise HTTPException(status_code=409, detail=f"La tripulación '{crew.nombre}' está asignada más de una vez en este plan.")
+        crew_ids_en_payload.add(d.crew_id)
+
+        # El campo estado mezcla valores en inglés y español según el punto del
+        # código que lo lea (ver get_personal_engine más abajo, que chequea
+        # "ENTREGADO" y "DELIVERED" indistintamente); se excluyen ambas formas
+        # aquí para no dejar pasar un despacho cerrado solo por el idioma usado.
+        despacho_activo = db.query(NewDispatchRecord).filter(
+            NewDispatchRecord.tenant_id == current_user.tenant_id,
+            NewDispatchRecord.crew_id == d.crew_id,
+            NewDispatchRecord.estado.notin_(["DELIVERED", "CANCELLED", "ENTREGADO", "CANCELADO"])
+        ).with_for_update().first()
+        if despacho_activo:
+            raise HTTPException(
+                status_code=409,
+                detail=f"La tripulación '{crew.nombre}' ya tiene un despacho activo (#{despacho_activo.id}) sin cerrar."
+            )
+
     plan = NewLogisticsPlan(
         tenant_id=current_user.tenant_id,
         fecha_planificacion=parsed_date,
@@ -1671,7 +1756,7 @@ def create_plan(payload: PlanCreateSchema, db: Session = Depends(get_db), curren
     db.add(plan)
     db.commit()
     db.refresh(plan)
-    
+
     for d in payload.despachos:
         crew = db.query(NewCrew).filter(NewCrew.id == d.crew_id, NewCrew.tenant_id == current_user.tenant_id).first()
         if crew:

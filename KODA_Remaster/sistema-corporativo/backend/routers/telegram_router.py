@@ -46,6 +46,24 @@ if TELEGRAM_BOT_TOKEN and (not TELEGRAM_WEBHOOK_SECRET or len(TELEGRAM_WEBHOOK_S
         "menos 32 caracteres. No existe valor por defecto."
     )
 
+# Clave compartida de servicio-a-servicio para autenticar el REENVÍO de
+# updates de chofer hacia koda-frontend/backend
+# (routers/logistica.py::telegram_webhook, vía LOGISTICS_WEBHOOK_URL más
+# abajo). Ese backend NO registra su propio webhook con Telegram: confía
+# exclusivamente en lo que ESTE backend le reenvía después de haber validado
+# TELEGRAM_WEBHOOK_SECRET arriba. Sin esta clave, cualquiera podría saltarse
+# esta validación llamando directamente al endpoint de logística y
+# suplantar a un chofer/admin. Debe ser el MISMO valor que
+# LOGISTICS_INTERNAL_FORWARD_KEY en koda-frontend/backend/core/security.py.
+LOGISTICS_INTERNAL_FORWARD_KEY = os.getenv("LOGISTICS_INTERNAL_FORWARD_KEY", "")
+if TELEGRAM_BOT_TOKEN and (not LOGISTICS_INTERNAL_FORWARD_KEY or len(LOGISTICS_INTERNAL_FORWARD_KEY) < 32):
+    raise RuntimeError(
+        "LOGISTICS_INTERNAL_FORWARD_KEY no configurado o inseguro: con TELEGRAM_BOT_TOKEN "
+        "habilitado, debe definirse como variable de entorno con un valor de al menos 32 "
+        "caracteres. No existe valor por defecto. Debe coincidir con el mismo valor "
+        "configurado en koda-frontend/backend."
+    )
+
 
 async def ensure_telegram_webhook() -> None:
     """
@@ -532,6 +550,7 @@ async def telegram_webhook(
                 res = await client.post(
                     logistics_url,
                     json=update.dict(),
+                    headers={"X-Internal-Forward-Key": LOGISTICS_INTERNAL_FORWARD_KEY},
                     timeout=8.0
                 )
                 return res.json()

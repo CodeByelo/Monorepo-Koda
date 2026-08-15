@@ -14,6 +14,23 @@ logger = logging.getLogger("sistema_corporativo")
 
 router = APIRouter(prefix="/api/v1/nomina", tags=["Nómina"])
 
+# ──────────────────────────────────────────────────────────────────────────────
+# ROLES CON ACCESO A LA APROBACIÓN DE PAGOS DE NÓMINA
+# (mismo criterio usado en vendedores_router._require_admin para acciones
+# financieras: CEO, Administrador, Gerente o Desarrollador)
+# ──────────────────────────────────────────────────────────────────────────────
+_ALLOWED_ROLES = {"ceo", "administrador", "gerente", "desarrollador"}
+
+
+def _require_privileged_role(current_user: dict) -> None:
+    role = str(current_user.get("role") or current_user.get("rol") or "").strip().lower()
+    if role not in _ALLOWED_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No autorizado: se requiere rol Gerente, Administrador o CEO para aprobar pagos de nómina."
+        )
+
+
 class PagoCreate(BaseModel):
     empleado_id: uuid.UUID
     monto_neto: Decimal = Field(..., gt=0)
@@ -42,9 +59,11 @@ async def aprobar_pago(
     current_user: dict = Depends(get_current_user),
     conn = Depends(get_db_connection)
 ):
+    _require_privileged_role(current_user)
+
     user_id_str = current_user.get("sub")
     tenant_id_str = current_user.get("tenant_id")
-    
+
     if not tenant_id_str:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

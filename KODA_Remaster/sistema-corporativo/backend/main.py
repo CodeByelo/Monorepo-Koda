@@ -1478,6 +1478,26 @@ async def _is_tech_user(conn, user_id: str) -> bool:
     return "tecnolog" in _normalize_text(dept)
 
 
+async def _is_privileged_ticket_role(conn, current_user: dict) -> bool:
+    """
+    Misma logica de privilegio usada en GET /tickets para decidir si un
+    usuario puede ver tickets/historial de otros solicitantes sin quedar
+    restringido a t.solicitante_id = user_id. Reutilizada por los
+    endpoints de historial de tickets para evitar el IDOR de exponer el
+    historial de tickets ajenos a usuarios no privilegiados.
+    """
+    role_norm = _normalize_text(current_user.get("role"))
+    is_dev = role_norm in {"desarrollador", "dev", "developer"}
+    is_admin = role_norm in {"administrativo", "admin", "administrador"}
+    is_ceo = role_norm == "ceo"
+    if is_dev or is_admin or is_ceo:
+        return True
+    user_id = current_user.get("sub")
+    if not user_id:
+        return False
+    return await _is_tech_user(conn, user_id)
+
+
 
 
 _ensured_tables = set()
@@ -1808,6 +1828,21 @@ async def listar_eventos_documento(
                 "SELECT tenant_id FROM profiles WHERE id = $1::uuid",
                 user_id,
             )
+        user_uuid = uuid.UUID(str(user_id))
+        user_gerencia_id = await conn.fetchval(
+            "SELECT gerencia_id FROM profiles WHERE id = $1::uuid",
+            user_uuid,
+        )
+        is_privileged = await _is_privileged_user(conn, current_user)
+        await _ensure_documento_access(
+            conn,
+            id,
+            tenant_id,
+            user_uuid,
+            user_gerencia_id,
+            is_privileged,
+            accion="ver los eventos de este documento",
+        )
         rows = await conn.fetch(
             """
             SELECT id, documento_id, actor_username, action, details, created_at
@@ -2795,6 +2830,49 @@ async def update_doc_status(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def _ensure_documento_access(
+    conn,
+    doc_id: uuid.UUID,
+    tenant_id,
+    user_uuid: uuid.UUID,
+    user_gerencia_id,
+    is_privileged: bool,
+    *,
+    accion: str = "acceder a este documento",
+) -> None:
+    """
+    Verifica que el usuario tenga relación directa con el documento
+    (receptor, receptor por gerencia, o rol privilegiado) antes de permitir
+    leer/escribir datos asociados (respuestas, eventos).
+
+    Misma lógica de `can_reply` usada originalmente (y en exclusiva) en
+    POST /documentos/{id}/respuesta — extraída aquí para que también la
+    reutilicen GET /documentos/{id}/respuestas y GET /documentos/{id}/eventos
+    y así evitar el IDOR de exponer esos datos a cualquier usuario del tenant.
+    """
+    doc = await conn.fetchrow(
+        """
+        SELECT id, receptor_id, receptor_gerencia_id
+        FROM documentos
+        WHERE id = $1
+          AND ($2::uuid IS NULL OR tenant_id = $2::uuid OR tenant_id IS NULL)
+        """,
+        doc_id,
+        tenant_id,
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+
+    can_access = is_privileged
+    if doc.get("receptor_id") and str(doc.get("receptor_id")) == str(user_uuid):
+        can_access = True
+    if doc.get("receptor_gerencia_id") and user_gerencia_id:
+        if int(doc.get("receptor_gerencia_id")) == int(user_gerencia_id):
+            can_access = True
+    if not can_access:
+        raise HTTPException(status_code=403, detail=f"No autorizado para {accion}")
+
+
 @app.post("/documentos/{id}/respuesta")
 async def responder_documento(
     request: Request,
@@ -2825,27 +2903,15 @@ async def responder_documento(
         if not content:
             raise HTTPException(status_code=400, detail="contenido requerido")
 
-        doc = await conn.fetchrow(
-            """
-            SELECT id, receptor_id, receptor_gerencia_id
-            FROM documentos
-            WHERE id = $1
-              AND ($2::uuid IS NULL OR tenant_id = $2::uuid OR tenant_id IS NULL)
-            """,
+        await _ensure_documento_access(
+            conn,
             id,
             tenant_id,
+            user_uuid,
+            user_gerencia_id,
+            is_privileged,
+            accion="responder este documento",
         )
-        if not doc:
-            raise HTTPException(status_code=404, detail="Documento no encontrado")
-
-        can_reply = is_privileged
-        if doc.get("receptor_id") and str(doc.get("receptor_id")) == str(user_uuid):
-            can_reply = True
-        if doc.get("receptor_gerencia_id") and user_gerencia_id:
-            if int(doc.get("receptor_gerencia_id")) == int(user_gerencia_id):
-                can_reply = True
-        if not can_reply:
-            raise HTTPException(status_code=403, detail="No autorizado para responder este documento")
 
         response_file_urls = []
         if archivos:
@@ -2975,6 +3041,21 @@ async def listar_respuestas_documento(
                 "SELECT tenant_id FROM profiles WHERE id = $1::uuid",
                 user_id,
             )
+        user_uuid = uuid.UUID(str(user_id))
+        user_gerencia_id = await conn.fetchval(
+            "SELECT gerencia_id FROM profiles WHERE id = $1::uuid",
+            user_uuid,
+        )
+        is_privileged = await _is_privileged_user(conn, current_user)
+        await _ensure_documento_access(
+            conn,
+            id,
+            tenant_id,
+            user_uuid,
+            user_gerencia_id,
+            is_privileged,
+            accion="ver las respuestas de este documento",
+        )
         rows = await conn.fetch(
             """
             SELECT
@@ -4438,7 +4519,12 @@ async def search_ticket_history(
     conn = Depends(get_db_connection),
 ):
     tenant_id = current_user.get("tenant_id")
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Token invalido")
     await _ensure_ticket_events_table(conn)
+    is_privileged_ticket_access = await _is_privileged_ticket_role(conn, current_user)
+    restrict_user_id = None if is_privileged_ticket_access else user_id
     rows = await conn.fetch(
         """
         SELECT
@@ -4454,11 +4540,13 @@ async def search_ticket_history(
                 OR CAST(e.ticket_id AS TEXT) ILIKE '%' || $2 || '%'
                 OR COALESCE(e.details, '') ILIKE '%' || $2 || '%'
               )
+          AND ($3::uuid IS NULL OR t.solicitante_id = $3::uuid)
         ORDER BY e.created_at DESC
         LIMIT 500
         """,
         tenant_id,
         q.strip(),
+        restrict_user_id,
     )
     return [dict(r) for r in rows]
 
@@ -4470,18 +4558,26 @@ async def list_ticket_history(
     conn = Depends(get_db_connection),
 ):
     tenant_id = current_user.get("tenant_id")
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Token invalido")
     await _ensure_ticket_events_table(conn)
+    is_privileged_ticket_access = await _is_privileged_ticket_role(conn, current_user)
+    restrict_user_id = None if is_privileged_ticket_access else user_id
     rows = await conn.fetch(
         """
-        SELECT id, ticket_id, actor_username, action, old_status, new_status,
-               observaciones, details, created_at
-        FROM ticket_events
-        WHERE ticket_id = $1
-          AND ($2::uuid IS NULL OR tenant_id = $2::uuid)
-        ORDER BY created_at ASC
+        SELECT e.id, e.ticket_id, e.actor_username, e.action, e.old_status, e.new_status,
+               e.observaciones, e.details, e.created_at
+        FROM ticket_events e
+        LEFT JOIN tickets t ON t.id = e.ticket_id
+        WHERE e.ticket_id = $1
+          AND ($2::uuid IS NULL OR e.tenant_id = $2::uuid)
+          AND ($3::uuid IS NULL OR t.solicitante_id = $3::uuid)
+        ORDER BY e.created_at ASC
         """,
         ticket_id,
         tenant_id,
+        restrict_user_id,
     )
     return [dict(r) for r in rows]
 
@@ -5143,12 +5239,16 @@ async def delete_hoja_de_ruta(
     if not user_id:
         raise HTTPException(status_code=401, detail="Token inválido")
 
+    tenant_id = current_user.get("tenant_id")
+
     role = _normalize_text(current_user.get("role", ""))
     is_privileged = role in {"ceo", "administrativo", "admin", "gerente", "desarrollador", "dev"}
 
     if is_privileged:
         deleted = await conn.fetchval(
-            "DELETE FROM hojas_de_ruta WHERE id = $1::uuid RETURNING id", hoja_id
+            "DELETE FROM hojas_de_ruta WHERE id = $1::uuid AND tenant_id = $2::uuid RETURNING id",
+            hoja_id,
+            tenant_id,
         )
     else:
         deleted = await conn.fetchval(

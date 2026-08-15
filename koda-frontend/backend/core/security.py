@@ -190,6 +190,62 @@ if not ORG_SYNC_API_KEY or len(ORG_SYNC_API_KEY) < 32:
     )
 
 
+# ==========================================
+# CLAVE DE SERVICIO (REENVÍO INTERNO DEL WEBHOOK DE TELEGRAM DE LOGÍSTICA — service-to-service)
+# ==========================================
+# El endpoint POST /api/logistica/telegram-webhook (routers/logistica.py) NO
+# registra su propio webhook con la API de Telegram: no existe ningún
+# setWebhook/ensure_telegram_webhook en este backend (koda-frontend). Recibe
+# ÚNICAMENTE updates ya reenviados por
+# KODA_Remaster/sistema-corporativo/backend/routers/telegram_router.py, que
+# es quien SÍ tiene el webhook registrado con Telegram y quien ya validó
+# TELEGRAM_WEBHOOK_SECRET (X-Telegram-Bot-Api-Secret-Token) antes de reenviar
+# el update.dict() validado hacia LOGISTICS_WEBHOOK_URL.
+#
+# Por lo tanto esto NO es un secret_token de Telegram (no aplica: este
+# backend nunca llama a la API de Telegram para registrar webhook), sino una
+# clave compartida de servicio-a-servicio — mismo patrón que
+# BOT_INTERNAL_API_KEY, pero en la dirección inversa (aquí ESTE backend es el
+# RECEPTOR del reenvío, no el emisor).
+#
+# Sin esta validación, cualquiera en internet puede hacer POST directo a
+# /api/logistica/telegram-webhook con un chat_id inventado (el de un chofer o
+# "admin" ya vinculado) y falsificar confirmaciones de despacho, marcar
+# entregas como ENTREGADO o reportar incidencias falsas, sin pasar nunca por
+# Telegram ni por la validación de KODA_Remaster.
+#
+# CRÍTICO: sin fallback hardcodeado, igual que SECRET_KEY/AUDIT_LOG_SECRET/
+# BOT_INTERNAL_API_KEY/ORG_SYNC_API_KEY. Debe configurarse con el MISMO valor
+# en ambos backends (koda-frontend y KODA_Remaster/sistema-corporativo).
+LOGISTICS_INTERNAL_FORWARD_KEY = os.getenv("LOGISTICS_INTERNAL_FORWARD_KEY", "").strip()
+if not LOGISTICS_INTERNAL_FORWARD_KEY or len(LOGISTICS_INTERNAL_FORWARD_KEY) < 32:
+    raise RuntimeError(
+        "LOGISTICS_INTERNAL_FORWARD_KEY no configurado o inseguro: debe definirse como "
+        "variable de entorno con un valor de al menos 32 caracteres. No existe valor por "
+        "defecto. Debe coincidir EXACTAMENTE con el valor configurado en "
+        "KODA_Remaster/sistema-corporativo/backend (mismo secreto compartido en ambos lados)."
+    )
+
+
+def verify_logistics_forward_key(
+    x_internal_forward_key: Optional[str] = Header(default=None, alias="X-Internal-Forward-Key")
+) -> bool:
+    """
+    Dependencia de FastAPI para el webhook de Telegram de logística
+    (`routers/logistica.py::telegram_webhook`). Igual que
+    `verify_bot_api_key`: un límite de confianza servidor-a-servidor, NUNCA
+    combinado con JWT de usuario. Solo KODA_Remaster (que ya validó el
+    secret_token real de Telegram) conoce esta clave y puede reenviar updates
+    aquí.
+    """
+    if not x_internal_forward_key or not hmac.compare_digest(x_internal_forward_key, LOGISTICS_INTERNAL_FORWARD_KEY):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Clave de reenvío interno inválida o ausente.",
+        )
+    return True
+
+
 def get_current_auditor(request: Request, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> AuditorSession:
     """
     Dependencia de seguridad que valida que la petición proviene de un auditor válido:
