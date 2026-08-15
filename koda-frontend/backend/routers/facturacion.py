@@ -32,7 +32,7 @@ from backend.models.operations import Cliente, Producto
 from backend.models.erp_extended import AuditoriaLog
 from backend.utils.ip_utils import get_real_ip
 from backend.schemas.operations import FacturaEmisionRequest
-from backend.services.facturacion_service import LineaFactura, procesar_emision_factura
+from backend.services.facturacion_service import LineaFactura, procesar_emision_factura, resolver_precio_unitario
 
 router = APIRouter(prefix="/v1/facturacion", tags=["Facturación Fiscal"])
 
@@ -139,7 +139,6 @@ def emitir_factura_fiscal(
         for det in detalles_in:
             prod_key = str(det.producto_id)
             cantidad = Decimal(str(det.cantidad))
-            precio_unit = Decimal(str(det.precio_unitario))
 
             if cantidad <= 0:
                 raise HTTPException(status_code=400, detail="La cantidad debe ser mayor a 0.")
@@ -163,7 +162,11 @@ def emitir_factura_fiscal(
             lineas.append(LineaFactura(
                 producto_id=producto.id,
                 cantidad=cantidad,
-                precio_unitario=precio_unit,
+                # Precio SIEMPRE tomado del catálogo real (Producto.precio_usd),
+                # nunca del `precio_unitario` que el cliente envía en el request:
+                # de lo contrario cualquiera podría emitir una factura fiscal
+                # válida ante el SENIAT por un monto arbitrario editando el body.
+                precio_unitario=resolver_precio_unitario(producto),
                 es_exento=bool(producto.es_exento),
             ))
 

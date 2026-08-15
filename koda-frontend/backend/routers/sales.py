@@ -10,7 +10,7 @@ from backend.models.erp_extended import AuditoriaLog, Vendedor
 from backend.schemas.operations import VentaCreate, VentaResponse, VentaReporteResponse
 from backend.core.security import get_current_user, require_role
 from backend.utils.idempotency import require_idempotency
-from backend.services.facturacion_service import LineaFactura, procesar_emision_factura
+from backend.services.facturacion_service import LineaFactura, procesar_emision_factura, resolver_precio_unitario
 
 router = APIRouter(prefix="/ventas", tags=["Ventas e Inventario"])
 
@@ -87,7 +87,8 @@ def registrar_venta_y_cxc(
             lineas.append(LineaFactura(
                 producto_id=producto.id,
                 cantidad=Decimal(str(detalle_in.cantidad)),
-                precio_unitario=Decimal(str(producto.precio_usd)),
+                # Precio SIEMPRE tomado del catálogo real, nunca del cliente de la API.
+                precio_unitario=resolver_precio_unitario(producto),
                 es_exento=bool(producto.es_exento),
             ))
 

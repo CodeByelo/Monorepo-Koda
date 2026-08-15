@@ -66,6 +66,21 @@ class ResultadoFactura:
     comision_usd: Decimal
 
 
+def resolver_precio_unitario(producto) -> Decimal:
+    """
+    Deriva el precio unitario de una línea de factura EXCLUSIVAMENTE desde el
+    catálogo del servidor (`Producto.precio_usd`), nunca desde el precio que
+    el cliente envía en el request. Aplica el mismo principio que
+    `derivar_aplica_igtf`: nunca confiar en un valor del cliente para un dato
+    que determina impuestos y montos legales de la factura.
+
+    Punto único usado por todos los routers que arman `LineaFactura`
+    (`sales.py`, `facturacion.py`) para que ninguno pueda divergir y volver a
+    confiar en un precio enviado por el cliente.
+    """
+    return Decimal(str(producto.precio_usd))
+
+
 def derivar_aplica_igtf(metodo_pago: str, moneda: Optional[str]) -> bool:
     """
     Deriva si aplica IGTF (3%) EXCLUSIVAMENTE a partir de datos del servidor
