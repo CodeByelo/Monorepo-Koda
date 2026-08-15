@@ -333,7 +333,7 @@ export const DevAdminDashboard: React.FC = () => {
       wsPath = '/api/dev/ws';
     }
 
-    const wsUrl = `${wsProto}//${wsHost}${wsPath}?token=${encodeURIComponent(token)}`;
+    const wsUrl = `${wsProto}//${wsHost}${wsPath}`;
 
     const connectWS = () => {
       setWsStatus('connecting');
@@ -341,6 +341,9 @@ export const DevAdminDashboard: React.FC = () => {
       wsRef.current = socket;
 
       socket.onopen = () => {
+        // Send the JWT as the first message instead of a query param so it
+        // never appears in the HTTP handshake / access logs.
+        socket.send(JSON.stringify({ type: 'auth', token }));
         setWsStatus('connected');
         setError(null);
       };

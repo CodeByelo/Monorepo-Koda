@@ -412,10 +412,27 @@ async def session_connect(websocket: WebSocket):
 @router.websocket("/dev/ws")
 async def dev_ws_connect(websocket: WebSocket):
     logger.info("WebSocket connection request received on /dev/ws")
-    params = websocket.query_params
-    token = params.get("token")
 
     await websocket.accept()
+
+    # The JWT must never travel in the connection URL (query strings land in
+    # server access logs, proxy/CDN logs and browser devtools history). The
+    # client instead sends it as the first message right after the handshake;
+    # we give it a short window to do so before dropping the connection.
+    try:
+        raw_auth = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+    except (asyncio.TimeoutError, WebSocketDisconnect):
+        logger.warning("WebSocket rejected: no auth message received in time")
+        await websocket.close(code=4000)
+        return
+
+    token = None
+    try:
+        auth_msg = json.loads(raw_auth)
+        if isinstance(auth_msg, dict) and auth_msg.get("type") == "auth":
+            token = auth_msg.get("token")
+    except (json.JSONDecodeError, TypeError):
+        token = None
 
     if not token:
         logger.warning("WebSocket rejected: no token provided")
