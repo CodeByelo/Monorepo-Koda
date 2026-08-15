@@ -90,7 +90,8 @@ const IVADeclaration = () => {
     }
   };
 
-  const formatCurrency = (val: number) => {
+  const formatCurrency = (val: number | undefined | null) => {
+    if (val === undefined || val === null || isNaN(val)) return "Bs. 0.00";
     return "Bs. " + Math.abs(val).toLocaleString('es-VE', { minimumFractionDigits: 2 });
   };
 

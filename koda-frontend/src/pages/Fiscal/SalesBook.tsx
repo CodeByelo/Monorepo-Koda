@@ -72,9 +72,10 @@ const SalesBook = () => {
     }
   };
 
-  const formatCurrency = (val: number | string) => {
+  const formatCurrency = (val: number | string | undefined | null) => {
+    if (val === undefined || val === null) return "0.00";
     const num = typeof val === 'string' ? parseFloat(val) : val;
-    if (isNaN(num)) return val;
+    if (isNaN(num)) return "0.00";
     return num.toLocaleString('es-VE', { minimumFractionDigits: 2 });
   };
 
