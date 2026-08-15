@@ -480,7 +480,7 @@ const Preloader = ({ onComplete }) => {
     "Cargando módulos del núcleo seguro... [OK]",
     "Mapeando registro modular (Bento suite)... [OK]",
     "Validando cadenas SSL/TLS... [SECURE]",
-    "Conectando a la pasarela fiscal SENIAT... [ONLINE]",
+    "Cargando motor de cálculo fiscal IVA/IGTF/ISLR... [OK]",
     "Sincronizando tasas del Banco Central de Venezuela... [LIVE]",
     "Handshake con base de datos. Nodos activos: 12",
     "Espacio de trabajo KODA inicializado... [COMPLETADO]"
@@ -819,7 +819,7 @@ const ERPUniverse = ({ mouseX, mouseY }) => {
 
   const nodes = [
     { id: 'ventas', label: 'Ventas', icon: ShoppingBag, x: '50%', y: '8%', color: '#00ffb4', size: 64, info: 'Órdenes activas' },
-    { id: 'factura', label: 'Facturación', icon: FileText, x: '80%', y: '24%', color: '#a78bfa', size: 56, info: 'SENIAT OK' },
+    { id: 'factura', label: 'Facturación', icon: FileText, x: '80%', y: '24%', color: '#a78bfa', size: 56, info: 'Fiscal OK' },
     { id: 'logistica', label: 'Logística', icon: Truck, x: '86%', y: '52%', color: '#38bdf8', size: 56, info: 'Flota activa' },
     { id: 'fiscal', label: 'Fiscal', icon: Scale, x: '72%', y: '78%', color: '#f59e0b', size: 56, info: 'IVA/ISLR OK' },
     { id: 'cobranzas', label: 'Cobranzas', icon: Wallet, x: '28%', y: '78%', color: '#ec4899', size: 56, info: 'CxC al día' },
@@ -957,7 +957,7 @@ const ERPUniverse = ({ mouseX, mouseY }) => {
           <div style={{ fontSize:8, color:'rgba(0,255,180,.55)', marginTop:2, fontWeight:600 }}>↑ +14.8% este mes</div>
         </div>
 
-        {/* SENIAT badge */}
+        {/* Fiscal compliance badge */}
         <div style={{ position:'absolute', top:'70%', left:'-26%', zIndex:8,
           background:'rgba(2,6,8,.92)', border:'1px solid rgba(167,139,250,.3)',
           borderRadius:14, padding:'.65rem .9rem', backdropFilter:'blur(16px)',
@@ -966,7 +966,7 @@ const ERPUniverse = ({ mouseX, mouseY }) => {
         }}>
           <div style={{ display:'flex', alignItems:'center', gap:5, marginBottom:4 }}>
             <ShieldCheck size={10} color="#a78bfa" />
-            <span style={{ fontSize:9, color:'rgba(255,255,255,.4)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.08em', fontFamily:"'Space Mono',monospace" }}>SENIAT</span>
+            <span style={{ fontSize:9, color:'rgba(255,255,255,.4)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.08em', fontFamily:"'Space Mono',monospace" }}>FISCAL VE</span>
           </div>
           <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
             {['IVA','IGTF','ISLR'].map(t => (
@@ -995,7 +995,7 @@ const WorkflowBuilder = () => {
     { id: 'sign', name: 'Firma Digital', desc: 'Certifica hash criptográfico' }
   ];
   const actions = [
-    { id: 'seniat', name: 'SENIAT Gateway', desc: 'Reporte directo a plataforma' },
+    { id: 'seniat', name: 'Registro Fiscal', desc: 'Genera reporte para Libro de Ventas' },
     { id: 'ledger', name: 'Diario Contable', desc: 'Asiento contable automático' },
     { id: 'email', name: 'Notificación Cliente', desc: 'Envío automático PDF/XML' }
   ];
@@ -1044,8 +1044,8 @@ const WorkflowBuilder = () => {
       <div style={{ marginTop:'2rem',background:'rgba(2,6,8,.9)',border:'1px solid rgba(0,255,180,.2)',borderRadius:12,padding:'1rem',fontFamily:"'Space Mono',monospace",fontSize:'.76rem',color:'#00ffb4',minHeight:'42px',display:'flex',alignItems:'center',gap:'8px',position:'relative',zIndex:2 }}>
         <span style={{ color:'rgba(0,255,180,.35)' }}>$</span>
         <span>
-          {activeTrigger==='pos' && "FLUJO: Venta POS → Convirtiendo divisas BCV → IVA 16% → Asiento Libro Diario → SENIAT Gateway..."}
-          {activeTrigger==='web' && "FLUJO: Factura Web → Validando RIF → Firma digital → PDF/XML SENIAT → Email automático al cliente..."}
+          {activeTrigger==='pos' && "FLUJO: Venta POS → Convirtiendo divisas BCV → IVA 16% → Asiento Libro Diario → Registro Fiscal..."}
+          {activeTrigger==='web' && "FLUJO: Factura Web → Validando RIF → Firma digital → PDF/XML fiscal → Email automático al cliente..."}
           {activeTrigger==='pay' && "FLUJO: Abono CxC → Conciliación Tesorería → IGTF si aplica → P&G actualizados → Dashboard live..."}
           {!activeTrigger && "Esperando disparador... Selecciona una opción para iniciar la animación de flujo de datos."}
         </span>
@@ -1306,7 +1306,7 @@ const PlanCard = ({ plan, i, total }) => {
           </div>
 
           {/* Action Trigger Button */}
-          <MagBtn href="/registro"
+          <MagBtn href="/login"
             className={isFeatured ? 'lp-cta' : 'lp-ghost'}
             style={{
               width:'100%', justifyContent:'center', padding:'.95rem',
@@ -1335,7 +1335,7 @@ const ComplianceMarquee = () => {
     { icon: Lock, text: 'IGTF 3% Calculado', color: '#38bdf8' },
     { icon: BarChart3, text: 'ISLR Integrado', color: '#a78bfa' },
     { icon: RefreshCw, text: 'BCV Live Sync', color: '#f59e0b' },
-    { icon: ShieldCheck, text: 'SENIAT Validado', color: '#10b981' },
+    { icon: ShieldCheck, text: 'Cálculo Fiscal Automático', color: '#10b981' },
     { icon: FileText, text: 'Factura Electrónica', color: '#00ffb4' },
     { icon: BookOpen, text: 'Libro Fiscal', color: '#38bdf8' },
     { icon: Landmark, text: 'Multi-Moneda', color: '#a78bfa' },
@@ -1542,14 +1542,14 @@ export default function LandingPage() {
   const mods = [
     { icon:Building2, label:'Gestor Empresarial', desc:'Suite corporativa completa. Dashboard ejecutivo, gestión multi-empresa y control de accesos con auditoría en tiempo real.', accent:'#00ffb4', size:'featured', badge:'Core', bullets:['Gestión multi-empresa y multi-sucursal','Dashboard ejecutivo con KPIs en vivo','Control granular de roles y permisos','Auditoría completa de actividad'] },
     { icon:ShoppingBag, label:'Ventas', desc:'Cotizaciones, órdenes, notas de entrega y listas de precios integradas.', accent:'#38bdf8', size:'normal', delay:80, miniChart:[55,70,48,85,60,92,75,88] },
-    { icon:FileText, label:'Facturación', desc:'Emisión fiscal conforme al SENIAT. IVA, IGTF e ISLR. POS integrado.', accent:'#a78bfa', size:'wide', badge:'SENIAT', delay:140 },
+    { icon:FileText, label:'Facturación', desc:'Emisión fiscal conforme a la normativa del SENIAT. IVA, IGTF e ISLR. POS integrado.', accent:'#a78bfa', size:'wide', badge:'Fiscal', delay:140 },
     { icon:ShoppingCart, label:'Compras', desc:'Proveedores, órdenes, aprobaciones y recepción en un flujo unificado.', accent:'#f59e0b', size:'normal', delay:100, miniChart:[40,58,35,72,55,68,45,80] },
     { icon:Package, label:'Inventario', desc:'Stock, kardex, trazabilidad, almacenes y toma física digital.', accent:'#ec4899', size:'normal', delay:180, miniChart:[65,78,52,88,70,83,60,91] },
     { icon:Truck, label:'Logística', desc:'Tablero de despacho, planificación Gantt, flota de vehículos y choferes.', accent:'#0ea5e9', size:'normal', delay:200, miniChart:[42,60,38,72,58,80,65,78] },
     { icon:Wallet, label:'Cobranzas', desc:'Cartera CxC, aplicación de cobros, antigüedad de saldos y flujo de caja.', accent:'#10b981', size:'normal', delay:220, miniChart:[50,68,44,80,62,88,72,84] },
     { icon:CreditCard, label:'Pagos', desc:'Cartera CxP, órdenes de pago, lotes y programación de egresos.', accent:'#f472b6', size:'normal', delay:240, miniChart:[38,55,42,68,52,75,60,72] },
     { icon:Landmark, label:'Tesorería', desc:'Posición consolidada, bancos, conciliación, caja chica y préstamos UVC.', accent:'#00ffb4', size:'normal', delay:260, miniChart:[48,62,55,78,52,85,68,74] },
-    { icon:Scale, label:'Fiscal', desc:'Libros de ventas y compras, IVA, IGTF, ISLR, calendario fiscal y ARC.', accent:'#f59e0b', size:'normal', badge:'SENIAT', delay:280, miniChart:[55,68,50,80,65,88,75,82] },
+    { icon:Scale, label:'Fiscal', desc:'Libros de ventas y compras, IVA, IGTF, ISLR, calendario fiscal y ARC.', accent:'#f59e0b', size:'normal', badge:'Fiscal', delay:280, miniChart:[55,68,50,80,65,88,75,82] },
     { icon:BookOpen, label:'Contabilidad', desc:'Asientos, libro diario/mayor, estados financieros y cierre contable.', accent:'#38bdf8', size:'normal', delay:300, miniChart:[58,72,45,82,67,90,75,86] },
     { icon:Users, label:'Nómina', desc:'Control de personal, cálculo de nómina y gestión de recursos humanos.', accent:'#c084fc', size:'normal', delay:320, miniChart:[45,60,52,74,58,80,68,76] },
     { icon:PieChart, label:'Reportes & BI', desc:'Business Intelligence, exportación de datos y auditoría de excepciones.', accent:'#a78bfa', size:'normal', delay:340, miniChart:[62,75,58,88,72,95,80,92] },
@@ -1698,7 +1698,7 @@ export default function LandingPage() {
                 <WordReveal text="Potenciado para el mundo." delay={100} isGradient={true} />
               </h2>
               <p style={{ color:'rgba(255,255,255,.38)',fontSize:'1.05rem',lineHeight:1.75,marginBottom:'2.5rem' }}>
-                El único ERP que entiende el entorno bimonetario venezolano, el cumplimiento fiscal del SENIAT, la sincronización BCV y la realidad empresarial local.
+                El único ERP que entiende el entorno bimonetario venezolano, el cumplimiento con la normativa fiscal del SENIAT, la sincronización BCV y la realidad empresarial local.
               </p>
               <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:'1.25rem' }}>
                 {[
@@ -1790,7 +1790,7 @@ export default function LandingPage() {
                 <span style={{ fontSize:10, fontWeight:800, color:'rgba(0,255,180,.6)', textTransform:'uppercase', letterSpacing:'.14em', fontFamily:"'Space Mono',monospace" }}>Con KODA gestionas todo desde un solo lugar</span>
               </div>
               <div style={{ display:'flex', flexWrap:'wrap', gap:'.6rem' }}>
-                {['Ventas & Cotizaciones','Facturación Fiscal SENIAT','Compras & Proveedores','Inventario & Almacenes','Logística & Despacho','Cobranzas CxC','Pagos CxP','Tesorería & Bancos','Módulo Fiscal IVA/ISLR/IGTF','Contabilidad Completa','Nómina & RRHH','Reportes & BI'].map(item => (
+                {['Ventas & Cotizaciones','Facturación Fiscal Electrónica','Compras & Proveedores','Inventario & Almacenes','Logística & Despacho','Cobranzas CxC','Pagos CxP','Tesorería & Bancos','Módulo Fiscal IVA/ISLR/IGTF','Contabilidad Completa','Nómina & RRHH','Reportes & BI'].map(item => (
                   <span key={item} style={{ padding:'5px 13px', borderRadius:50, background:'rgba(0,255,180,.06)', border:'1px solid rgba(0,255,180,.14)', fontSize:11, fontWeight:700, color:'rgba(0,255,180,.7)', letterSpacing:'.04em', display:'inline-flex', alignItems:'center', gap:5 }}>
                     <CheckCircle size={9} color="#00ffb4" style={{ flexShrink:0 }} />
                     {item}
@@ -1905,7 +1905,7 @@ export default function LandingPage() {
                 </div>
               ))}
               <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.5rem',marginTop:'1rem' }}>
-                {[['Libro de Ventas ✓','#a78bfa'],['SENIAT ✓','#00ffb4']].map(([t,c])=>(
+                {[['Libro de Ventas ✓','#a78bfa'],['Fiscal ✓','#00ffb4']].map(([t,c])=>(
                   <div key={t} style={{ padding:'.55rem',borderRadius:10,background:`${c}08`,border:`1px solid ${c}20`,textAlign:'center',fontSize:10,color:c,fontWeight:800,textTransform:'uppercase',letterSpacing:'.07em',fontFamily:"'Space Mono',monospace" }}>{t}</div>
                 ))}
               </div>
@@ -1916,7 +1916,7 @@ export default function LandingPage() {
               <Label icon={FileText} text="Facturación Fiscal" color="#a78bfa" bg="rgba(167,139,250,.07)" border="rgba(167,139,250,.2)" />
               <SectionH line1="Cumplimiento fiscal" line2grad="total con Venezuela." size="clamp(1.9rem,3.5vw,3.2rem)" />
               <p style={{ color:'rgba(255,255,255,.42)',lineHeight:1.8,marginBottom:'2rem' }}>Emisión conforme a la Providencia 00071. IVA, IGTF, ISLR y retenciones calculadas automáticamente. Libro de Ventas generado al instante.</p>
-              <CheckList accent="#a78bfa" items={['Facturación bimonetaria USD + Bolívares','IVA 16% e IGTF 3% automáticos','Punto de Venta (POS) integrado','Libro de Ventas SENIAT automático','Notas de Crédito y Débito conformes','PDF y XML fiscal']} />
+              <CheckList accent="#a78bfa" items={['Facturación bimonetaria USD + Bolívares','IVA 16% e IGTF 3% automáticos','Punto de Venta (POS) integrado','Libro de Ventas en formato SENIAT automático','Notas de Crédito y Débito conformes','PDF y XML fiscal']} />
             </div>
           </Reveal>
         </div>
@@ -1953,7 +1953,7 @@ export default function LandingPage() {
                 <span style={{ color:'rgba(56,189,248,.75)',fontSize:'.8rem',fontWeight:700 }}>Utilidad neta: $340,800 — Margen 12.0%</span>
               </div>
               <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'.4rem',marginTop:'.75rem' }}>
-                {['Diario ✓','Mayor ✓','SENIAT ✓'].map(t=>(
+                {['Diario ✓','Mayor ✓','Fiscal ✓'].map(t=>(
                   <div key={t} style={{ padding:'.45rem',textAlign:'center',fontSize:10,fontWeight:800,color:'rgba(56,189,248,.7)',background:'rgba(56,189,248,.05)',border:'1px solid rgba(56,189,248,.12)',borderRadius:9,letterSpacing:'.06em',fontFamily:"'Space Mono',monospace" }}>{t}</div>
                 ))}
               </div>

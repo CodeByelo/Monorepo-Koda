@@ -7,7 +7,7 @@ import { useAuth } from '../../hooks/useAuth';
 // import { login } from '../../lib/api'; // Eliminado: Usaremos useAuth
 
 // ====================================================================
-// SPLASH SCREEN - CORPOEELEC INDUSTRIAL
+// SPLASH SCREEN
 // ====================================================================
 const SplashScreen = ({ onComplete }) => {
   const [progress, setProgress] = useState(0);

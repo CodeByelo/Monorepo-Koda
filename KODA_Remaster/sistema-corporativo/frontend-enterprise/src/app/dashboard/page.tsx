@@ -98,7 +98,6 @@ import {
   getAnnouncement,
   getOrgStructure,
   getOrgManagementDetails,
-  saveOrgStructure,
   saveOrgManagementDetails,
   createSecurityLog,
 } from "../../lib/api";
@@ -320,49 +319,35 @@ const ORG_ICONS: Record<string, React.ElementType> = {
   Factory,
 };
 
+// Generic, non-company-specific starter structure shown only until a tenant
+// configures its own org chart. This is intentionally NOT auto-persisted —
+// see the org structure loading effect below.
 const DEFAULT_ORG_STRUCTURE: OrgCategory[] = [
   {
-    category: "I. Alta Dirección y Control",
+    category: "I. Dirección General",
     icon: "Shield",
     items: [
       "Gerencia General",
       "Auditoría Interna",
       "Consultoría Jurídica",
-      "Gerencia Nacional de Planificación y Presupuesto",
     ],
   },
   {
-    category: "II. Gestión Administrativa",
+    category: "II. Administración",
     icon: "Briefcase",
     items: [
-      "Gerencia Nacional de Administración",
-      "Gerencia Nacional de Gestión Humana",
-      "Gerencia Nacional de Tecnologías de la Información y la Comunicación",
-      "Gerencia Nacional de Tecnologías de Proyectos",
+      "Administración y Finanzas",
+      "Gestión Humana",
+      "Tecnología de la Información",
     ],
   },
   {
-    category: "III. Gestión Operativa y ASHO",
+    category: "III. Operaciones",
     icon: "Zap",
     items: [
-      "Gerencia Nacional de Adecuaciones y Mejoras",
-      "Gerencia Nacional de Asho",
-      "Gerencia Nacional de Atención al Ciudadano",
-      "Gerencia de Comercialización",
+      "Operaciones",
+      "Atención al Cliente",
     ],
-  },
-  {
-    category: "IV. Energía y Comunidad",
-    icon: "Users",
-    items: [
-      "Gerencia Nacional de Energía Alternativa y Eficiencia Energética",
-      "Gerencia Nacional de Gestión Comunal",
-    ],
-  },
-  {
-    category: "V. Filiales y Unidades",
-    icon: "Factory",
-    items: ["Unerven", "Vietven"],
   },
 ];
 
@@ -382,34 +367,39 @@ const MANAGEMENT_DETAILS: Record<string, string[]> = {
     "Elaboración de informes de gestión de riesgos.",
   ],
   "Consultoría Jurídica": [
-    "Asesoría legal a la presidencia y Gerencias.",
+    "Asesoría legal a la dirección y Gerencias.",
     "Revisión y redacción de contratos y convenios.",
     "Defensa judicial y extrajudicial de la institución.",
     "Emitir dictámenes jurídicos vinculantes.",
   ],
-  "Gerencia Nacional de Planificación y Presupuesto": [
-    "Formulación del Plan Operativo Anual (POA).",
-    "Control y seguimiento de la ejecución presupuestaria.",
-    "Evaluación de indicadores de gestión.",
-    "Proyección de escenarios financieros a mediano plazo.",
-  ],
-  "Gerencia Nacional de Administración": [
+  "Administración y Finanzas": [
     "Gestión de recursos financieros y tesorería.",
     "Administración de servicios generales.",
     "Procesamiento de pagos a proveedores.",
     "Contabilización de operaciones financieras.",
   ],
-  "Gerencia Nacional de Gestión Humana": [
+  "Gestión Humana": [
     "Reclutamiento y selección de personal.",
     "Gestión de nómina y beneficios laborales.",
     "Planificación de capacitación y desarrollo.",
     "Evaluación del desempeño del personal.",
   ],
-  "Gerencia Nacional de Tecnologías de la Información y la Comunicación": [
+  "Tecnología de la Información": [
     "Mantenimiento de infraestructura tecnológica.",
     "Desarrollo y soporte de sistemas de información.",
     "Garantizar la seguridad de la información.",
     "Soporte técnico a usuarios finales.",
+  ],
+  "Operaciones": [
+    "Ejecución y coordinación de procesos operativos.",
+    "Seguimiento de indicadores de desempeño.",
+    "Cumplimiento de metas trimestrales asignadas.",
+    "Seguimiento de planes de mejora continua.",
+  ],
+  "Atención al Cliente": [
+    "Gestión de solicitudes y reclamos de clientes.",
+    "Seguimiento a la satisfacción del cliente.",
+    "Coordinación con las demás Gerencias para resolución de casos.",
   ],
   "Gestión Directa": [
     "Acceso a la terminal de comandos del servidor.",
@@ -431,25 +421,6 @@ const getDefaultFunctions = (name: string) => [
   "Reporte de indicadores de gestión.",
   "Cumplimiento de metas trimestrales asignadas.",
   "Seguimiento de planes de mejora continua.",
-];
-
-const PLANT_METRICS = [
-  {
-    name: "Planta Luis Zambrano",
-    availability: 95,
-    trend: "+2%",
-    status: "optimal",
-  },
-  {
-    name: "Planta Metrocontadores",
-    availability: 88,
-    trend: "-1%",
-    status: "warning",
-  },
-  { name: "Planta Tanques", availability: 92, trend: "+5%", status: "optimal" },
-  { name: "Centro Textil", availability: 85, trend: "-3%", status: "warning" },
-  { name: "UNERVEN", availability: 90, trend: "+1%", status: "optimal" },
-  { name: "VIETVEN", availability: 87, trend: "+4%", status: "optimal" },
 ];
 
 const AUDIT_ALERTS: AuditAlert[] = [
@@ -2585,9 +2556,6 @@ const DocumentManager: React.FC<{
         : docView === "sent"
           ? "Enviados"
           : "Auditar Mensajes";
-
-    const MY_DEPT =
-      "Gerencia Nacional de Tecnologías de la Información y la Comunicación";
 
     const currentUserId = user?.id ? String(user.id) : "";
 
@@ -4774,9 +4742,7 @@ export default function Dashboard() {
         id: t.id,
         title: t.titulo || "Sin Título",
         description: t.descripcion || "",
-        area:
-          t.area ||
-          "Gerencia Nacional de Tecnologías de la Información y la Comunicación",
+        area: t.area || "Sin Asignar",
         creatorDept: t.solicitante_gerencia || "Sin Asignar",
         priority: (String(t.prioridad || "media").toUpperCase() as Ticket["priority"]),
         status:
@@ -5010,16 +4976,12 @@ export default function Dashboard() {
       }
 
       if (source === "catalog") {
-        // Always show the proper grouped structure visually
+        // Tenant has not configured its own org structure yet: show the
+        // generic starter structure for display purposes only. Do NOT
+        // auto-persist it — a new tenant must not have any org structure
+        // written to its database until the user explicitly creates/edits
+        // one through the real UI flow (see SecurityModule / setOrgStructure).
         data = JSON.parse(JSON.stringify(DEFAULT_ORG_STRUCTURE));
-        if (canEditOrgStructure) {
-          try {
-            await saveOrgStructure(DEFAULT_ORG_STRUCTURE);
-            source = "seeded";
-          } catch (e) {
-            console.error("No se pudo inicializar la estructura organizativa", e);
-          }
-        }
       }
 
       if (userRole === "Desarrollador" && !data.some((g) => g.category?.includes("Desarrollo"))) {
@@ -5036,7 +4998,7 @@ export default function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [userRole, user?.id, canEditOrgStructure]);
+  }, [userRole, user?.id]);
 
 
   // ESTADO DE ANUNCIOS (Dashboard General)

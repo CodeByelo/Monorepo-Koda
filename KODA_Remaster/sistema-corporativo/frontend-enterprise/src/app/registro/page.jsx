@@ -44,7 +44,7 @@ const NeonCheckbox = ({ checked, onChange }) => (
 );
 
 // ====================================================================
-// SPLASH SCREEN - CORPOEELEC INDUSTRIAL
+// SPLASH SCREEN
 // ====================================================================
 const SplashScreen = ({ onComplete }) => {
   const [progress, setProgress] = useState(0);
@@ -728,22 +728,17 @@ const RegistroForm = () => {
                 error={errors.gerencia}
                 showError={!!errors.gerencia}
                 options={gerenciaOptions.length > 0 ? gerenciaOptions : [
+                  // Generic, non-company-specific placeholder shown only when
+                  // no tenant-specific gerencias were returned by the API or
+                  // cached locally. Do not hardcode a real company's org chart here.
                   'Gerencia General',
-                  'Auditoria Interna',
+                  'Auditoría Interna',
                   'Consultoría Jurídica',
-                  'Gerencia Nacional de Planificación y presupuesto',
-                  'Gerencia Nacional de Administración',
-                  'Gerencia Nacional de Gestión Humana',
-                  'Gerencia Nacional de Tecnologías de la Información y la Comunicación',
-                  'Gerencia Nacional de Tecnologías de Proyectos',
-                  'Gerencia Nacional de Adecuaciones y Mejoras',
-                  'Gerencia Nacional de Asho',
-                  'Gerencia Nacional de Atención al Ciudadano',
-                  'Gerencia de Comercialización',
-                  'Gerencia Nacional de Energía Alternativa y Eficiencia Energética',
-                  'Gerencia Nacional de Gestión Communal',
-                  'Unerven',
-                  'Vietven'
+                  'Administración y Finanzas',
+                  'Gestión Humana',
+                  'Tecnología de la Información',
+                  'Operaciones',
+                  'Atención al Cliente',
                 ]}
                 required
               />
