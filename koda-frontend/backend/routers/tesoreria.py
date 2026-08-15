@@ -10,11 +10,10 @@ from backend.models.erp_extended import (
     CuentaPorCobrar,
     CuentaPorPagar,
     MovimientoBancario,
-    RetencionIVA,
-    RetencionISLR
 )
+from backend.routers.modulos_ext import calcular_reserva_fiscal
 
-from backend.utils.auth import get_current_user
+from backend.core.security import get_current_user
 
 router = APIRouter(prefix="/tesoreria", tags=["Tesoreria"])
 logger = logging.getLogger(__name__)
@@ -64,15 +63,9 @@ def get_treasury_dashboard(db: Session = Depends(get_db), current_user = Depends
         })
     
     # 2. Reserva Fiscal (IVA/ISLR retenido)
-    ret_iva = db.query(func.sum(RetencionIVA.monto_usd)).filter(
-        RetencionIVA.estado == "PENDIENTE",
-        RetencionIVA.tenant_id == current_user.tenant_id
-    ).scalar()
-    ret_islr = db.query(func.sum(RetencionISLR.monto_usd)).filter(
-        RetencionISLR.estado == "PENDIENTE",
-        RetencionISLR.tenant_id == current_user.tenant_id
-    ).scalar()
-    reserva_fiscal = to_float(ret_iva) + to_float(ret_islr)
+    # Delegates to the single source of truth in modulos_ext.py so this figure
+    # never silently diverges from the Pagos/Compras dashboards.
+    reserva_fiscal = calcular_reserva_fiscal(db, current_user.tenant_id)
 
     # 3. Efectivo en Tránsito
     efectivo_transito = db.query(func.sum(MovimientoBancario.monto_usd)).filter(
