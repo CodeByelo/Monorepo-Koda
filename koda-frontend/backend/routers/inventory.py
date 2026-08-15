@@ -7,10 +7,12 @@ from decimal import Decimal, ROUND_HALF_UP
 from backend.core.database import get_db
 from backend.models.operations import Producto, KardexMovimiento, AjusteInventario
 from backend.models.core import TasaCambio
+from backend.models.erp_extended import StockPorAlmacen
 from backend.models.accounting import AsientoContable, AsientoDetalle
 from backend.schemas.operations import AjusteInventarioCreate, AjusteInventarioResponse, KardexMovimientoResponse
 from backend.core.security import get_current_user, require_role
 from backend.utils.idempotency import require_idempotency
+from backend.utils.helpers import get_almacen_principal_id
 
 router = APIRouter(prefix="/inventario", tags=["Inventario y Almacén"])
 
@@ -36,6 +38,7 @@ def proponer_ajuste(
         producto_id=ajuste_in.producto_id,
         cantidad=ajuste_in.cantidad,
         motivo=ajuste_in.motivo,
+        almacen_id=ajuste_in.almacen_id,
         estado="PENDIENTE",
         tenant_id=current_user.tenant_id
     )
@@ -86,7 +89,17 @@ def aprobar_ajuste(
 
     if producto.stock + ajuste.cantidad < 0:
         raise HTTPException(status_code=400, detail="El ajuste dejaría el stock en negativo.")
-        
+
+    # Almacén donde se aplica físicamente el ajuste: el indicado al proponer,
+    # o el almacén "principal" del tenant como fallback para no dejar
+    # StockPorAlmacen sin actualizar.
+    almacen_id = ajuste.almacen_id or get_almacen_principal_id(db, current_user.tenant_id)
+    if not almacen_id:
+        raise HTTPException(
+            status_code=400,
+            detail="No hay ningún almacén configurado para el tenant. Cree un almacén antes de aprobar ajustes."
+        )
+
     # Extraer la tasa de cambio activa para valorar el asiento contable en Bolívares
     tasa_activa = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
     if not tasa_activa:
@@ -103,6 +116,30 @@ def aprobar_ajuste(
 
     # 2. Impactar Stock Físico
     producto.stock += ajuste.cantidad
+
+    # 2b. Reflejar el ajuste en StockPorAlmacen para el almacén afectado
+    # (mismo patrón de lock+update-o-create que recibir_transferencia). No
+    # bloqueamos si la fila del almacén específico quedara negativa: el
+    # chequeo de negatividad de arriba ya protege el total global, y algunas
+    # filas por-almacén heredadas de antes de esta migración pueden no
+    # reflejar aún el histórico completo. Esa divergencia puntual se
+    # autocorrige a medida que se registran más movimientos por-almacén.
+    almacen_stock = db.query(StockPorAlmacen).filter(
+        StockPorAlmacen.producto_id == producto.id,
+        StockPorAlmacen.almacen_id == almacen_id,
+        StockPorAlmacen.tenant_id == current_user.tenant_id
+    ).with_for_update().first()
+
+    if almacen_stock:
+        almacen_stock.cantidad += ajuste.cantidad
+    else:
+        almacen_stock = StockPorAlmacen(
+            producto_id=producto.id,
+            almacen_id=almacen_id,
+            cantidad=max(ajuste.cantidad, Decimal("0.00")),
+            tenant_id=current_user.tenant_id
+        )
+        db.add(almacen_stock)
 
     # 3. Grabar en Libro Mayor de Inventario (Kardex)
     tipo_mov = "Ajuste_Entrada" if ajuste.cantidad > 0 else "Ajuste_Salida"

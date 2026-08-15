@@ -133,6 +133,11 @@ class AjusteInventarioCreate(BaseModel):
     producto_id: int
     cantidad: int = Field(..., description="Cantidad a ajustar (positiva para entradas, negativa para salidas/mermas)")
     motivo: str = Field(..., min_length=5)
+    # Almacén donde se aplica físicamente el ajuste. Opcional por
+    # compatibilidad con llamadores existentes: si se omite, el backend usa
+    # el almacén "principal" del tenant al momento de aprobar (ver
+    # backend.utils.helpers.get_almacen_principal_id).
+    almacen_id: Optional[int] = None
 
 class AjusteInventarioResponse(BaseModel):
     id: int
@@ -140,6 +145,7 @@ class AjusteInventarioResponse(BaseModel):
     cantidad: int
     motivo: str
     estado: str
+    almacen_id: Optional[int] = None
     fecha_solicitud: datetime
     fecha_aprobacion: Optional[datetime] = None
 
@@ -250,6 +256,11 @@ class RecepcionStockCreate(BaseModel):
     producto_id: int
     cantidad: Decimal = Field(..., gt=0)
     costo_factura: Decimal = Field(..., ge=0)
+    # Almacén que recibe la mercancía. Opcional por compatibilidad con
+    # llamadores existentes que aún no informan almacén: si se omite, el
+    # backend usa el almacén "principal" del tenant (ver
+    # backend.utils.helpers.get_almacen_principal_id).
+    almacen_id: Optional[int] = None
 
 class RecepcionStockResponse(BaseModel):
     id: int
@@ -269,3 +280,5 @@ class DevolucionProveedorCreate(BaseModel):
     factura_id: Optional[int] = None
     motivo: str
     monto_usd: Decimal
+    producto_id: Optional[int] = None
+    cantidad: Optional[Decimal] = Field(default=None, gt=0)

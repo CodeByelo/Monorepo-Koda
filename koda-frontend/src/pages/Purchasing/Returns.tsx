@@ -10,7 +10,8 @@ const Returns = () => {
   const [returns, setReturns] = useState<any[]>([]);
   const [proveedores, setProveedores] = useState<any[]>([]);
   const [facturas, setFacturas] = useState<any[]>([]);
-  
+  const [productos, setProductos] = useState<any[]>([]);
+
   const [isLoading, setIsLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [showActionModal, setShowActionModal] = useState<'VINCULAR' | 'APROBAR' | null>(null);
@@ -21,7 +22,9 @@ const Returns = () => {
     proveedorId: '',
     facturaId: '',
     motivo: '',
-    montoUsd: ''
+    montoUsd: '',
+    productoId: '',
+    cantidad: ''
   });
 
   const fetchData = () => {
@@ -29,12 +32,14 @@ const Returns = () => {
     Promise.all([
       api.get<any[]>('/compras/devoluciones').catch(() => ({ data: [] })),
       api.get<any[]>('/proveedores').catch(() => ({ data: [] })),
-      api.get<any[]>('/compras/facturas').catch(() => ({ data: [] }))
+      api.get<any[]>('/compras/facturas').catch(() => ({ data: [] })),
+      api.get<any[]>('/productos').catch(() => ({ data: [] }))
     ])
-      .then(([retRes, provRes, facRes]: [any, any, any]) => {
+      .then(([retRes, provRes, facRes, prodRes]: [any, any, any, any]) => {
         setReturns(retRes.data || retRes || []);
         setProveedores(provRes.data || provRes || []);
         setFacturas(facRes.data || facRes || []);
+        setProductos(prodRes.data || prodRes || []);
       })
       .catch((error) => console.error('Error fetching data:', error))
       .finally(() => setIsLoading(false));
@@ -65,24 +70,33 @@ const Returns = () => {
       }));
       return;
     }
-    
+    if (formData.productoId && !formData.cantidad) {
+      window.dispatchEvent(new CustomEvent('koda-notification', {
+        detail: { type: 'error', message: "Indica la cantidad devuelta del producto seleccionado" }
+      }));
+      return;
+    }
+
+
     setIsProcessing(true);
     try {
       await api.post('/compras/devoluciones', {
         proveedor_id: parseInt(formData.proveedorId),
         factura_id: formData.facturaId ? parseInt(formData.facturaId) : null,
         motivo: formData.motivo,
-        monto_usd: parseFloat(formData.montoUsd)
+        monto_usd: parseFloat(formData.montoUsd),
+        producto_id: formData.productoId ? parseInt(formData.productoId) : null,
+        cantidad: formData.productoId && formData.cantidad ? parseFloat(formData.cantidad) : null
       });
-      
+
       // Dispatch success notification if any
       const event = new CustomEvent('koda-notification', {
         detail: { type: 'success', message: 'Devolución registrada correctamente' }
       });
       window.dispatchEvent(event);
-      
+
       setShowModal(false);
-      setFormData({ proveedorId: '', facturaId: '', motivo: '', montoUsd: '' });
+      setFormData({ proveedorId: '', facturaId: '', motivo: '', montoUsd: '', productoId: '', cantidad: '' });
       fetchData(); // reload
     } catch (error: any) {
       window.dispatchEvent(new CustomEvent('koda-notification', {
@@ -317,6 +331,32 @@ const Returns = () => {
                     <option key={f.id} value={f.id}>{f.numero_factura} ({f.fecha || f.date})</option>
                   ))}
                 </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Producto Devuelto (Opcional)</label>
+                <select
+                  value={formData.productoId}
+                  onChange={e => setFormData({...formData, productoId: e.target.value})}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold uppercase focus:outline-none focus:border-[#0b5156]"
+                >
+                  <option value="">Sin afectar inventario</option>
+                  {productos.map(p => (
+                    <option key={p.id} value={p.id}>{p.nombre} (Stock: {p.stock || 0})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Cantidad Devuelta</label>
+                <input
+                  type="number"
+                  value={formData.cantidad}
+                  onChange={e => setFormData({...formData, cantidad: e.target.value})}
+                  placeholder="0"
+                  disabled={!formData.productoId}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-[#0b5156] disabled:opacity-50"
+                />
               </div>
 
               <div className="space-y-2 col-span-2">

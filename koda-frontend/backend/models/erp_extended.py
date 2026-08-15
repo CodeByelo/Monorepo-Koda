@@ -432,8 +432,15 @@ class RequisicionCompra(Base):
     monto_estimado_usd = Column(Numeric(15, 2), nullable=False)
     tasa_cambio_bs = Column(Numeric(10, 4), nullable=False)
     prioridad = Column(String(20), default="NORMAL", nullable=False)
-    estado = Column(String(20), default="PENDIENTE", nullable=False)
+    estado = Column(String(20), default="PENDIENTE", nullable=False)  # PENDIENTE, APROBADA, RECHAZADA
     fecha = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    # Rastro de auditoría maker-checker (ver sql/017_requisicion_compra_aprobacion.sql).
+    # Nullable: filas existentes y requisiciones aún PENDIENTE no tienen decisión.
+    decidido_por = Column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=True)
+    fecha_decision = Column(DateTime, nullable=True)
+    motivo_rechazo = Column(String(500), nullable=True)
+
+    decidido_por_user = relationship("Profile", foreign_keys=[decidido_por])
 
     @property
     def monto_estimado(self):
@@ -801,6 +808,12 @@ class DevolucionProveedor(Base):
     motivo = Column(String(500), nullable=False)
     monto_usd = Column(Numeric(15, 2), nullable=False)
     estado = Column(String(50), default="EN PROCESO", nullable=False)
+    # Producto/cantidad devueltos físicamente al proveedor. Nullable por
+    # compatibilidad con filas existentes (creadas antes de esta migración,
+    # ver sql/016_devolucion_proveedor_stock.sql) que no tienen esta
+    # información y por tanto no participan del impacto de stock.
+    producto_id = Column(Integer, ForeignKey("public.productos.id"), nullable=True)
+    cantidad = Column(Numeric(15, 2), nullable=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

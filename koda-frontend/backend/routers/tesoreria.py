@@ -138,3 +138,11 @@ def get_treasury_dashboard(db: Session = Depends(get_db), current_user = Depends
         "bancos": bancos_lista,
         "alertas": alertas_lista
     }
+
+# NOTE: this module's `router` is NOT included anywhere in backend/main.py.
+# The live "/tesoreria/*" prefix actually served by the app is
+# `modulos_ext.tesoreria_router` (see backend/routers/modulos_ext.py).
+# New CxP endpoints were added there instead — see "CUENTAS POR PAGAR" section
+# in modulos_ext.py — so they are actually reachable. This file appears to be
+# an orphaned/duplicate implementation left over from a prior refactor and is
+# worth reconciling (either wire it up in main.py, or remove it) separately.

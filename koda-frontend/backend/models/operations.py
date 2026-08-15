@@ -147,6 +147,11 @@ class AjusteInventario(Base):
     cantidad = Column(Numeric(15, 2), nullable=False)  # Positivo (Entrada) o Negativo (Merma/Salida)
     motivo = Column(String(255), nullable=False)
     estado = Column(String(20), default="PENDIENTE", nullable=False) # PENDIENTE, APROBADO, RECHAZADO
+    # Almacén donde se aplica físicamente el ajuste (StockPorAlmacen). Nullable
+    # por compatibilidad con filas existentes y solicitudes que no lo indican;
+    # en ese caso aprobar_ajuste() resuelve el almacén "principal" del tenant
+    # al momento de aprobar (ver backend.utils.helpers.get_almacen_principal_id).
+    almacen_id = Column(Integer, ForeignKey("public.almacenes.id"), nullable=True)
     fecha_solicitud = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     fecha_aprobacion = Column(DateTime, nullable=True)
 

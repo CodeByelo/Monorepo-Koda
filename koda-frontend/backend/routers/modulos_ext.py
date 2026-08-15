@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime, date, timezone, timedelta
 from decimal import Decimal
+from typing import Optional
 
 from backend.core.database import get_db
 from backend.models.operations import (
@@ -21,9 +22,9 @@ from backend.schemas.operations import (
     CotizacionCreate, CotizacionStatusUpdate, CompraCreate, RecepcionStockCreate, RecepcionStockResponse,
     DevolucionProveedorCreate, NotaEntregaCreate, NotaEntregaEstadoUpdate
 )
-from backend.core.security import get_current_user
+from backend.core.security import get_current_user, require_role
 from backend.models.core import TasaCambio
-from backend.utils.helpers import to_float, periodo_rango, ventas_periodo, tasa_actual, margen_bruto_pct
+from backend.utils.helpers import to_float, periodo_rango, ventas_periodo, tasa_actual, margen_bruto_pct, get_almacen_principal_id, verificar_periodo_abierto
 
 def _as_aware(dt):
     """Ensure a datetime is timezone-aware (UTC). Handles naive datetimes from DB."""
@@ -218,11 +219,28 @@ def listar_compras(db: Session = Depends(get_db), current_user = Depends(get_cur
 
 @compras_router.get("/ordenes")
 def ordenes_compra(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    # "Historial de Órdenes de Compra" (PurchaseOrders.tsx) necesita ver
+    # también las ANULADA para ser un historial real, no solo las abiertas.
     compras = db.query(Compra).filter(
-        Compra.estado.in_(["PENDIENTE", "ACTIVA"]),
         Compra.tenant_id == current_user.tenant_id
-    ).all()
-    return [{"id": c.numero_factura, "proveedor": c.proveedor.nombre if c.proveedor else "", "total": to_float(c.total), "estado": c.estado} for c in compras]
+    ).order_by(Compra.fecha.desc()).all()
+    return [
+        {
+            # "id" se mantiene como numero_factura por compatibilidad de
+            # visualización (columna N° Orden); "compra_id" es el id numérico
+            # real de la fila, necesario para autorizar/recibir.
+            "id": c.numero_factura,
+            "compra_id": c.id,
+            "date": c.fecha.strftime("%d/%m/%Y") if c.fecha else "",
+            "vendor": {"nombre": c.proveedor.nombre if c.proveedor else "", "rif": c.proveedor.rif if c.proveedor else ""},
+            "proveedor": c.proveedor.nombre if c.proveedor else "",
+            "amount": to_float(c.total_usd),
+            "total": to_float(c.total_usd),
+            "status": c.estado,
+            "estado": c.estado,
+        }
+        for c in compras
+    ]
 
 
 @compras_router.get("/facturas")
@@ -251,7 +269,18 @@ def aprobaciones(db: Session = Depends(get_db), current_user = Depends(get_curre
         RequisicionCompra.estado == "PENDIENTE",
         RequisicionCompra.tenant_id == current_user.tenant_id
     ).all()
-    return [{"id": r.numero, "solicitante": r.solicitante, "monto": to_float(r.monto_estimado), "estado": r.estado, "prioridad": r.prioridad} for r in rows]
+    # "id" se mantiene como el numero (REQ-xxxxxxxx) por compatibilidad con
+    # el display existente en el frontend; "requisicion_id" es el id numérico
+    # real de la fila, necesario para invocar aprobar/rechazar.
+    return [{
+        "id": r.numero,
+        "requisicion_id": r.id,
+        "numero": r.numero,
+        "solicitante": r.solicitante,
+        "monto": to_float(r.monto_estimado),
+        "estado": r.estado,
+        "prioridad": r.prioridad
+    } for r in rows]
 
 
 @compras_router.get("/requisiciones")
@@ -310,6 +339,63 @@ def create_requisicion(req: RequisicionCreate, db: Session = Depends(get_db), cu
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class RequisicionRechazoInput(BaseModel):
+    motivo: Optional[str] = None
+
+
+@compras_router.post("/requisiciones/{requisicion_id}/aprobar")
+def aprobar_requisicion(
+    requisicion_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_role(["Admin", "Gerente"]))  # CHECKER: maker-checker, ver aprobar_ajuste en inventory.py
+):
+    """
+    Paso 2 (Checker) del flujo maker-checker de requisiciones: cualquier
+    usuario puede registrar una requisición (create_requisicion, "maker"),
+    pero solo Admin/Gerente puede aprobarla. Deja rastro de auditoría
+    (decidido_por/fecha_decision) de quién tomó la decisión y cuándo.
+    """
+    req = db.query(RequisicionCompra).filter(
+        RequisicionCompra.id == requisicion_id,
+        RequisicionCompra.tenant_id == current_user.tenant_id
+    ).with_for_update().first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Requisición no encontrada")
+    if req.estado != "PENDIENTE":
+        raise HTTPException(status_code=400, detail=f"La requisición ya fue procesada (estado actual: {req.estado}).")
+
+    req.estado = "APROBADA"
+    req.decidido_por = current_user.id
+    req.fecha_decision = datetime.now(timezone.utc)
+    db.commit()
+    return {"ok": True, "id": req.id, "numero": req.numero, "estado": req.estado}
+
+
+@compras_router.post("/requisiciones/{requisicion_id}/rechazar")
+def rechazar_requisicion(
+    requisicion_id: int,
+    payload: RequisicionRechazoInput,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_role(["Admin", "Gerente"]))  # CHECKER
+):
+    """Paso 2 (Checker) alternativo: rechaza la requisición con motivo opcional."""
+    req = db.query(RequisicionCompra).filter(
+        RequisicionCompra.id == requisicion_id,
+        RequisicionCompra.tenant_id == current_user.tenant_id
+    ).with_for_update().first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Requisición no encontrada")
+    if req.estado != "PENDIENTE":
+        raise HTTPException(status_code=400, detail=f"La requisición ya fue procesada (estado actual: {req.estado}).")
+
+    req.estado = "RECHAZADA"
+    req.decidido_por = current_user.id
+    req.fecha_decision = datetime.now(timezone.utc)
+    req.motivo_rechazo = payload.motivo
+    db.commit()
+    return {"ok": True, "id": req.id, "numero": req.numero, "estado": req.estado}
+
+
 @compras_router.get("/recepciones")
 def recepciones(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     recs = db.query(RecepcionStock).filter(RecepcionStock.tenant_id == current_user.tenant_id).order_by(RecepcionStock.fecha.desc()).all()
@@ -334,30 +420,62 @@ def procesar_recepcion(
     current_user = Depends(get_current_user)
 ):
     try:
+        # Bloqueamos la fila del producto para evitar condiciones de carrera
+        # entre recepciones concurrentes del mismo producto (mismo patrón que
+        # recibir_transferencia).
         producto = db.query(Producto).filter(
             Producto.id == req.producto_id,
             Producto.tenant_id == current_user.tenant_id
-        ).first()
+        ).with_for_update().first()
         if not producto:
             raise HTTPException(status_code=404, detail="Producto no encontrado")
-        
+
+        # Almacén que recibe la mercancía: el indicado explícitamente, o el
+        # almacén "principal" del tenant como fallback para no dejar
+        # StockPorAlmacen sin actualizar.
+        almacen_id = req.almacen_id or get_almacen_principal_id(db, current_user.tenant_id)
+        if not almacen_id:
+            raise HTTPException(
+                status_code=400,
+                detail="No hay ningún almacén configurado para el tenant. Cree un almacén antes de registrar recepciones."
+            )
+
         # Calcular nuevo CPP
         stock_actual = producto.stock
         costo_actual = producto.costo_usd
-        
+
         nueva_cantidad = req.cantidad
         nuevo_costo = req.costo_factura
-        
+
         total_stock = stock_actual + nueva_cantidad
         if total_stock > 0:
             cpp = ((stock_actual * costo_actual) + (nueva_cantidad * nuevo_costo)) / total_stock
         else:
             cpp = nuevo_costo
-            
+
         # Actualizar Producto
         producto.stock += nueva_cantidad
         producto.costo_usd = cpp
-        
+
+        # Reflejar la entrada en StockPorAlmacen para el almacén receptor
+        # (mismo patrón de lock+update-o-create que recibir_transferencia).
+        destino_stock = db.query(StockPorAlmacen).filter(
+            StockPorAlmacen.producto_id == req.producto_id,
+            StockPorAlmacen.almacen_id == almacen_id,
+            StockPorAlmacen.tenant_id == current_user.tenant_id
+        ).with_for_update().first()
+
+        if destino_stock:
+            destino_stock.cantidad += nueva_cantidad
+        else:
+            destino_stock = StockPorAlmacen(
+                producto_id=req.producto_id,
+                almacen_id=almacen_id,
+                cantidad=nueva_cantidad,
+                tenant_id=current_user.tenant_id
+            )
+            db.add(destino_stock)
+
         # Crear Hoja de Recepción
         count = db.query(RecepcionStock).filter(RecepcionStock.tenant_id == current_user.tenant_id).count() + 1
         hoja_id = f"REC-{count:04d}"
@@ -393,13 +511,20 @@ def devoluciones(db: Session = Depends(get_db), current_user = Depends(get_curre
             Proveedor.id == d.proveedor_id,
             Proveedor.tenant_id == current_user.tenant_id
         ).first()
+        producto = db.query(Producto).filter(
+            Producto.id == d.producto_id,
+            Producto.tenant_id == current_user.tenant_id
+        ).first() if d.producto_id else None
         res.append({
             "id": d.id,
             "numero_devolucion": d.numero_devolucion,
             "fecha": d.fecha.strftime("%Y-%m-%d") if d.fecha else "",
             "proveedor": prov.nombre if prov else "Desconocido",
             "monto": float(d.monto_usd),
-            "estado": d.estado
+            "estado": d.estado,
+            "producto_id": d.producto_id,
+            "producto": producto.nombre if producto else None,
+            "cantidad": float(d.cantidad) if d.cantidad is not None else None
         })
     return res
 
@@ -416,21 +541,44 @@ def crear_devolucion(
         ).first()
         if not prov:
             raise HTTPException(status_code=404, detail="Proveedor no encontrado")
-            
+
+        # Si se indica producto/cantidad, la devolución sí representa una
+        # salida física de mercancía: se bloquea la fila del producto (mismo
+        # patrón que aprobar_ajuste/procesar_recepcion) y se descuenta el
+        # stock, validando que no quede negativo.
+        producto = None
+        if dev_in.producto_id is not None:
+            if not dev_in.cantidad or dev_in.cantidad <= 0:
+                raise HTTPException(status_code=400, detail="Debe indicar una cantidad mayor a cero cuando se especifica un producto.")
+            producto = db.query(Producto).filter(
+                Producto.id == dev_in.producto_id,
+                Producto.tenant_id == current_user.tenant_id
+            ).with_for_update().first()
+            if not producto:
+                raise HTTPException(status_code=404, detail="Producto no encontrado")
+            if producto.stock - dev_in.cantidad < 0:
+                raise HTTPException(status_code=400, detail="La devolución dejaría el stock del producto en negativo.")
+
         count = db.query(DevolucionProveedor).filter(DevolucionProveedor.tenant_id == current_user.tenant_id).count() + 1
         numero = f"DEV-{count:04d}"
-        
+
         db_dev = DevolucionProveedor(
             numero_devolucion=numero,
             proveedor_id=dev_in.proveedor_id,
             factura_id=dev_in.factura_id,
             motivo=dev_in.motivo,
             monto_usd=dev_in.monto_usd,
+            producto_id=dev_in.producto_id,
+            cantidad=dev_in.cantidad,
             estado="EN PROCESO",
             fecha=datetime.now(timezone.utc),
             tenant_id=current_user.tenant_id
         )
         db.add(db_dev)
+
+        if producto is not None:
+            producto.stock -= dev_in.cantidad
+
         db.commit()
         return {"ok": True, "numero_devolucion": numero}
     except Exception as e:
@@ -493,6 +641,11 @@ def crear_compra(
                 status_code=400,
                 detail=f"La factura N° {compra_in.numero_factura} ya está registrada en el sistema."
             )
+
+        # Bloqueo de período: no permitir registrar compras con fecha_emision
+        # dentro de un período contable ya cerrado (mismo chequeo que usa la
+        # creación manual de asientos en contabilidad_ext.py).
+        verificar_periodo_abierto(db, current_user.tenant_id, compra_in.fecha_emision, contexto="compras")
 
         # Crear Compra
         nueva_compra = Compra(
@@ -584,6 +737,30 @@ def crear_compra(
             detail=f"Error al registrar la compra: {str(e)}"
         )
 
+
+@compras_router.post("/{compra_id}/autorizar")
+def autorizar_compra(
+    compra_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_role(["Admin", "Gerente"]))  # CHECKER: mismo criterio que aprobar_ajuste
+):
+    """
+    Autoriza una orden de compra que quedó en estado PENDIENTE (por ejemplo,
+    importada o registrada manualmente sin autorización previa), pasándola a
+    ACTIVA. No aplica a compras ya ACTIVA/ANULADA.
+    """
+    compra = db.query(Compra).filter(
+        Compra.id == compra_id,
+        Compra.tenant_id == current_user.tenant_id
+    ).with_for_update().first()
+    if not compra:
+        raise HTTPException(status_code=404, detail="Orden de compra no encontrada")
+    if compra.estado != "PENDIENTE":
+        raise HTTPException(status_code=400, detail=f"Solo se pueden autorizar órdenes PENDIENTE (estado actual: {compra.estado}).")
+
+    compra.estado = "ACTIVA"
+    db.commit()
+    return {"ok": True, "id": compra.id, "estado": compra.estado}
 
 
 @compras_router.get("/analisis-costos")
@@ -1117,51 +1294,6 @@ def cuentas_cobrar(db: Session = Depends(get_db), current_user = Depends(get_cur
     ]
 
 
-@cobranzas_router.get("/erosion")
-def erosion_cartera(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    cxc = db.query(CuentaPorCobrar).filter(
-        CuentaPorCobrar.estado != "PAGADA",
-        CuentaPorCobrar.tenant_id == current_user.tenant_id
-    ).all()
-    if not cxc:
-        return {
-            "protegida": 100.0,
-            "expuesta": 0.0,
-            "riesgo_detectado": False,
-            "tasa_recuperacion": 100.0,
-            "total_usd": 0.0,
-            "protegido_usd": 0.0,
-            "expuesto_usd": 0.0
-        }
-    
-    total_pend = 0.0
-    protegido_usd = 0.0
-    expuesto_usd = 0.0
-    
-    for r in cxc:
-        saldo = to_float(r.monto_total_usd - r.monto_pagado_usd)
-        total_pend += saldo
-        # Si la venta asociada indica pago en Divisa o Efectivo, se considera protegida
-        metodo = r.venta.metodo_pago if r.venta else "Divisa"
-        if metodo in ["Divisa", "Efectivo"]:
-            protegido_usd += saldo
-        else:
-            expuesto_usd += saldo
-            
-    pct_protegida = (protegido_usd / total_pend) * 100 if total_pend > 0 else 100.0
-    pct_expuesta = (expuesto_usd / total_pend) * 100 if total_pend > 0 else 0.0
-    
-    return {
-        "protegida": round(pct_protegida, 1),
-        "expuesta": round(pct_expuesta, 1),
-        "riesgo_detectado": pct_expuesta > 30.0,
-        "tasa_recuperacion": 92.5,
-        "total_usd": round(total_pend, 2),
-        "protegido_usd": round(protegido_usd, 2),
-        "expuesto_usd": round(expuesto_usd, 2)
-    }
-
-
 @cobranzas_router.get("/recaudacion")
 def recaudacion_composicion(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     cxc_pagado = db.query(func.sum(CuentaPorCobrar.monto_pagado_usd)).filter(
@@ -1338,17 +1470,16 @@ def enviar_estado_cuenta(body: dict, db: Session = Depends(get_db), current_user
     email = body.get("email")
     if not email:
         raise HTTPException(status_code=400, detail="El correo electrónico es requerido")
-    
-    # Escribir el correo de forma real a un registro local para auditoría en el workspace
-    log_path = "/home/byelo/koda-backend/emails_enviados.log"
-    from datetime import datetime
-    try:
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] A: {email} | Asunto: Estado de Cuenta KODA ERP | Mensaje: Se adjunta PDF del Estado de Cuenta consolidado.\n")
-    except Exception as e:
-        print(f"Error escribiendo log de email: {e}")
-        
-    return {"ok": True, "message": f"Estado de cuenta enviado a {email} (Registrado en log local)"}
+
+    # No existe infraestructura real de envío de email en este backend (no hay
+    # smtplib/SendGrid/SES ni variables EMAIL_*/SMTP_* configuradas). Antes este
+    # endpoint simulaba éxito escribiendo en un log de desarrollo hardcodeado;
+    # eso engañaba al usuario haciéndole creer que el cliente recibió el correo.
+    # Se falla honestamente hasta que se integre un proveedor de email real.
+    raise HTTPException(
+        status_code=501,
+        detail="El envío de email no está configurado. Contacte al administrador del sistema.",
+    )
 
 
 # --- PAGOS ---
@@ -2069,6 +2200,111 @@ def tesoreria_dashboard(db: Session = Depends(get_db), current_user = Depends(ge
         ],
         "bancos": bancos_lista,
         "alertas": alertas_lista
+    }
+
+
+# ---- CUENTAS POR PAGAR (real, mirra la antigüedad de /cobranzas/* para CxC) ----
+
+@tesoreria_router.get("/cuentas-por-pagar")
+def cuentas_por_pagar_list(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """Lista real de CuentaPorPagar del tenant, con antigüedad (días vencido)
+    calculada sobre fecha_vencimiento vs. hoy, e IVA soportado tomado de la
+    Compra vinculada (si existe). Mismo criterio de antigüedad que
+    /cobranzas/cuentas usa para CuentaPorCobrar."""
+    cxp = db.query(CuentaPorPagar).filter(
+        CuentaPorPagar.tenant_id == current_user.tenant_id
+    ).order_by(CuentaPorPagar.fecha_vencimiento.asc()).all()
+    today = datetime.now(timezone.utc).date()
+
+    compra_ids = [c.compra_id for c in cxp if c.compra_id]
+    compras_map = {}
+    if compra_ids:
+        compras_map = {
+            c.id: c for c in db.query(Compra).filter(Compra.id.in_(compra_ids)).all()
+        }
+
+    result = []
+    for c in cxp:
+        monto_total = to_float(c.monto_total_usd)
+        monto_pagado = to_float(c.monto_pagado_usd)
+        saldo = monto_total - monto_pagado
+        vencimiento = c.fecha_vencimiento.date() if c.fecha_vencimiento else None
+        dias_vencido = (today - vencimiento).days if vencimiento and today > vencimiento else 0
+        estado_display = (
+            "Vencida" if dias_vencido > 0
+            else ("Por Vencer" if vencimiento and (vencimiento - today).days <= 7 else c.estado)
+        )
+        compra = compras_map.get(c.compra_id) if c.compra_id else None
+        iva_soportado = to_float(compra.iva_usd) if compra else 0.0
+
+        result.append({
+            "id": c.id,
+            "proveedor": c.proveedor.nombre if c.proveedor else "N/A",
+            "rif": c.proveedor.rif if c.proveedor else "J-00000000-0",
+            "numero_doc": c.numero_documento,
+            "numero_control": compra.numero_control if compra and compra.numero_control else "N/A",
+            "fecha_emision": c.fecha_emision.strftime("%d/%m/%Y") if c.fecha_emision else "",
+            "fecha_vencimiento": vencimiento.strftime("%d/%m/%Y") if vencimiento else "",
+            "monto_total": f"${monto_total:,.2f}",
+            "monto_total_raw": monto_total,
+            "monto_pagado": f"${monto_pagado:,.2f}",
+            "saldo": f"${saldo:,.2f}",
+            "saldo_raw": saldo,
+            "iva_soportado": f"${iva_soportado:,.2f}",
+            "iva_soportado_raw": iva_soportado,
+            "dias_vencido": dias_vencido,
+            "estado": estado_display,
+            "estado_db": c.estado,
+        })
+    return result
+
+
+@tesoreria_router.get("/cuentas-por-pagar/kpis")
+def kpis_cuentas_por_pagar(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """KPIs reales para el header de Cuentas por Pagar (Tesorería)."""
+    def format_currency(val):
+        return f"${val:,.2f}"
+
+    cxp = db.query(CuentaPorPagar).filter(
+        CuentaPorPagar.tenant_id == current_user.tenant_id
+    ).all()
+    today = datetime.now(timezone.utc).date()
+    abiertas = [c for c in cxp if c.estado != "PAGADA"]
+
+    total_por_pagar = sum(to_float(c.monto_total_usd) - to_float(c.monto_pagado_usd) for c in abiertas)
+    por_vencer_7d = sum(
+        to_float(c.monto_total_usd) - to_float(c.monto_pagado_usd)
+        for c in abiertas
+        if c.fecha_vencimiento and 0 <= (c.fecha_vencimiento.date() - today).days <= 7
+    )
+
+    compra_ids = [c.compra_id for c in abiertas if c.compra_id]
+    credito_fiscal_iva_usd = 0.0
+    if compra_ids:
+        compras = db.query(Compra).filter(Compra.id.in_(compra_ids)).all()
+        credito_fiscal_iva_usd = sum(to_float(c.iva_usd) for c in compras)
+
+    tasa = tasa_actual(db, current_user.tenant_id)
+    credito_fiscal_iva_bs = credito_fiscal_iva_usd * tasa
+
+    retenciones_pendientes = db.query(RetencionIVA).filter(
+        RetencionIVA.tenant_id == current_user.tenant_id,
+        RetencionIVA.tipo == "PRACTICADA",
+        RetencionIVA.estado == "PENDIENTE",
+    ).count()
+
+    return {
+        "metricas": [
+            {"label": "Cuentas por Pagar", "value": format_currency(total_por_pagar), "desc": "Obligaciones totales", "color": "text-slate-800"},
+            {"label": "A Pagar (7 días)", "value": format_currency(por_vencer_7d), "desc": "Requisición de flujo", "color": "text-amber-500"},
+            {"label": "Crédito Fiscal IVA", "value": f"Bs. {credito_fiscal_iva_bs:,.2f}", "desc": "Acumulado a favor (CxP abiertas)", "color": "text-koda-main"},
+            {"label": "Retenciones Pend.", "value": f"{retenciones_pendientes} Comp.", "desc": "Entregar a proveedores", "color": "text-blue-600"},
+        ],
+        "total_por_pagar_raw": total_por_pagar,
+        "por_vencer_7d_raw": por_vencer_7d,
+        "credito_fiscal_iva_raw": credito_fiscal_iva_bs,
+        "retenciones_pendientes": retenciones_pendientes,
+        "proveedores_vencidos": len({c.proveedor_id for c in abiertas if c.fecha_vencimiento and today > c.fecha_vencimiento.date()}),
     }
 
 
@@ -4454,6 +4690,8 @@ def get_status_color(estado: str) -> str:
         return "bg-blue-50 text-blue-700 border border-blue-100"
     elif est in ("aceptada", "facturada", "procesada"):
         return "bg-emerald-50 text-emerald-700 border border-emerald-100"
+    elif est == "convertida":
+        return "bg-teal-50 text-teal-700 border border-teal-100"
     elif est in ("rechazada", "anulada"):
         return "bg-rose-50 text-rose-700 border border-rose-100"
     elif est == "vencida":
@@ -4836,7 +5074,7 @@ def actualizar_estado_cotizacion(
         raise HTTPException(status_code=404, detail="Cotización no encontrada")
         
     nuevo_estado = payload.estado.strip()
-    estados_validos = {"Borrador", "Enviada", "Aceptada", "Rechazada", "Vencida", "Anulada", "Facturada"}
+    estados_validos = {"Borrador", "Enviada", "Aceptada", "Rechazada", "Vencida", "Anulada", "Facturada", "Convertida"}
     if nuevo_estado not in estados_validos:
         raise HTTPException(
             status_code=400,
@@ -5238,6 +5476,25 @@ def crear_cotizacion(
         count = db.query(Cotizacion).count()
         numero_cotizacion = f"COT-2026-{str(count + 1).zfill(4)}"
 
+        # 3.5 Totales SIEMPRE derivados server-side desde los ítems reales,
+        # nunca de `cot_in.subtotal/discountTotal/totalFinal` (el cliente
+        # podía enviar cualquier valor ahí sin que el backend lo validara).
+        # Aunque la cotización no es un documento fiscal, sigue siendo la
+        # base de la Orden de Venta y de la factura que se genera al
+        # aceptarla, así que su total debe ser fiable.
+        subtotal_calc = Decimal("0.00")
+        descuento_calc = Decimal("0.00")
+        total_calc = Decimal("0.00")
+        items_totales = []
+        for item in cot_in.items:
+            linea_bruta = item.quantity * item.price
+            linea_descuento = linea_bruta * (item.discountPct / Decimal("100.00"))
+            total_fila = linea_bruta - linea_descuento
+            subtotal_calc += linea_bruta
+            descuento_calc += linea_descuento
+            total_calc += total_fila
+            items_totales.append(total_fila)
+
         # 4. Crear la cabecera de la cotización
         nueva_cot = Cotizacion(
             numero_cotizacion=numero_cotizacion,
@@ -5246,9 +5503,9 @@ def crear_cotizacion(
             fecha_vencimiento=cot_in.dueDate,
             moneda=cot_in.currency,
             tasa_cambio=tasa_val,
-            subtotal=cot_in.subtotal,
-            descuento_total=cot_in.discountTotal,
-            total=cot_in.totalFinal,
+            subtotal=subtotal_calc,
+            descuento_total=descuento_calc,
+            total=total_calc,
             condiciones=cot_in.notes,
             estado="Borrador",
             creado_por=uuid.UUID(str(current_user.id)) if hasattr(current_user, 'id') and current_user.id else None
@@ -5257,9 +5514,7 @@ def crear_cotizacion(
         db.flush()
 
         # 5. Guardar los ítems
-        for item in cot_in.items:
-            total_fila = item.quantity * item.price * (Decimal("1.00") - item.discountPct / Decimal("100.00"))
-            
+        for item, total_fila in zip(cot_in.items, items_totales):
             nuevo_item = CotizacionItem(
                 cotizacion_id=nueva_cot.id,
                 producto_id=None,
@@ -5284,9 +5539,118 @@ def crear_cotizacion(
         raise HTTPException(status_code=500, detail=f"Error al crear cotización: {str(e)}")
 
 
+@ventas_ext_router.post("/cotizaciones/{id}/orden")
+def convertir_cotizacion_a_orden(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Convierte una Cotización 'Aceptada' en una Orden de Venta real.
+
+    Cierra el ciclo Cotización -> Orden de Venta -> Nota de Entrega/Factura
+    descrito en el modal de ayuda de SalesOrders.tsx (hasta ahora solo se
+    podía facturar directo, sin pasar por Orden de Venta). Sigue el mismo
+    patrón que `facturar_cotizacion`: valida estado 'Aceptada' y deriva el
+    monto SIEMPRE desde los ítems reales de la cotización, nunca de un total
+    enviado por el cliente.
+    """
+    from decimal import ROUND_HALF_UP
+
+    cot = (
+        db.query(Cotizacion)
+        .filter(Cotizacion.id == id, Cotizacion.tenant_id == current_user.tenant_id)
+        .first()
+    )
+    if not cot:
+        raise HTTPException(status_code=404, detail="Cotización no encontrada")
+
+    if cot.estado != "Aceptada":
+        raise HTTPException(
+            status_code=400,
+            detail="Solo se pueden convertir a Orden de Venta las cotizaciones en estado 'Aceptada'."
+        )
+
+    try:
+        tasa = Decimal(str(cot.tasa_cambio)) if cot.tasa_cambio else Decimal("1.0")
+        if tasa <= 0:
+            tasa = Decimal("1.0")
+
+        total_usd = Decimal("0.00")
+        for item in cot.items:
+            precio_unitario = Decimal(str(item.precio_unitario))
+            descuento_pct = Decimal(str(item.descuento_porcentaje))
+            precio_neto = precio_unitario * (Decimal("1.00") - descuento_pct / Decimal("100.00"))
+            if cot.moneda == "VES":
+                precio_neto = precio_neto / tasa
+            total_usd += precio_neto * Decimal(str(item.cantidad))
+        total_usd = total_usd.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        count = db.query(OrdenVenta).filter(OrdenVenta.tenant_id == current_user.tenant_id).count()
+        numero_orden = f"OV-{datetime.now(timezone.utc).year}-{str(count + 1).zfill(4)}"
+
+        nueva_orden = OrdenVenta(
+            tenant_id=current_user.tenant_id,
+            numero=numero_orden,
+            cliente_id=cot.cliente_id,
+            fecha=datetime.now(timezone.utc),
+            total_usd=total_usd,
+            tasa_cambio_bs=tasa,
+            estado="PENDIENTE",
+        )
+        db.add(nueva_orden)
+
+        cot.estado = "Convertida"
+
+        db.commit()
+        db.refresh(nueva_orden)
+
+        return {
+            "ok": True,
+            "orden_id": nueva_orden.id,
+            "numero_orden": nueva_orden.numero,
+            "estado_cotizacion": cot.estado,
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al convertir la cotización a orden de venta: {str(e)}")
+
+
 @ventas_ext_router.get("/ordenes")
-def ordenes_venta(db: Session = Depends(get_db)):
-    return db.query(OrdenVenta).order_by(OrdenVenta.fecha.desc()).all()
+def ordenes_venta(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Lista las Ordenes de Venta reales del tenant actual.
+
+    Antes esta consulta no filtraba por tenant_id (fuga entre empresas) y
+    devolvía objetos ORM crudos sin mapear (el frontend espera `client`/
+    `total`/`estado`, no `cliente_id`/`total_usd`), igual que ya se hace en
+    /cotizaciones y /notas-entrega más abajo.
+    """
+    ordenes = (
+        db.query(OrdenVenta, Cliente)
+        .outerjoin(Cliente, Cliente.id == OrdenVenta.cliente_id)
+        .filter(OrdenVenta.tenant_id == current_user.tenant_id)
+        .order_by(OrdenVenta.fecha.desc())
+        .all()
+    )
+    return [
+        {
+            "id": o.numero,
+            "id_db": o.id,
+            "numero_orden": o.numero,
+            "client": c.nombre if c else "No especificado",
+            "cliente": c.nombre if c else "No especificado",
+            "amount": to_float(o.total_usd),
+            "total": to_float(o.total_usd),
+            "tasa_cambio_bs": to_float(o.tasa_cambio_bs),
+            "estado": o.estado,
+            "status": o.estado,
+            "statusColor": get_status_color(o.estado),
+            "fecha": o.fecha.isoformat() if o.fecha else None,
+        }
+        for o, c in ordenes
+    ]
 
 
 @ventas_ext_router.get("/notas-entrega")

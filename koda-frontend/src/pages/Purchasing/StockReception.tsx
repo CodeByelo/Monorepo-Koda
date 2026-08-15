@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Calculator, ChevronRight, Target, CheckCircle } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { api } from '@/api/client';
 
 const money = (value: unknown) => `$${Number(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
 
 const StockReception = () => {
-  const [purchaseOrder, setPurchaseOrder] = useState('');
+  const [searchParams] = useSearchParams();
+  // Permite llegar precargado desde "Recibir Mercancía" en PurchaseOrders.tsx
+  // (?orden=NUMERO_FACTURA), sin forzar el flujo si se navega directo aquí.
+  const [purchaseOrder, setPurchaseOrder] = useState(() => searchParams.get('orden') || '');
   const [invoiceCost, setInvoiceCost] = useState('');
   const [receivedQty, setReceivedQty] = useState('');
   const [receptions, setReceptions] = useState<any[]>([]);
