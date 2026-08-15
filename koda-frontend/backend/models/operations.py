@@ -170,11 +170,14 @@ class Cliente(Base):
 
 class Proveedor(Base):
     __tablename__ = "proveedores"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'rif', name='_tenant_proveedores_rif_uc'),
+        {'schema': 'public'}
+    )
     tenant_id = Column(UUID(as_uuid=True))
 
     id = Column(Integer, primary_key=True, index=True)
-    rif = Column(String(50), unique=True, index=True, nullable=False)
+    rif = Column(String(50), index=True, nullable=False)
     nombre = Column(String(150), nullable=False)
     telefono = Column(String(50), nullable=True)
     email = Column(String(150), nullable=True)

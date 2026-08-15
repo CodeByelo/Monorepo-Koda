@@ -35,11 +35,14 @@ class Empresa(Base):
 
 class Sucursal(Base):
     __tablename__ = "sucursales"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'codigo', name='_tenant_sucursales_codigo_uc'),
+        {'schema': 'public'}
+    )
     tenant_id = Column(UUID(as_uuid=True))
 
     id = Column(Integer, primary_key=True, index=True)
-    codigo = Column(String(20), unique=True, nullable=False)
+    codigo = Column(String(20), nullable=False)
     nombre = Column(String(150), nullable=False)
     ciudad = Column(String(100), nullable=True)
     estado = Column(String(20), default="Activo", nullable=False)
@@ -151,12 +154,15 @@ class CuentaPorPagar(Base):
 
 class Compra(Base):
     __tablename__ = "compras"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'numero_factura', name='_tenant_compras_numero_factura_uc'),
+        {'schema': 'public'}
+    )
     tenant_id = Column(UUID(as_uuid=True))
 
     id = Column(Integer, primary_key=True, index=True)
     proveedor_id = Column(Integer, ForeignKey("public.proveedores.id"), nullable=False)
-    numero_factura = Column(String(50), unique=True, index=True, nullable=False)
+    numero_factura = Column(String(50), index=True, nullable=False)
     numero_control = Column(String(50), nullable=True)
     recepcion_id = Column(Integer, ForeignKey("public.recepciones_stock.id"), nullable=True)
     fecha = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
@@ -197,12 +203,15 @@ class Compra(Base):
 
 class CuentaBancaria(Base):
     __tablename__ = "cuentas_bancarias"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'numero_cuenta', name='_tenant_cuentas_bancarias_numero_cuenta_uc'),
+        {'schema': 'public'}
+    )
     tenant_id = Column(UUID(as_uuid=True))
 
     id = Column(Integer, primary_key=True, index=True)
     banco = Column(String(100), nullable=False)
-    numero_cuenta = Column(String(50), unique=True, nullable=False)
+    numero_cuenta = Column(String(50), nullable=False)
     moneda = Column(String(3), default="USD", nullable=False)
     saldo_actual_usd = Column(Numeric(15, 2), default=0.00, nullable=False)
     cuarentena_usd = Column(Numeric(15, 2), default=0.00, nullable=False)
@@ -305,11 +314,14 @@ class CotizacionItem(Base):
 
 class OrdenVenta(Base):
     __tablename__ = "ordenes_venta"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'numero', name='_tenant_ordenes_venta_numero_uc'),
+        {'schema': 'public'}
+    )
     tenant_id = Column(UUID(as_uuid=True))
 
     id = Column(Integer, primary_key=True, index=True)
-    numero = Column(String(50), unique=True, nullable=False)
+    numero = Column(String(50), nullable=False)
     cliente_id = Column(Integer, ForeignKey("public.clientes.id"), nullable=True)
     fecha = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     total_usd = Column(Numeric(15, 2), nullable=False)
@@ -408,11 +420,14 @@ class StockPorAlmacen(Base):
 
 class RequisicionCompra(Base):
     __tablename__ = "requisiciones_compra"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'numero', name='_tenant_requisiciones_compra_numero_uc'),
+        {'schema': 'public'}
+    )
     tenant_id = Column(UUID(as_uuid=True))
 
     id = Column(Integer, primary_key=True, index=True)
-    numero = Column(String(50), unique=True, nullable=False)
+    numero = Column(String(50), nullable=False)
     solicitante = Column(String(100), nullable=False)
     monto_estimado_usd = Column(Numeric(15, 2), nullable=False)
     tasa_cambio_bs = Column(Numeric(10, 4), nullable=False)
@@ -427,11 +442,14 @@ class RequisicionCompra(Base):
 
 class RecepcionStock(Base):
     __tablename__ = "recepciones_stock"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'hoja_id', name='_tenant_recepciones_stock_hoja_id_uc'),
+        {'schema': 'public'}
+    )
     tenant_id = Column(UUID(as_uuid=True))
 
     id = Column(Integer, primary_key=True, index=True)
-    hoja_id = Column(String(50), unique=True, nullable=False)
+    hoja_id = Column(String(50), nullable=False)
     orden_compra = Column(String(50), nullable=True)
     producto_id = Column(Integer, ForeignKey("public.productos.id"), nullable=False)
     cantidad = Column(Numeric(15, 2), nullable=False)
@@ -447,11 +465,14 @@ class RecepcionStock(Base):
 
 class NotaCredito(Base):
     __tablename__ = "notas_credito"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'numero', name='_tenant_notas_credito_numero_uc'),
+        {'schema': 'public'}
+    )
     tenant_id = Column(UUID(as_uuid=True))
 
     id = Column(Integer, primary_key=True, index=True)
-    numero = Column(String(50), unique=True, nullable=False)
+    numero = Column(String(50), nullable=False)
     venta_id = Column(Integer, ForeignKey("public.ventas.id"), nullable=True)
     cliente_id = Column(Integer, ForeignKey("public.clientes.id"), nullable=False)
     monto_usd = Column(Numeric(15, 2), nullable=False)
@@ -766,11 +787,14 @@ class DeclaracionISLR(Base):
 
 class DevolucionProveedor(Base):
     __tablename__ = "devoluciones_proveedor"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'numero_devolucion', name='_tenant_devoluciones_proveedor_numero_devolucion_uc'),
+        {'schema': 'public'}
+    )
     tenant_id = Column(UUID(as_uuid=True))
 
     id = Column(Integer, primary_key=True, index=True)
-    numero_devolucion = Column(String(50), unique=True, index=True, nullable=False)
+    numero_devolucion = Column(String(50), index=True, nullable=False)
     fecha = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     proveedor_id = Column(Integer, ForeignKey("public.proveedores.id"), nullable=False)
     factura_id = Column(Integer, ForeignKey("public.compras.id"), nullable=True)
@@ -786,12 +810,15 @@ class DevolucionProveedor(Base):
 class Vehiculo(Base):
     """Registro de todos los vehículos de la flota (camiones, carros, motos, etc.)."""
     __tablename__ = "vehiculos"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'placa', name='_tenant_vehiculos_placa_uc'),
+        {'schema': 'public'}
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(UUID(as_uuid=True))
     nombre = Column(String(100), nullable=False)
-    placa = Column(String(20), unique=True, nullable=False, index=True)
+    placa = Column(String(20), nullable=False, index=True)
     tipo = Column(String(50), nullable=False, default="CAMION")  # CAMION, CARRO, MOTO, FURGON, AVION, BARCO, OTRO
     marca = Column(String(80), nullable=True)
     modelo = Column(String(80), nullable=True)
@@ -813,12 +840,15 @@ class Vehiculo(Base):
 class Chofer(Base):
     """Directorio de choferes/conductores con vinculación a Telegram."""
     __tablename__ = "choferes"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'cedula', name='_tenant_choferes_cedula_uc'),
+        {'schema': 'public'}
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(UUID(as_uuid=True))
     nombre = Column(String(100), nullable=False)
-    cedula = Column(String(20), nullable=True, unique=True)
+    cedula = Column(String(20), nullable=True)
     telefono = Column(String(20), nullable=True)
     telegram_chat_id = Column(String(30), nullable=True)  # chat_id del bot de Telegram
     licencia_tipo = Column(String(10), nullable=True)  # 3, 4, 5, A, B, etc.
@@ -834,11 +864,14 @@ class Chofer(Base):
 class TurnoDespacho(Base):
     """Hoja de ruta diaria: asignación de vehículo + chofer + destino."""
     __tablename__ = "turnos_despacho"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'numero_turno', name='_tenant_turnos_despacho_numero_turno_uc'),
+        {'schema': 'public'}
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(UUID(as_uuid=True))
-    numero_turno = Column(String(20), unique=True, index=True, nullable=False)
+    numero_turno = Column(String(20), index=True, nullable=False)
     vehiculo_id = Column(Integer, ForeignKey("public.vehiculos.id"), nullable=False)
     chofer_id = Column(Integer, ForeignKey("public.choferes.id"), nullable=False)
     venta_id = Column(Integer, ForeignKey("public.ventas.id"), nullable=True) # Enlace directo con venta/factura
@@ -1001,11 +1034,14 @@ class NotaEntrega(Base):
     directo de inventario (ambos campos de origen nullable).
     """
     __tablename__ = "notas_entrega"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'numero_nota', name='_tenant_notas_entrega_numero_nota_uc'),
+        {'schema': 'public'}
+    )
     tenant_id = Column(UUID(as_uuid=True))
 
     id = Column(Integer, primary_key=True, index=True)
-    numero_nota = Column(String(50), unique=True, nullable=False)
+    numero_nota = Column(String(50), nullable=False)
     cliente_id = Column(Integer, ForeignKey("public.clientes.id"), nullable=True)
     # Snapshot del nombre del cliente tal como se escribió en el formulario:
     # el despacho de almacén no debe bloquearse si el nombre no calza
