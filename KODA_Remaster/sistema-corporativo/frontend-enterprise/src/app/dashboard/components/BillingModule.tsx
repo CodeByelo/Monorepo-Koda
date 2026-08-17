@@ -1,6 +1,8 @@
 "use client";
-import React from "react";
-import { CreditCard, ExternalLink, Maximize2 } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { CreditCard, Maximize2, Loader2, AlertTriangle } from "lucide-react";
+
+type BridgeStatus = "loading" | "ready" | "error";
 
 export default function BillingModule({ darkMode }: { darkMode: boolean }) {
   const isProduction = typeof window !== 'undefined' && (
@@ -16,21 +18,74 @@ export default function BillingModule({ darkMode }: { darkMode: boolean }) {
   if (isTailscale) {
     baseUrl = `https://${host}:8443`;
   }
-  // SEGURIDAD: antes se anexaba aquí el JWT de sesión de este backend
-  // (localStorage "sgd_token") como `?token=...`, exponiendo la sesión completa en el
-  // historial del navegador y en logs de acceso del origen de facturación. Se retiró:
-  // 1) koda-frontend ya no lee `?token=` en su AuthProvider (ver commit 3b7bf8a, que
-  //    migró a un `?exchange_code=` de un solo uso), por lo que ese parámetro ya no
-  //    tenía ningún efecto funcional.
-  // 2) Aunque lo leyera, este token lo firma el backend de
-  //    KODA_Remaster/sistema-corporativo/backend (JWT_SECRET propio, usuarios en
-  //    Supabase), distinto del backend de koda-frontend (SECRET_KEY propio, tabla
-  //    Profile). No es intercambiable por un `exchange_code` de koda-frontend: esa
-  //    llamada sería rechazada por firma inválida, y no existe un mapeo de identidad
-  //    de usuario entre ambos sistemas.
-  // Integrar un SSO real entre ambas superficies requiere una decisión de arquitectura
-  // cross-team sobre cómo (o si) unificar/mapear identidades entre los dos backends.
-  const billingUrl = baseUrl;
+
+  // ─────────────────────────────────────────────────────────────────────
+  // SSO real hacia koda-frontend (el ERP): antes se anexaba aquí el JWT de
+  // sesión de este backend (localStorage "sgd_token") como `?token=...`,
+  // exponiendo la sesión completa en el historial del navegador y en logs
+  // de acceso del origen de facturación. Se retiró y nunca se reemplazó
+  // por nada funcional -- koda-frontend siempre mostraba "Acceso
+  // Restringido" a cualquier usuario.
+  //
+  // Ahora: antes de renderizar el iframe, se pide un exchange_code de un
+  // solo uso a GET /api/auth/koda-frontend/exchange-code (proxy hacia
+  // GET /auth/koda-frontend/exchange-code del backend de ESTE sistema,
+  // que a su vez llama a koda-frontend/backend con el profile_id de la
+  // sesión actual -- nunca uno enviado por este componente). Ese código
+  // se consume igual que el resto del monorepo: `?exchange_code=...`,
+  // que el AuthProvider de koda-frontend ya sabe canjear contra
+  // POST /api/auth/exchange (mecanismo preexistente, sin cambios).
+  // ─────────────────────────────────────────────────────────────────────
+  const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>("loading");
+  const [exchangeCode, setExchangeCode] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string>(
+    "No se pudo verificar tu acceso al módulo de Facturación. Contactá soporte."
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      setBridgeStatus("loading");
+      try {
+        const res = await fetch("/api/auth/koda-frontend/exchange-code", {
+          method: "GET",
+          credentials: "include",
+        });
+
+        if (cancelled) return;
+
+        const body = await res.json().catch(() => ({} as any));
+
+        if (!res.ok || !body?.exchange_code) {
+          setErrorMessage(
+            body?.detail ||
+              "No se pudo verificar tu acceso al módulo de Facturación. Contactá soporte."
+          );
+          setBridgeStatus("error");
+          return;
+        }
+
+        setExchangeCode(body.exchange_code as string);
+        setBridgeStatus("ready");
+      } catch (e) {
+        if (cancelled) return;
+        setErrorMessage(
+          "No se pudo verificar tu acceso al módulo de Facturación. Contactá soporte."
+        );
+        setBridgeStatus("error");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const billingUrl = exchangeCode
+    ? `${baseUrl}?exchange_code=${encodeURIComponent(exchangeCode)}`
+    : baseUrl;
 
   return (
     <div
@@ -59,29 +114,54 @@ export default function BillingModule({ darkMode }: { darkMode: boolean }) {
             Módulo de Facturación — Koda ERP
           </span>
         </div>
-        <a
-          href={billingUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${
-            darkMode
-              ? "bg-[#00C294]/10 text-[#00C294] hover:bg-[#00C294]/20"
-              : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-          }`}
-        >
-          <Maximize2 size={13} />
-          Abrir en ventana completa
-        </a>
+        {bridgeStatus === "ready" && (
+          <a
+            href={billingUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${
+              darkMode
+                ? "bg-[#00C294]/10 text-[#00C294] hover:bg-[#00C294]/20"
+                : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+            }`}
+          >
+            <Maximize2 size={13} />
+            Abrir en ventana completa
+          </a>
+        )}
       </div>
 
-      {/* iframe que ocupa todo el espacio restante */}
-      <iframe
-        src={billingUrl}
-        title="Módulo de Facturación"
-        style={{ flex: 1, border: "none", display: "block", width: "100%" }}
-        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-        allowFullScreen
-      />
+      {/* Contenido: loader mientras se resuelve el exchange_code, mensaje
+          claro si falla, iframe recién cuando hay un código válido. */}
+      {bridgeStatus === "loading" && (
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-slate-400">
+          <Loader2 size={28} className="animate-spin text-[#00C294]" />
+          <span className="text-sm font-medium">Verificando tu acceso al Módulo de Facturación…</span>
+        </div>
+      )}
+
+      {bridgeStatus === "error" && (
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center">
+          <AlertTriangle size={28} className="text-amber-500" />
+          <span
+            className={`text-sm font-semibold max-w-md ${
+              darkMode ? "text-slate-200" : "text-slate-700"
+            }`}
+          >
+            {errorMessage}
+          </span>
+        </div>
+      )}
+
+      {bridgeStatus === "ready" && (
+        <iframe
+          src={billingUrl}
+          title="Módulo de Facturación"
+          style={{ flex: 1, border: "none", display: "block", width: "100%" }}
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+        />
+      )}
     </div>
   );
 }
