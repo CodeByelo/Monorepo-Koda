@@ -20,6 +20,12 @@
 -- operador de solapamiento (&&) sobre el daterange.
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
+-- Estas dos columnas las agrega el modelo SQLAlchemy (models/hr.py) pero
+-- nunca se habían aplicado contra la base de datos real hasta esta migración.
+ALTER TABLE public.nominas
+    ADD COLUMN IF NOT EXISTS fecha_inicio DATE,
+    ADD COLUMN IF NOT EXISTS fecha_fin DATE;
+
 -- Solo se exige la restricción cuando ambas fechas están pobladas: las filas
 -- históricas (procesadas antes de que existieran estas columnas) tienen
 -- fecha_inicio/fecha_fin NULL y deben quedar exentas. La predicado parcial
