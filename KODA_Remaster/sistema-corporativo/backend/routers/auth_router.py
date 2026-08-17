@@ -8,6 +8,7 @@ from auth.security import verify_password, get_password_hash, create_access_toke
 from auth.supabase_auth import get_current_user
 from datetime import datetime, timedelta
 from services.tenant_status import get_active_user_count_and_limit
+from services.koda_frontend_client import issue_sso_bridge_exchange_code, SsoBridgeError
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -115,6 +116,54 @@ async def get_user_profile(
     except Exception as e:
         print(f"Error fetching profile: {e}")
         raise HTTPException(status_code=500, detail="Error al obtener perfil")
+
+@router.get("/koda-frontend/exchange-code")
+async def get_koda_frontend_exchange_code(current_user: dict = Depends(get_current_user)):
+    """
+    Puente de SSO real hacia koda-frontend/backend (el ERP, un despliegue de
+    Render completamente separado). Consumido por el "Módulo de
+    Facturación" embebido en el dashboard institucional
+    (frontend-enterprise/src/app/dashboard/components/BillingModule.tsx):
+    antes de este endpoint, el iframe de ese módulo cargaba sin ningún
+    token de sesión, por lo que `ProtectedRoute` de koda-frontend mostraba
+    "Acceso Restringido" a CUALQUIER usuario.
+
+    CRÍTICO DE SEGURIDAD: el `profile_id` que se envía a koda-frontend
+    SIEMPRE sale de `current_user["sub"]` — ya extraído y validado del JWT
+    de la sesión actual por `auth.supabase_auth.get_current_user` — NUNCA
+    de un parámetro que mande el cliente en el body/query. Aceptar un
+    profile_id arbitrario del llamador sería una vulnerabilidad de
+    account-takeover: cualquier usuario autenticado podría pedir una
+    sesión real del ERP para CUALQUIER OTRO profile_id.
+    """
+    profile_id = current_user.get("sub")
+    if not profile_id:
+        raise HTTPException(status_code=401, detail="Sesión inválida.")
+
+    try:
+        exchange_code = await issue_sso_bridge_exchange_code(str(profile_id))
+    except SsoBridgeError as e:
+        if e.status_code == 404:
+            # Caso de negocio real: no todos los tenants institucionales
+            # tienen el ERP (koda-frontend) provisionado todavía. Mensaje
+            # explícito, nunca un 500 genérico.
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    "Tu empresa no tiene el Módulo de Facturación (ERP) activado "
+                    "todavía. Contacta a soporte para provisionarlo."
+                ),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                "No se pudo verificar tu acceso al Módulo de Facturación en este "
+                "momento. Intenta nuevamente en unos minutos."
+            ),
+        )
+
+    return {"exchange_code": exchange_code}
+
 
 class UserRegister(BaseModel):
     email: EmailStr
