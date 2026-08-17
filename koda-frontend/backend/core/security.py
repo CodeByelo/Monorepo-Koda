@@ -246,6 +246,54 @@ def verify_logistics_forward_key(
     return True
 
 
+# ==========================================
+# CLAVE DE SERVICIO (PUENTE DE SSO — service-to-service, AUTENTICACIÓN)
+# ==========================================
+# KODA_Remaster/sistema-corporativo/backend (el sistema institucional donde
+# el usuario ya inició sesión) llama a
+# POST /internal/auth/sso-bridge/issue (routers/sso_bridge.py) para emitir,
+# en nombre de un `profile_id` ya autenticado del OTRO lado, un
+# exchange_code de un solo uso que el "Módulo de Facturación" embebido
+# (BillingModule.tsx de frontend-enterprise) usa para iniciar sesión real en
+# ESTE backend (ver routers/auth.py::exchange_code, /auth/exchange).
+#
+# Deliberadamente un secreto PROPIO, distinto de BOT_INTERNAL_API_KEY y
+# ORG_SYNC_API_KEY: aquellos sincronizan datos (ventas/stock/nombre de
+# organización); este endpoint mintea sesiones de usuario real -- un límite
+# de confianza de mínimo privilegio, tratado con el mismo cuidado que un
+# endpoint de login.
+#
+# CRÍTICO: sin fallback hardcodeado, igual que el resto de las claves de
+# servicio de este backend. Debe configurarse con el MISMO valor en las
+# variables de entorno de Render de AMBOS backends.
+SSO_BRIDGE_INTERNAL_KEY = os.getenv("SSO_BRIDGE_INTERNAL_KEY", "").strip()
+if not SSO_BRIDGE_INTERNAL_KEY or len(SSO_BRIDGE_INTERNAL_KEY) < 32:
+    raise RuntimeError(
+        "SSO_BRIDGE_INTERNAL_KEY no configurado o inseguro: debe definirse como "
+        "variable de entorno con un valor de al menos 32 caracteres. No existe valor "
+        "por defecto. Debe coincidir EXACTAMENTE con el valor configurado en "
+        "KODA_Remaster/sistema-corporativo/backend (mismo secreto compartido en ambos lados)."
+    )
+
+
+def verify_sso_bridge_key(
+    x_sso_bridge_key: Optional[str] = Header(default=None, alias="X-SSO-Bridge-Key")
+) -> bool:
+    """
+    Dependencia de FastAPI para `routers/sso_bridge.py`. Igual que
+    `verify_bot_api_key`/`verify_logistics_forward_key`: un límite de
+    confianza servidor-a-servidor, NUNCA combinado con JWT de usuario. Solo
+    KODA_Remaster (que ya autenticó al usuario de su propio lado) conoce
+    esta clave y puede pedir la emisión de un exchange_code en su nombre.
+    """
+    if not x_sso_bridge_key or not hmac.compare_digest(x_sso_bridge_key, SSO_BRIDGE_INTERNAL_KEY):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Clave de puente SSO inválida o ausente.",
+        )
+    return True
+
+
 def get_current_auditor(request: Request, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> AuditorSession:
     """
     Dependencia de seguridad que valida que la petición proviene de un auditor válido:

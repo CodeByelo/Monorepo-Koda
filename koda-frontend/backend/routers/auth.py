@@ -91,21 +91,38 @@ def _prune_expired_exchange_codes(now: datetime) -> None:
         _exchange_codes.pop(c, None)
 
 
-@router.post("/exchange-code")
-def create_exchange_code(current_user: Profile = Depends(get_current_user)):
-    """Genera un código de un solo uso, de corta duración (30s), que otra
-    superficie del monorepo puede intercambiar por una sesión real para el
-    mismo usuario autenticado, sin necesidad de propagar el JWT por la URL."""
+def issue_exchange_code(user_id) -> str:
+    """Genera y almacena un código de un solo uso, de corta duración (30s),
+    para `user_id`. Función interna centralizada, reutilizada por:
+
+    1. POST /exchange-code (debajo): el propio usuario, ya autenticado en
+       ESTE backend, pide un código para sí mismo.
+    2. `routers/sso_bridge.py::issue_sso_bridge_code`: el puente de SSO
+       cross-sistema, invocado por KODA_Remaster/sistema-corporativo/backend
+       en nombre de un `profile_id` ya autenticado del OTRO lado (misma fila
+       física de `profiles`, misma base Postgres).
+
+    Nunca se duplica este mecanismo: ambos casos terminan en el mismo
+    `_exchange_codes` y se consumen exactamente igual vía POST /exchange.
+    """
     now = datetime.now(timezone.utc)
     _prune_expired_exchange_codes(now)
 
     code = secrets.token_urlsafe(24)
     _exchange_codes[code] = {
-        "user_id": str(current_user.id),
+        "user_id": str(user_id),
         "expires_at": now + timedelta(seconds=_EXCHANGE_CODE_TTL_SECONDS),
         "used": False,
     }
-    return {"code": code}
+    return code
+
+
+@router.post("/exchange-code")
+def create_exchange_code(current_user: Profile = Depends(get_current_user)):
+    """Genera un código de un solo uso, de corta duración (30s), que otra
+    superficie del monorepo puede intercambiar por una sesión real para el
+    mismo usuario autenticado, sin necesidad de propagar el JWT por la URL."""
+    return {"code": issue_exchange_code(current_user.id)}
 
 
 @router.post("/exchange")
