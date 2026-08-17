@@ -117,17 +117,18 @@ export const DEFAULT_SCOPES: Record<string, string[]> = {
         PERMISSIONS_MASTER.TICKETS_VIEW_DEPT,
         PERMISSIONS_MASTER.ORG_VIEW_LIMITED
     ],
-    CEO: [
-        PERMISSIONS_MASTER.VIEW_DASHBOARD,
-        PERMISSIONS_MASTER.VIEW_PRIORITIES,
-        PERMISSIONS_MASTER.VIEW_TICKETS,
-        PERMISSIONS_MASTER.VIEW_DOCUMENTS,
-        PERMISSIONS_MASTER.VIEW_STATS,
-        PERMISSIONS_MASTER.PRIORITIES_VIEW_ALL,
-        PERMISSIONS_MASTER.DOCS_VIEW_ALL,
-        PERMISSIONS_MASTER.TICKETS_VIEW_ALL,
-        PERMISSIONS_MASTER.ORG_VIEW_FULL
-    ],
+    // CEO = dueño/máximo responsable de su empresa (tenant). Este rol es el que
+    // se asigna a la cuenta provisionada vía POST /dev/users con rol_id=1, que
+    // por requerimiento explícito del negocio debe tener acceso a TODO dentro
+    // de su propia empresa (dashboard, tickets, documentos, prioridades y el
+    // Módulo de Seguridad: usuarios, logs, anuncios y estructura organizativa).
+    // Antes de este cambio, CEO no incluía ningún permiso VIEW_SECURITY/
+    // SECURITY_*/SYS_*, por lo que el Módulo de Seguridad completo (y sus
+    // "canales de configuración") quedaba invisible para el dueño de la cuenta.
+    // El backend (auth_router.py /login y /me) nunca envía un array de
+    // `permissions` por usuario, así que este mapa por rol es la única fuente
+    // de permisos real para CEO: se iguala a Administrador/Desarrollador.
+    CEO: Object.values(PERMISSIONS_MASTER),
     Administrador: Object.values(PERMISSIONS_MASTER),
     Desarrollador: Object.values(PERMISSIONS_MASTER) // Acceso total
 };
