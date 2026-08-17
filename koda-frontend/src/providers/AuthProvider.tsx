@@ -104,7 +104,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     (async () => {
       try {
-        const res = await fetch('/api/auth/exchange', {
+        const res = await fetch(`${BASE_URL}/auth/exchange`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -227,7 +227,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLicenseError(null);
     setToken(null);
     // Llamar al endpoint de logout para limpiar la cookie httpOnly
-    fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
+    fetch(`${BASE_URL}/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
   };
 
   const checkLicense = async (): Promise<boolean> => {
