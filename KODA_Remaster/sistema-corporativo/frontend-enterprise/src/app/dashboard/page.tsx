@@ -5112,21 +5112,47 @@ export default function Dashboard() {
 
   useEffect(() => {
     setMounted(true);
-    if (typeof window !== "undefined") {
-      const host = window.location.hostname;
-      const isProduction = host.includes('vercel.app') || host.includes('onrender.com') || host.includes('cloudflare');
-      const billingProdUrl = process.env.NEXT_PUBLIC_BILLING_URL || 'https://koda-billing-front.vercel.app';
-      let baseUrl = isProduction ? billingProdUrl : `http://${host}:5174`;
-      if (host.includes('.ts.net')) {
-        baseUrl = `https://${host}:8443`;
-      }
-      // SEGURIDAD: ya no se anexa `?token=<jwt>`. Ver la nota detallada en
-      // BillingModule.tsx — koda-frontend ya no lee ese parámetro (usa
-      // `?exchange_code=` de un solo uso) y, de todos modos, el JWT de este backend
-      // no es válido para el backend de koda-frontend (secretos y esquemas de
-      // usuario distintos). Requiere decisión de arquitectura cross-team.
-      setBillingUrl(baseUrl);
+    if (typeof window === "undefined") return;
+
+    const host = window.location.hostname;
+    const isProduction = host.includes('vercel.app') || host.includes('onrender.com') || host.includes('cloudflare');
+    const billingProdUrl = process.env.NEXT_PUBLIC_BILLING_URL || 'https://koda-billing-front.vercel.app';
+    let baseUrl = isProduction ? billingProdUrl : `http://${host}:5174`;
+    if (host.includes('.ts.net')) {
+      baseUrl = `https://${host}:8443`;
     }
+
+    // SSO real hacia koda-frontend: se pide un exchange_code de un solo uso
+    // antes de exponer el link del sidebar (mismo mecanismo que
+    // BillingModule.tsx / GET /api/auth/koda-frontend/exchange-code). Este
+    // link vive independiente de BillingModule.tsx y antes quedó afuera de
+    // ese fix -- por eso seguía mostrando "Acceso Restringido" en
+    // koda-frontend pese a que BillingModule.tsx ya funcionaba. Si el
+    // pedido falla, se deja `billingUrl` vacío: `canAccessBilling` ya
+    // gatea si el item se muestra, y un `href` vacío evita enlazar a una
+    // URL sin sesión que solo mostraría esa misma pantalla de bloqueo.
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/koda-frontend/exchange-code", {
+          method: "GET",
+          credentials: "include",
+        });
+        const body = await res.json().catch(() => ({} as any));
+        if (cancelled) return;
+        if (res.ok && body?.exchange_code) {
+          setBillingUrl(`${baseUrl}?exchange_code=${encodeURIComponent(body.exchange_code)}`);
+        } else {
+          setBillingUrl("");
+        }
+      } catch {
+        if (!cancelled) setBillingUrl("");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
