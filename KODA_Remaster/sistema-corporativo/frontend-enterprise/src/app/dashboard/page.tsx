@@ -4565,10 +4565,18 @@ export default function Dashboard() {
   const openBillingModule = useCallback(async () => {
     if (isBillingLoading) return;
     setIsBillingLoading(true);
+    // Must open synchronously within the click's user-activation window, or
+    // browsers silently block the popup once the fetch below resolves.
+    const billingTab = window.open("", "_blank", "noopener,noreferrer");
     try {
       const url = await fetchBillingUrl();
-      window.open(url, "_blank", "noopener,noreferrer");
+      if (billingTab) {
+        billingTab.location.href = url;
+      } else {
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
     } catch (e) {
+      billingTab?.close();
       await uiAlert(
         e instanceof BillingBridgeError
           ? e.message
