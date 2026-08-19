@@ -655,6 +655,29 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 # ===================================================================
 import asyncio
 
+@app.get("/test-telegram-alert")
+async def test_telegram_alert():
+    """Endpoint de prueba para verificar que las alertas a Telegram están llegando correctamente."""
+    admin_chat_id = os.getenv("TELEGRAM_ADMIN_CHAT_ID")
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    
+    if not bot_token:
+        return {"status": "error", "message": "TELEGRAM_BOT_TOKEN no está configurado en las variables de entorno."}
+    if not admin_chat_id:
+        return {"status": "error", "message": "TELEGRAM_ADMIN_CHAT_ID no está configurado en las variables de entorno."}
+        
+    from routers.telegram_router import send_telegram_message
+    now_str = datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
+    text = (
+        f"🧪 *PRUEBA DE ALERTA TELEGRAM — KODA SYSTEM*\n\n"
+        f"✅ *Estado:* Sistema de Monitoreo Activo\n"
+        f"👤 *Admin Chat ID:* `{admin_chat_id}`\n"
+        f"⏰ *Hora:* `{now_str}`\n\n"
+        f"_Si estás leyendo esto, las alertas automáticas de caídas y errores están funcionando al 100%._"
+    )
+    await send_telegram_message(chat_id=int(admin_chat_id), text=text)
+    return {"status": "success", "message": f"Alerta de prueba enviada exitosamente al chat {admin_chat_id}"}
+
 @app.post("/test-idempotency-endpoint")
 @require_idempotency
 async def test_idempotency_endpoint(request: Request, payload: dict):
