@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "async-lru-cache": "^0.2.1"
+  }
+}

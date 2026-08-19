@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <!--
+      Base href dinámico — DEBE ser el primer elemento del <head>.
+      El build usa `base: './'` (rutas relativas) porque este mismo bundle se
+      sirve tanto en la raíz del dominio como bajo el prefijo /facturacion.
+      Sin este <base>, un F5 o un enlace directo a una subruta de 2+ segmentos
+      (ej. /ventas/cotizaciones) hace que el navegador resuelva "./assets/..."
+      relativo a /ventas/, no a la raíz, y los chunks JS devuelven 404 -> la
+      app nunca monta y la página queda en blanco (sin errores de React,
+      porque nunca llega a ejecutarse el bundle).
+      Ver AGENTS/commit: fix(routing) base href dinámico para deep-link reload.
+    -->
+    <script>
+      (function () {
+        var base = document.createElement('base');
+        base.href = window.location.pathname.startsWith('/facturacion') ? '/facturacion/' : '/';
+        document.head.appendChild(base);
+      })();
+    </script>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/LogoGlass.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KODA ERP | Intelligent Business Suite</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./src/main.tsx"></script>
+  </body>
+</html>

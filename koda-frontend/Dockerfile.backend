@@ -1,0 +1,27 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# postgresql-client agrega el binario `pg_dump`, usado por
+# backend/services/backup_service.py para generar respaldos SQL nativos de la
+# base de datos. Si esta capa no llega a construirse/instalarse en el entorno
+# real de despliegue, el servicio de respaldo cae automáticamente a un
+# fallback 100% Python (dump JSON) — ver ese módulo para el detalle.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copiar requirements e instalar dependencias
+COPY backend/requirements.txt ./backend/requirements.txt
+RUN pip install --no-cache-dir -r backend/requirements.txt
+
+# Copiar el código del backend preservando la estructura de paquete
+COPY backend/ ./backend/
+
+# PYTHONPATH apunta a /app para que "from backend.core..." funcione
+ENV PYTHONPATH=/app
+
+EXPOSE 8000
+
+# Ejecutar desde /app usando el path completo del módulo
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

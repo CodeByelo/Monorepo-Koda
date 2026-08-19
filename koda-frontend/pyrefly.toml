@@ -1,0 +1,7 @@
+[tool.pyrefly]
+extra_paths = ["/home/byelo/koda-backend/koda-frontend", ".", "./backend"]
+workspace_root = "/home/byelo/koda-backend/koda-frontend"
+python_version = "3.11"
+exclude = ["src", "node_modules", "dist"]
+import_roots = ["."]
+

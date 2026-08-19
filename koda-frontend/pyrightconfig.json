@@ -1,0 +1,12 @@
+{
+  "extraPaths": [
+    "/home/byelo/koda-backend/koda-frontend",
+    ".",
+    "./backend"
+  ],
+  "executionEnvironments": [
+    {
+      "root": "."
+    }
+  ]
+}

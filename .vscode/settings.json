@@ -1,0 +1,15 @@
+{
+  "typescript.tsdk": "KODA_Remaster/sistema-corporativo/frontend-enterprise/node_modules/typescript/lib",
+  "typescript.validate.enable": true,
+  "javascript.validate.enable": false,
+  "files.exclude": {
+    "**/.git": true,
+    "**/.svn": true,
+    "**/.hg": true,
+    "**/CVS": true,
+    "**/.DS_Store": true,
+    "**/Thumbs.db": true,
+    "**/.next": true,
+    "**/dist": true
+  }
+}

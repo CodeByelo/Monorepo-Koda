@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend-tests:
+    name: Backend tests (koda-frontend)
+    runs-on: ubuntu-latest
+    env:
+      # NOTE: these are dummy, obviously-fake CI-only placeholders — not real
+      # secrets. The app falls back to a local SQLite DB when
+      # DATABASE_URL/SUPABASE_DB_URL is unset, so this never touches real
+      # Supabase or any production data.
+      SECRET_KEY: ci-test-secret-key-not-for-production-use-32chars
+      AUDIT_LOG_SECRET: ci-test-audit-log-secret-not-for-prod-32charsxx
+      BOT_INTERNAL_API_KEY: ci-test-bot-internal-api-key-not-for-prod-32chars
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        run: pip install -r koda-frontend/backend/requirements.txt pytest
+
+      - name: Run backend tests
+        run: python -m pytest koda-frontend/backend/tests/
+
+  frontend-build:
+    name: Frontend typecheck + build (koda-frontend)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: koda-frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: koda-frontend
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: koda-frontend
+        run: npx tsc --noEmit
+
+      - name: Build
+        working-directory: koda-frontend
+        run: npm run build
