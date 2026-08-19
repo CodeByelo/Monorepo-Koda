@@ -40,13 +40,13 @@ const Login = () => {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Email</label>
+            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Usuario o Correo</label>
             <input 
-              type="email" 
+              type="text" 
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-[#0b5156] transition-colors"
-              placeholder="admin@koda.com"
+              placeholder="admin o tu@correo.com"
               required 
             />
           </div>
