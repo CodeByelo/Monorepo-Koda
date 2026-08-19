@@ -128,12 +128,12 @@ async function directDbMethod(session: string): Promise<NextResponse> {
   const sql = getSQL();
 
   // 2. Verificar que el usuario existe y está activo en la tabla profiles
-  const users = await sql`
+  const users = (await sql`
     SELECT id, estado, tenant_id
     FROM profiles
     WHERE id = ${profileId}::uuid
     LIMIT 1
-  `;
+  `) as unknown as Array<{ id: string; estado: boolean | number; tenant_id: string }>;
 
   if (!users || users.length === 0) {
     return NextResponse.json(
@@ -161,11 +161,11 @@ async function directDbMethod(session: string): Promise<NextResponse> {
   }
 
   // 3. Verificar que el tenant existe
-  const tenants = await sql`
+  const tenants = (await sql`
     SELECT id FROM organizations
     WHERE id = ${user.tenant_id}::uuid
     LIMIT 1
-  `;
+  `) as unknown as Array<{ id: string }>;
 
   if (!tenants || tenants.length === 0) {
     return NextResponse.json(
