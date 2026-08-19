@@ -42,34 +42,74 @@ function parseResponse(text: string) {
   }
 }
 
+const MAX_RETRIES = 3;
+const RETRY_BASE_DELAY_MS = 2000; // 2s, 4s, 8s (exponential backoff)
+
 async function fallbackProxyMethod(session: string): Promise<NextResponse> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 60000); // 60s timeout (antes era implícitamente ~5s por el backend)
+  let lastError: any = null;
+  let lastStatus = 502;
 
-  try {
-    const response = await fetch(`${API_BASE_URL}/auth/koda-frontend/exchange-code`, {
-      method: "GET",
-      headers: { Authorization: `Bearer ${session}` },
-      cache: "no-store",
-      signal: controller.signal,
-    });
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 60000);
 
-    const text = await response.text();
-    return NextResponse.json(parseResponse(text), {
-      status: response.status,
-      headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
-    });
-  } catch (err: any) {
-    if (err?.name === "AbortError") {
-      return NextResponse.json(
-        { detail: "El servidor de autenticación tardó demasiado en responder. Intenta nuevamente." },
-        { status: 504 },
-      );
+    try {
+      // En reintentos, enviar un ping de warm-up al backend para ayudarlo a despertar
+      if (attempt > 0) {
+        console.log(`[exchange-code] Reintento ${attempt}/${MAX_RETRIES} tras cold start...`);
+        try {
+          await fetch(`${API_BASE_URL}/health`, {
+            method: "GET",
+            cache: "no-store",
+            signal: AbortSignal.timeout(10000),
+          });
+        } catch {
+          // El ping puede fallar; no importa, el objetivo es despertar Render
+        }
+        // Esperar con backoff exponencial antes de reintentar
+        await new Promise((r) => setTimeout(r, RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)));
+      }
+
+      const response = await fetch(`${API_BASE_URL}/auth/koda-frontend/exchange-code`, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${session}` },
+        cache: "no-store",
+        signal: controller.signal,
+      });
+
+      // Si la respuesta es exitosa o es un error del cliente (4xx), devolver inmediatamente
+      if (response.ok || (response.status >= 400 && response.status < 500)) {
+        const text = await response.text();
+        return NextResponse.json(parseResponse(text), {
+          status: response.status,
+          headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
+        });
+      }
+
+      // 502/503/504 = probable cold start de Render → reintentar
+      lastStatus = response.status;
+      lastError = new Error(`Backend responded with ${response.status}`);
+      console.warn(`[exchange-code] Backend respondió ${response.status} (intento ${attempt + 1}/${MAX_RETRIES + 1})`);
+    } catch (err: any) {
+      if (err?.name === "AbortError") {
+        return NextResponse.json(
+          { detail: "El servidor de autenticación tardó demasiado en responder. Intenta nuevamente." },
+          { status: 504 },
+        );
+      }
+      lastError = err;
+      console.warn(`[exchange-code] Error de red (intento ${attempt + 1}/${MAX_RETRIES + 1}):`, err?.message);
+    } finally {
+      clearTimeout(timer);
     }
-    throw err;
-  } finally {
-    clearTimeout(timer);
   }
+
+  // Todos los reintentos agotados
+  console.error(`[exchange-code] Todos los reintentos agotados. Último error:`, lastError);
+  return NextResponse.json(
+    { detail: "El servidor de autenticación no está disponible en este momento. Por favor intenta en unos minutos." },
+    { status: lastStatus, headers: { "Cache-Control": "no-store" } },
+  );
 }
 
 export async function GET(request: Request) {
