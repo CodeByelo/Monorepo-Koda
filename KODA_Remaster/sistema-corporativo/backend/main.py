@@ -1100,7 +1100,7 @@ async def login_compat(
         LEFT JOIN roles r ON p.rol_id = r.id
         LEFT JOIN gerencias g ON p.gerencia_id = g.id
         LEFT JOIN organizations o ON p.tenant_id = o.id
-        WHERE LOWER(p.username) = LOWER($1)
+        WHERE LOWER(p.username) = LOWER($1) OR LOWER(p.email) = LOWER($1)
     """
     user = await conn.fetchrow(query, username_input)
 
