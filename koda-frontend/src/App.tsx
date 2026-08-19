@@ -519,14 +519,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   }
 
   if (!isAuthenticated) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-[#f4f6f8]">
-        <div className="text-center p-12 bg-white rounded-3xl shadow-sm border border-slate-200">
-          <h2 className="text-2xl font-black text-slate-800 uppercase mb-2">Acceso Restringido</h2>
-          <p className="text-sm font-bold text-slate-500 uppercase">Esta aplicación solo puede ser accedida a través del sistema KODA Remaster.</p>
-        </div>
-      </div>
-    );
+    return <Login />;
   }
 
   const isDev = userRole?.toLowerCase() === 'desarrollador' || userRole?.toLowerCase() === 'dev' || userRole?.toLowerCase() === 'developer';
