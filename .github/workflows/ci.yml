@@ -45,3 +45,34 @@ jobs:
 
       - name: Validar compilación de sintaxis Python (ERP Backend)
         run: python -m py_compile koda-frontend/backend/main.py
+
+  test-python-backend:
+    name: Tests Backend Corporativo (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        working-directory: KODA_Remaster/sistema-corporativo/backend
+        run: |
+          pip install -r requirements.txt
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+          pip install pytest
+
+      - name: Ejecutar pytest
+        working-directory: KODA_Remaster/sistema-corporativo/backend
+        env:
+          # Solo para que main.py pueda importarse en CI (exigen >=32 chars,
+          # sin default hardcodeado). No son secretos reales.
+          JWT_SECRET: ci-only-fake-jwt-secret-not-a-real-secret-32chars
+          ORG_SYNC_API_KEY: ci-only-fake-org-sync-key-not-a-real-secret-32c
+        # Acotado a tests/: los test_*.py sueltos en la raíz de backend/ son
+        # scripts manuales que requieren un servidor/DB reales corriendo
+        # (no están pensados para pytest en CI).
+        run: pytest tests/
