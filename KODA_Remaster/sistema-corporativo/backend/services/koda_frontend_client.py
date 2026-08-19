@@ -48,7 +48,7 @@ def _require_config() -> None:
         )
 
 
-async def issue_sso_bridge_exchange_code(profile_id: str, timeout: float = 60.0) -> str:
+async def issue_sso_bridge_exchange_code(profile_id: str, timeout: float = 5.0) -> str:
     """
     POST {KODA_FRONTEND_API_URL}/internal/auth/sso-bridge/issue
 
@@ -59,9 +59,15 @@ async def issue_sso_bridge_exchange_code(profile_id: str, timeout: float = 60.0)
     llamador (routers/auth_router.py) decida cómo traducirlo a un mensaje
     de usuario claro.
 
-    Timeout subido de 5s a 60s para tolerar cold starts de Render free tier
-    (~30-60s). Incluye 3 reintentos con backoff exponencial para errores de
-    conexión (no para errores de negocio 4xx).
+    Timeout corto (5s) + 2 intentos con un único backoff de 2s: peor caso
+    ~12s de espera total para UN click de usuario. Antes eran 3 intentos de
+    60s con backoff [0, 2, 5] = hasta ~187s en un solo click, lo cual
+    generaba el síntoma de "error distinto en cada click" (timeouts de la
+    plataforma/proxy interactuando mal con una espera de más de 3 minutos).
+    El ERP (koda-frontend en Render) tiene cold starts reales de 30-60s,
+    pero para ese caso es mejor fallar rápido y dejar que el usuario (o un
+    único retry del frontend) reintente, que colgar el request casi 3
+    minutos.
     """
     _require_config()
 
@@ -69,9 +75,9 @@ async def issue_sso_bridge_exchange_code(profile_id: str, timeout: float = 60.0)
     headers = {"X-SSO-Bridge-Key": SSO_BRIDGE_INTERNAL_KEY}
 
     last_error = None
-    retry_delays = [0, 2.0, 5.0]  # segundos entre intentos
+    retry_delays = [0, 2.0]  # segundos antes de cada intento
 
-    for attempt in range(3):
+    for attempt in range(2):
         if attempt > 0:
             import asyncio
             await asyncio.sleep(retry_delays[attempt])
@@ -114,4 +120,4 @@ async def issue_sso_bridge_exchange_code(profile_id: str, timeout: float = 60.0)
     # Agotados los reintentos
     if last_error:
         raise last_error
-    raise SsoBridgeError("No se pudo contactar al ERP después de 3 intentos.")
+    raise SsoBridgeError("No se pudo contactar al ERP después de 2 intentos.")

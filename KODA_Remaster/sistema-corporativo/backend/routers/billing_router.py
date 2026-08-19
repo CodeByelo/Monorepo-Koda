@@ -130,26 +130,43 @@ async def upload_billing_excel(
     gerencia_id = current_user.get("gerencia_id")
     client_ip = request.client.host if request and request.client else None
 
-    if tenant_id:
-        await conn.execute("SELECT set_config('app.current_tenant_id', $1, true)", str(tenant_id))
-
     if not (file.filename or "").endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=400, detail="Formato de archivo no soportado")
 
     content = await file.read()
     if not validate_magic_bytes(content, file.filename):
-        await _log_security_event(
-            conn,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            username=username,
-            evento="FILE_UPLOAD_SPOOFING",
-            detalles=f"Intento de spoofing detectado al subir excel de facturación: {file.filename}. La firma binaria no coincide.",
-            estado="critical",
-            page="/billing/upload",
-            ip_origen=client_ip,
-            gerencia_id=gerencia_id
-        )
+        # set_config(..., true) es SET LOCAL: solo vive dentro de la
+        # transacción actual. Debe ir en el mismo `conn.transaction()` que
+        # el INSERT de _log_security_event, o el contexto de tenant
+        # desaparece antes de que la RLS de security_events lo vea.
+        if tenant_id:
+            async with conn.transaction():
+                await conn.execute("SELECT set_config('app.current_tenant_id', $1, true)", str(tenant_id))
+                await _log_security_event(
+                    conn,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    username=username,
+                    evento="FILE_UPLOAD_SPOOFING",
+                    detalles=f"Intento de spoofing detectado al subir excel de facturación: {file.filename}. La firma binaria no coincide.",
+                    estado="critical",
+                    page="/billing/upload",
+                    ip_origen=client_ip,
+                    gerencia_id=gerencia_id
+                )
+        else:
+            await _log_security_event(
+                conn,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                username=username,
+                evento="FILE_UPLOAD_SPOOFING",
+                detalles=f"Intento de spoofing detectado al subir excel de facturación: {file.filename}. La firma binaria no coincide.",
+                estado="critical",
+                page="/billing/upload",
+                ip_origen=client_ip,
+                gerencia_id=gerencia_id
+            )
         raise HTTPException(
             status_code=400,
             detail="El contenido del archivo no coincide con su extensión (se requiere un archivo Excel válido)."
@@ -270,7 +287,12 @@ async def export_billing_excel(
 ):
     tenant_id = current_user.get("tenant_id")
     if tenant_id:
-        await conn.execute("SELECT set_config('app.current_tenant_id', $1, true)", str(tenant_id))
+        # set_config(..., true) es SET LOCAL: solo aplica dentro de la
+        # transacción en la que se ejecuta. Se abre explícitamente aquí
+        # para que cualquier consulta con RLS que dependa del tenant (hoy
+        # o en el futuro) quede protegida por el mismo contexto.
+        async with conn.transaction():
+            await conn.execute("SELECT set_config('app.current_tenant_id', $1, true)", str(tenant_id))
     items = payload.get("items", [])
     wb = openpyxl.Workbook()
     ws = wb.active

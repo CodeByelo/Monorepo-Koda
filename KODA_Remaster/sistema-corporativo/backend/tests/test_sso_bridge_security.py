@@ -94,3 +94,64 @@ def test_exchange_code_propaga_404_como_error_claro(monkeypatch):
     )
     assert resp.status_code == 404
     assert "ERP" in resp.json()["detail"]
+
+
+def test_issue_sso_bridge_exchange_code_respeta_sla_de_timeout():
+    """
+    No-regresión de la Fix del timeout budget stacking en
+    services/koda_frontend_client.py: antes, 3 intentos x 60s + backoff
+    [0, 2, 5] daban un peor caso de ~187s para UN click de usuario. Ahora
+    son 2 intentos x 5s + un backoff de 2s => peor caso ~12s.
+
+    Este test NO usa el doble de prueba de los tests anteriores (que
+    reemplaza toda la función por un retorno instantáneo y por eso nunca
+    ejercitó el retry/timeout real). Aquí se reemplaza únicamente
+    `httpx.AsyncClient` por un doble que "cuelga" hasta el `timeout`
+    configurado en cada intento, para medir el tiempo real de pared y
+    detectar si alguien vuelve a subir el timeout o el número de
+    reintentos.
+    """
+    import asyncio
+    import time
+
+    import httpx
+    import pytest
+
+    class _FakeHangingClient:
+        """Simula que koda-frontend nunca responde: el timeout real de
+        httpx dispararía justo a los `timeout` segundos configurados."""
+
+        def __init__(self, timeout):
+            self._timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, json=None, headers=None):
+            await asyncio.sleep(self._timeout)
+            raise httpx.ReadTimeout("simulado: koda-frontend nunca responde")
+
+    original_async_client = koda_frontend_client.httpx.AsyncClient
+    original_url = koda_frontend_client.KODA_FRONTEND_API_URL
+    original_key = koda_frontend_client.SSO_BRIDGE_INTERNAL_KEY
+    koda_frontend_client.httpx.AsyncClient = _FakeHangingClient
+    koda_frontend_client.KODA_FRONTEND_API_URL = "http://fake-erp.test"
+    koda_frontend_client.SSO_BRIDGE_INTERNAL_KEY = "test-key"
+    try:
+        start = time.monotonic()
+        with pytest.raises(koda_frontend_client.SsoBridgeError):
+            asyncio.run(
+                koda_frontend_client.issue_sso_bridge_exchange_code(REAL_PROFILE_ID)
+            )
+        elapsed = time.monotonic() - start
+    finally:
+        koda_frontend_client.httpx.AsyncClient = original_async_client
+        koda_frontend_client.KODA_FRONTEND_API_URL = original_url
+        koda_frontend_client.SSO_BRIDGE_INTERNAL_KEY = original_key
+
+    # SLA endurecido: peor caso ~12s. Si alguien revierte a un budget
+    # largo (p. ej. 60s x 3 intentos), esto debe fallar.
+    assert elapsed <= 13.0, f"El presupuesto de reintentos se disparó: {elapsed:.1f}s"
