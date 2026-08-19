@@ -49,6 +49,7 @@ import {
   Map as MapIcon,
   FileSpreadsheet,
   Code,
+  Loader2,
 } from "lucide-react";
 
 import TicketSystem, { Ticket } from "../../components/TicketSystem";
@@ -103,6 +104,7 @@ import {
 } from "../../lib/api";
 import { ApiDocument, ApiUser } from "../../lib/api";
 import { uiAlert, uiConfirm, uiPrompt } from "../../lib/ui-dialog";
+import { fetchBillingUrl, BillingBridgeError } from "./utils/billingBridge";
 const ResponsiveContainerCompat =
   ResponsiveContainer as unknown as React.ComponentType<any>;
 const PieChartCompat = PieChart as unknown as React.ComponentType<any>;
@@ -125,7 +127,7 @@ interface SidebarItemProps {
   darkMode: boolean;
   badgeCount?: number;
   onClick?: () => void;
-  href?: string;
+  loading?: boolean;
 }
 interface SidebarGroupItem {
   id: string;
@@ -133,7 +135,7 @@ interface SidebarGroupItem {
   icon: React.ElementType;
   canAccess: boolean;
   badgeCount?: number;
-  href?: string;
+  loading?: boolean;
 }
 
 interface SidebarGroup {
@@ -552,10 +554,11 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
   darkMode,
   badgeCount = 0,
   onClick,
-  href,
+  loading = false,
 }) => {
   const className = `
     group glass-hover flex items-center ${collapsed ? "justify-center" : "justify-between"} gap-3 px-3 py-2.5 rounded-md cursor-pointer transition-all duration-200 min-w-0 relative
+    ${loading ? "opacity-60 cursor-not-allowed" : ""}
     ${active
       ? darkMode
         ? "bg-[#00C294]/10 text-[#00C294] shadow-sm border border-[#00C294]/50"
@@ -570,7 +573,11 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
     <>
       <div className={`flex items-center ${collapsed ? "justify-center" : "gap-3 min-w-0 flex-1"}`}>
         <div className="relative shrink-0">
-          <Icon size={18} className={`${active ? (darkMode ? "text-[#00C294]" : "text-white") : ""}`} />
+          {loading ? (
+            <Loader2 size={18} className="animate-spin" />
+          ) : (
+            <Icon size={18} className={`${active ? (darkMode ? "text-[#00C294]" : "text-white") : ""}`} />
+          )}
           {collapsed && badgeCount > 0 && (
             <span
               className={`
@@ -605,25 +612,11 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
     </>
   );
 
-  if (href) {
-    return (
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={onClick}
-        className={className}
-        style={{ textDecoration: 'none' }}
-      >
-        {content}
-      </a>
-    );
-  }
-
   return (
     <div
-      onClick={onClick}
+      onClick={loading ? undefined : onClick}
       onKeyDown={(e) => {
+        if (loading) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onClick?.();
@@ -632,6 +625,7 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
       role="button"
       tabIndex={0}
       aria-label={label}
+      aria-disabled={loading}
       className={className}
     >
       {content}
@@ -681,8 +675,8 @@ const SidebarAccordion: React.FC<{
             collapsed={collapsed}
             darkMode={darkMode}
             badgeCount={item.badgeCount}
-            href={item.href}
-            onClick={item.href ? undefined : () => onNavigate(item.id)}
+            loading={item.loading}
+            onClick={() => onNavigate(item.id)}
           />
         ))}
       </div>
@@ -735,8 +729,8 @@ const SidebarAccordion: React.FC<{
               collapsed={collapsed}
               darkMode={darkMode}
               badgeCount={item.badgeCount}
-              href={item.href}
-              onClick={item.href ? undefined : () => onNavigate(item.id)}
+              loading={item.loading}
+              onClick={() => onNavigate(item.id)}
             />
           ))}
         </div>
@@ -4359,7 +4353,7 @@ export default function Dashboard() {
   const [collapsed, setCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [activeSection, setActiveSection] = useState("dashboard");
-  const [billingUrl, setBillingUrl] = useState<string>("");
+  const [isBillingLoading, setIsBillingLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
   const [expandedCategories, setExpandedCategories] = useState<number[]>([
     0, 1, 2, 3, 4,
@@ -4533,7 +4527,7 @@ export default function Dashboard() {
       allowedRoles: ["CEO", "Gerente", "Administrador", "Desarrollador"],
       items: [
         { id: "graficos", label: "Gráficos", icon: BarChart2, canAccess: canAccessStats },
-        { id: "facturacion", label: "Módulo de Facturación", icon: FileSpreadsheet, canAccess: canAccessBilling, href: billingUrl || undefined },
+        { id: "facturacion", label: "Módulo de Facturación", icon: FileSpreadsheet, canAccess: canAccessBilling, loading: isBillingLoading },
       ],
     },
     {
@@ -4558,7 +4552,7 @@ export default function Dashboard() {
         { id: "seguridad", label: "Módulo de Seguridad", icon: Shield, canAccess: canAccessSecurity },
       ],
     },
-  ], [canAccessStats, canAccessBilling, billingUrl, canAccessDocumentos, unreadInboxCount, canAccessPriorities, canAccessTickets, canAccessSecurity]);
+  ], [canAccessStats, canAccessBilling, isBillingLoading, canAccessDocumentos, unreadInboxCount, canAccessPriorities, canAccessTickets, canAccessSecurity]);
 
   // Filtrar grupos según el rol del usuario
   const visibleSidebarGroups = useMemo(() =>
@@ -4568,10 +4562,32 @@ export default function Dashboard() {
     }),
   [sidebarGroups, userRole]);
 
+  const openBillingModule = useCallback(async () => {
+    if (isBillingLoading) return;
+    setIsBillingLoading(true);
+    try {
+      const url = await fetchBillingUrl();
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      await uiAlert(
+        e instanceof BillingBridgeError
+          ? e.message
+          : "No se pudo abrir el Módulo de Facturación. Intenta nuevamente.",
+        "Módulo de Facturación",
+      );
+    } finally {
+      setIsBillingLoading(false);
+    }
+  }, [isBillingLoading]);
+
   const handleSidebarNavigate = useCallback((tabId: string) => {
+    if (tabId === "facturacion") {
+      openBillingModule();
+      return;
+    }
     setActiveSection("dashboard");
     setActiveTab(tabId);
-  }, []);
+  }, [openBillingModule]);
 
   const fetchDocuments = useCallback(async () => {
     try {
@@ -5112,60 +5128,6 @@ export default function Dashboard() {
 
   useEffect(() => {
     setMounted(true);
-    if (typeof window === "undefined") return;
-
-    const host = window.location.hostname;
-    const isProduction = host.includes('vercel.app') || host.includes('onrender.com') || host.includes('cloudflare');
-    const billingProdUrl = process.env.NEXT_PUBLIC_BILLING_URL || 'https://koda-billing-front.vercel.app';
-    let baseUrl = isProduction ? billingProdUrl : `http://${host}:5174`;
-    if (host.includes('.ts.net')) {
-      baseUrl = `https://${host}:8443`;
-    }
-
-    // SSO real hacia koda-frontend: se pide un exchange_code de un solo uso
-    // antes de exponer el link del sidebar. Incluye reintentos automáticos
-    // (3 intentos con backoff) para tolerar cold starts y errores transitorios.
-    let cancelled = false;
-    (async () => {
-      const retryDelays = [0, 2000, 5000]; // ms entre intentos
-      for (let attempt = 0; attempt < 3; attempt++) {
-        if (cancelled) return;
-        if (attempt > 0) {
-          await new Promise((r) => setTimeout(r, retryDelays[attempt] || 5000));
-        }
-        try {
-          const token = typeof window !== 'undefined'
-            ? (localStorage.getItem('sgd_token') || localStorage.getItem('koda_token'))
-            : null;
-
-          const headers: Record<string, string> = {};
-          if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
-          }
-
-          const res = await fetch("/api/auth/koda-frontend/exchange-code", {
-            method: "GET",
-            headers,
-            credentials: "include",
-          });
-          if (cancelled) return;
-          // No reintentar en 401/404 (errores de negocio, no transitorios)
-          if (res.status === 401 || res.status === 404) break;
-          const body = await res.json().catch(() => ({} as any));
-          if (res.ok && body?.exchange_code) {
-            setBillingUrl(`${baseUrl}?exchange_code=${encodeURIComponent(body.exchange_code)}`);
-            return; // Éxito — salir del loop
-          }
-        } catch {
-          // Error de red — reintentar si quedan intentos
-        }
-      }
-      if (!cancelled) setBillingUrl("");
-    })();
-
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   useEffect(() => {

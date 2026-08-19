@@ -1,135 +1,50 @@
 "use client";
 import React, { useEffect, useState, useCallback } from "react";
 import { CreditCard, Maximize2, Loader2, AlertTriangle, RefreshCw } from "lucide-react";
+import { fetchBillingUrl, BillingBridgeError } from "../utils/billingBridge";
 
 type BridgeStatus = "loading" | "ready" | "error";
 
-const MAX_RETRIES = 3;
-const RETRY_DELAYS = [0, 2000, 5000]; // ms entre reintentos: inmediato, 2s, 5s
-
 export default function BillingModule({ darkMode }: { darkMode: boolean }) {
-  const isProduction = typeof window !== 'undefined' && (
-    window.location.hostname.includes('vercel.app') ||
-    window.location.hostname.includes('onrender.com') ||
-    window.location.hostname.includes('cloudflare')
-  );
-  const isTailscale = typeof window !== 'undefined' && window.location.hostname.includes('.ts.net');
-  const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-
-  const billingProdUrl = process.env.NEXT_PUBLIC_BILLING_URL || 'https://koda-billing-front.vercel.app';
-  let baseUrl = isProduction ? billingProdUrl : `http://${host}:5174`;
-  if (isTailscale) {
-    baseUrl = `https://${host}:8443`;
-  }
-
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>("loading");
-  const [exchangeCode, setExchangeCode] = useState<string | null>(null);
+  const [billingUrl, setBillingUrl] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [retryCount, setRetryCount] = useState(0);
   const [isRetrying, setIsRetrying] = useState(false);
 
-  const fetchExchangeCode = useCallback(async (attempt = 0): Promise<boolean> => {
+  const loadBillingUrl = useCallback(async () => {
     try {
-      const token = typeof window !== 'undefined'
-        ? (localStorage.getItem('sgd_token') || localStorage.getItem('koda_token'))
-        : null;
-
-      const headers: Record<string, string> = {};
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      const res = await fetch("/api/auth/koda-frontend/exchange-code", {
-        method: "GET",
-        headers,
-        credentials: "include",
-      });
-
-      const body = await res.json().catch(() => ({} as any));
-
-      if (res.ok && body?.exchange_code) {
-        setExchangeCode(body.exchange_code as string);
-        setBridgeStatus("ready");
-        setRetryCount(0);
-        return true;
-      }
-
-      // Si es un 401, no tiene sentido reintentar
-      if (res.status === 401) {
-        setErrorMessage("Tu sesión ha expirado. Recarga la página e inicia sesión nuevamente.");
-        setBridgeStatus("error");
-        return false;
-      }
-
-      // Si es 404, el usuario no tiene acceso (no es un error transitorio)
-      if (res.status === 404) {
-        setErrorMessage(
-          body?.detail || "Tu empresa no tiene el Módulo de Facturación activado. Contacta a soporte."
-        );
-        setBridgeStatus("error");
-        return false;
-      }
-
-      // Para errores 5xx, intentar reintentar
-      if (attempt < MAX_RETRIES - 1) {
-        const delay = RETRY_DELAYS[attempt + 1] || 5000;
-        await new Promise((r) => setTimeout(r, delay));
-        return fetchExchangeCode(attempt + 1);
-      }
-
-      // Agotados los reintentos
-      setErrorMessage(
-        body?.detail ||
-        "No se pudo conectar con el Módulo de Facturación. Usa el botón de reintento."
-      );
-      setBridgeStatus("error");
-      return false;
+      const url = await fetchBillingUrl();
+      setBillingUrl(url);
+      setBridgeStatus("ready");
     } catch (e) {
-      if (attempt < MAX_RETRIES - 1) {
-        const delay = RETRY_DELAYS[attempt + 1] || 5000;
-        await new Promise((r) => setTimeout(r, delay));
-        return fetchExchangeCode(attempt + 1);
-      }
-
       setErrorMessage(
-        "Error de conexión al verificar tu acceso. Verifica tu internet y usa el botón de reintento."
+        e instanceof BillingBridgeError
+          ? e.message
+          : "No se pudo conectar con el Módulo de Facturación. Usa el botón de reintento.",
       );
       setBridgeStatus("error");
-      return false;
     }
   }, []);
 
-  // Carga inicial con reintentos automáticos
   useEffect(() => {
     let cancelled = false;
-
-    (async () => {
-      setBridgeStatus("loading");
-      const success = await fetchExchangeCode(0);
+    setBridgeStatus("loading");
+    loadBillingUrl().then(() => {
       if (cancelled) return;
-      if (!success && bridgeStatus !== "error") {
-        setBridgeStatus("error");
-      }
-    })();
-
+    });
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadBillingUrl]);
 
-  // Reintento manual del usuario
   const handleRetry = useCallback(async () => {
     setIsRetrying(true);
     setBridgeStatus("loading");
-    setRetryCount((c: number) => c + 1);
-    await fetchExchangeCode(0);
+    setRetryCount((c) => c + 1);
+    await loadBillingUrl();
     setIsRetrying(false);
-  }, [fetchExchangeCode]);
-
-  const billingUrl = exchangeCode
-    ? `${baseUrl}?exchange_code=${encodeURIComponent(exchangeCode)}`
-    : baseUrl;
+  }, [loadBillingUrl]);
 
   return (
     <div
