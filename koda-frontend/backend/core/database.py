@@ -10,59 +10,41 @@ load_dotenv(override=True)
 # Obtener la URL de la base de datos de las variables de entorno (Obligatorio)
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+if not DATABASE_URL:
+    raise RuntimeError(
+        "[DATABASE ERROR CRÍTICO] La variable de entorno DATABASE_URL no está configurada. "
+        "El sistema requiere PostgreSQL (Supabase) y no permite bases de datos SQLite locales en producción."
+    )
+
+if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-is_sqlite = False
-if not DATABASE_URL or not DATABASE_URL.startswith("postgresql"):
-    is_sqlite = True
-    DATABASE_URL = "sqlite:////app/backend/erp_bimonetario.db" if os.path.exists("/app/backend/erp_bimonetario.db") else "sqlite:///erp_bimonetario.db"
+if not DATABASE_URL.startswith("postgresql"):
+    raise RuntimeError(
+        f"[DATABASE ERROR CRÍTICO] Formato inválido de base de datos: {DATABASE_URL[:15]}... "
+        "El sistema solo soporta conexiones a PostgreSQL."
+    )
+
+# Parámetros de búsqueda para public schema
+if "?" in DATABASE_URL:
+    if "options=-csearch_path=" not in DATABASE_URL:
+        DATABASE_URL = f"{DATABASE_URL}&options=-csearch_path=public"
 else:
-    try:
-        test_engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args={"connect_timeout": 3})
-        with test_engine.connect():
-            pass
-        test_engine.dispose()
-    except Exception as db_err:
-        print(f"\033[93m[DB WARNING] No se pudo conectar a Supabase ({db_err}). Activando base de datos local SQLite de respaldo.\033[0m")
-        is_sqlite = True
-        DATABASE_URL = "sqlite:////app/backend/erp_bimonetario.db" if os.path.exists("/app/backend/erp_bimonetario.db") else "sqlite:///erp_bimonetario.db"
+    DATABASE_URL = f"{DATABASE_URL}?options=-csearch_path=public"
+
+print(f"\033[94m[DB INFO] Motor SQL activo: PostgreSQL ({DATABASE_URL.split('@')[-1] if '@' in DATABASE_URL else 'Supabase'})\033[0m")
+
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=5,
+    max_overflow=10,
+    pool_recycle=1800,
+    pool_timeout=10,
+)
 
 # Clase base declarativa para que los modelos hereden de ella
 Base = declarative_base()
-
-if is_sqlite:
-    print(f"\033[92m[DB INFO] Motor SQL activo: SQLite ({DATABASE_URL})\033[0m")
-    engine = create_engine(
-        DATABASE_URL,
-        connect_args={"check_same_thread": False}
-    )
-    from sqlalchemy import event
-    @event.listens_for(Base.metadata, "before_create")
-    def _strip_schema_for_sqlite(target, connection, **kw):
-        for table in target.tables.values():
-            table.schema = None
-
-    @event.listens_for(engine, "before_cursor_execute", retval=True)
-    def _strip_public_schema_sqlite(conn, cursor, statement, parameters, context, execmany):
-        if "public." in statement:
-            statement = statement.replace("public.", "")
-        return statement, parameters
-else:
-    if "?" in DATABASE_URL:
-        if "options=-csearch_path=" not in DATABASE_URL:
-            DATABASE_URL = f"{DATABASE_URL}&options=-csearch_path=public"
-    else:
-        DATABASE_URL = f"{DATABASE_URL}?options=-csearch_path=public"
-    print(f"\033[94m[DB INFO] Motor SQL activo: PostgreSQL ({DATABASE_URL.split('@')[-1] if '@' in DATABASE_URL else 'Supabase'})\033[0m")
-    engine = create_engine(
-        DATABASE_URL,
-        pool_pre_ping=True,
-        pool_size=5,
-        max_overflow=10,
-        pool_recycle=1800,
-        pool_timeout=10,
-    )
 
 # Configurar la fábrica de sesiones (SessionLocal)
 SessionLocal = sessionmaker(
