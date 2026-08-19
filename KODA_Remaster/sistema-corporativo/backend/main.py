@@ -573,6 +573,25 @@ def _apply_cors_headers(request: Request, response: JSONResponse) -> JSONRespons
         response.headers["Access-Control-Allow-Headers"] = "*"
     return response
 
+async def _notify_telegram_error(ref_code: str, method: str, path: str, error_msg: str) -> None:
+    """Envía alerta de error 500 al chat de administrador de Telegram si está configurado."""
+    admin_chat_id = os.getenv("TELEGRAM_ADMIN_CHAT_ID")
+    if not admin_chat_id or not os.getenv("TELEGRAM_BOT_TOKEN"):
+        return
+    try:
+        from routers.telegram_router import send_telegram_message
+        now_str = datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
+        text = (
+            f"🚨 *ERROR CRÍTICO DETECTADO EN KODA*\n\n"
+            f"🔖 *Ref:* `{ref_code}`\n"
+            f"🌐 *Ruta:* `{method} {path}`\n"
+            f"💥 *Detalle:* `{error_msg[:250]}`\n"
+            f"⏰ *Hora:* `{now_str}`\n"
+        )
+        await send_telegram_message(chat_id=int(admin_chat_id), text=text)
+    except Exception as e:
+        logger.debug(f"No se pudo enviar alerta a Telegram: {e}")
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     # Si la excepción es una HTTPException (ej. 429 del rate limiter, 401, 403, etc.)
@@ -586,6 +605,10 @@ async def global_exception_handler(request: Request, exc: Exception):
     # Print explícito para asegurar que se ve en la terminal
     print(f"\n❌ CRITICAL GLOBAL ERROR [Ref: {ref_code}]: {str(exc)}\n{error_trace}\n")
     logger.error(f"GLOBAL ERROR [Ref: {ref_code}]: {str(exc)}\n{error_trace}")
+
+    # Enviar notificación push asíncrona a Telegram
+    import asyncio
+    asyncio.create_task(_notify_telegram_error(ref_code, request.method, request.url.path, str(exc)))
 
     response_content = {
         "detail": f"Error interno del servidor. Código de referencia: {ref_code}"
@@ -607,6 +630,9 @@ async def http_exception_handler(request: Request, exc: HTTPException):
             error_trace = f"HTTPException 500 raised with detail: {exc.detail}"
         print(f"\n❌ HTTP 500 ERROR [Ref: {ref_code}]: {exc.detail}\n{error_trace}\n")
         logger.error(f"HTTP 500 ERROR [Ref: {ref_code}]: {exc.detail}\n{error_trace}")
+
+        import asyncio
+        asyncio.create_task(_notify_telegram_error(ref_code, request.method, request.url.path, str(exc.detail)))
 
         response_content = {
             "detail": f"Error interno del servidor. Código de referencia: {ref_code}"
