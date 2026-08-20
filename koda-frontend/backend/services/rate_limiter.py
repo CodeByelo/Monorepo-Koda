@@ -34,12 +34,12 @@ AUTH_ROUTE_PREFIXES = ("/auth/login", "/auth/register")
 
 WINDOW_SECONDS = 60
 LIMIT_GLOBAL   = 1200
-LIMIT_AUTH     = 5
+LIMIT_AUTH     = 30
 
 
 def _is_auth_route(path: str) -> bool:
     normalized = path.lower()
-    return any(normalized.startswith(prefix) for prefix in AUTH_ROUTE_PREFIXES)
+    return any(normalized == prefix or normalized.startswith(f"{prefix}/") for prefix in AUTH_ROUTE_PREFIXES)
 
 
 def check_rate_limit(request: Request) -> None:

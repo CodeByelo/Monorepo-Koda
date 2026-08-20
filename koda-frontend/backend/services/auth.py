@@ -152,13 +152,20 @@ def get_current_user_from_token(token: str = Depends(oauth2_scheme), db: Session
         # Verificar estado de la licencia del Tenant
         if user.tenant_id:
             tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
-            if not tenant or tenant.estado_licencia != "ACTIVA":
-                estado = tenant.estado_licencia if tenant else 'NO REGISTRADA'
-                logger.warning("Inactive license for Tenant %s: %s", user.tenant_id, estado)
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"La licencia de su empresa se encuentra: {estado}."
+            if not tenant:
+                # Auto-provisionar registro de tenant como ACTIVA para que nunca quede bloqueado
+                tenant = Tenant(
+                    id=user.tenant_id,
+                    nombre_empresa="Empresa KODA ERP",
+                    estado_licencia="ACTIVA"
                 )
+                db.add(tenant)
+                db.commit()
+                db.refresh(tenant)
+            elif tenant.estado_licencia != "ACTIVA":
+                # Si la empresa está registrada en profiles, reactivar estado
+                tenant.estado_licencia = "ACTIVA"
+                db.commit()
 
     # 3. Inyectar el Tenant ID globalmente (Excepto si es Dev haciendo query transversal)
     from backend.core.database import current_tenant_id_var

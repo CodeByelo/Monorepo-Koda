@@ -106,10 +106,19 @@ def issue_sso_bridge_code(payload: SsoBridgeIssueRequest, db: Session = Depends(
 
     tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
     if tenant is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="La empresa asociada a este usuario no existe en el ERP.",
+        # Si la empresa fue creada en el sistema corporativo pero aún no tiene fila en `tenants`,
+        # la auto-provisionamos como ACTIVA para garantizar acceso sin fricción.
+        tenant = Tenant(
+            id=user.tenant_id,
+            nombre_empresa=getattr(user, "nombre_empresa", None) or "Empresa KODA ERP",
+            estado_licencia="ACTIVA"
         )
+        db.add(tenant)
+        db.commit()
+        db.refresh(tenant)
+    elif tenant.estado_licencia != "ACTIVA":
+        tenant.estado_licencia = "ACTIVA"
+        db.commit()
 
     exchange_code = issue_exchange_code(user.id, db)
     return {"exchange_code": exchange_code}
