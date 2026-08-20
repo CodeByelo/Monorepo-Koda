@@ -46,7 +46,34 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    if not hashed_password or not isinstance(hashed_password, str):
+        return False
+    try:
+        if pwd_context.verify(plain_password, hashed_password):
+            return True
+    except Exception:
+        pass
+
+    # Fallback para hashes bcrypt ($2a$, $2b$, $2y$)
+    if hashed_password.startswith(("$2a$", "$2b$", "$2y$")):
+        try:
+            import bcrypt
+            return bcrypt.checkpw(
+                plain_password.encode("utf-8"),
+                hashed_password.encode("utf-8"),
+            )
+        except Exception:
+            pass
+
+    # Fallback para hashes sha256 planos
+    try:
+        sha_candidate = hashlib.sha256(plain_password.encode("utf-8")).hexdigest()
+        if hmac.compare_digest(sha_candidate, hashed_password):
+            return True
+    except Exception:
+        pass
+
+    return False
 
 # ==========================================
 # MANEJO DE TOKENS JWT
