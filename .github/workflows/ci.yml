@@ -16,13 +16,17 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          # Node 20 trae npm 10, que resuelve peer deps distinto a la npm 11
-          # usada para generar este lockfile (rechaza "npm ci" con
-          # "Missing: @types/react@... from lock file" aunque el lockfile
-          # este bien). Node 22 trae npm 11 y coincide.
           node-version: 22
           cache: 'npm'
           cache-dependency-path: KODA_Remaster/sistema-corporativo/frontend-enterprise/package-lock.json
+
+      - name: Fijar version de npm
+        # El lockfile se genero con npm 11.x. La npm que trae Node por
+        # defecto (10.x incluso en Node 22) resuelve peer deps distinto y
+        # "npm ci" lo rechaza con "Missing: @types/react@... from lock
+        # file" aunque el lockfile este bien. Se fija la version exacta en
+        # vez de depender de cual traiga la imagen del runner.
+        run: npm install -g npm@11
 
       - name: Instalar dependencias
         working-directory: KODA_Remaster/sistema-corporativo/frontend-enterprise
