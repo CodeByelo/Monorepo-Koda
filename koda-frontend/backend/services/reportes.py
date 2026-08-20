@@ -5,19 +5,25 @@ from backend.models.erp_extended import DetalleAsiento, CuentaBancaria, CuentaPo
 
 class ReporteService:
     @staticmethod
-    def obtener_balance_comprobacion(db: Session):
+    def obtener_balance_comprobacion(db: Session, tenant_id=None):
         """
         Agrupa los detalles de los asientos por código de cuenta contable,
         calcula la suma de cargos (Debe) y abonos (Haber) de cada una
-        y valida que el balance general esté cuadrado (Total Debe == Total Haber).
+        y valida que el balance general esté cuadrado (Total Debe == Total Haber),
+        aislando estrictamente por empresa (tenant_id).
         """
         # Agrupar asiento_detalles por cuenta
-        resultados = db.query(
+        query = db.query(
             DetalleAsiento.cuenta_codigo,
             DetalleAsiento.cuenta_nombre,
             func.sum(DetalleAsiento.debe_usd).label("debe_total"),
             func.sum(DetalleAsiento.haber_usd).label("haber_total")
-        ).group_by(
+        )
+
+        if tenant_id:
+            query = query.filter(DetalleAsiento.tenant_id == tenant_id)
+
+        resultados = query.group_by(
             DetalleAsiento.cuenta_codigo,
             DetalleAsiento.cuenta_nombre
         ).order_by(
@@ -58,19 +64,25 @@ class ReporteService:
         }
 
     @staticmethod
-    def obtener_estado_resultados(db: Session):
+    def obtener_estado_resultados(db: Session, tenant_id=None):
         """
         Filtra las cuentas de Ingresos (código 4) y Costos/Gastos (código 5)
-        para calcular la utilidad bruta y neta acumulada en base al libro diario.
+        para calcular la utilidad bruta y neta acumulada en base al libro diario,
+        aislando estrictamente por empresa (tenant_id).
         """
         # Filtrar detalles de cuentas con prefijo 4 o 5
-        resultados = db.query(
+        query = db.query(
             DetalleAsiento.cuenta_codigo,
             func.sum(DetalleAsiento.debe_usd).label("debe_total"),
             func.sum(DetalleAsiento.haber_usd).label("haber_total")
         ).filter(
             DetalleAsiento.cuenta_codigo.like("4%") | DetalleAsiento.cuenta_codigo.like("5%")
-        ).group_by(
+        )
+
+        if tenant_id:
+            query = query.filter(DetalleAsiento.tenant_id == tenant_id)
+
+        resultados = query.group_by(
             DetalleAsiento.cuenta_codigo
         ).all()
 

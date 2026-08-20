@@ -350,12 +350,12 @@ def get_repo_dashboard_resumen(current_user = Depends(get_current_user)):
         db.close()
 
 @app.get("/repo_estado_resultados", tags=["Reportes Financieros"])
-def get_repo_estado_resultados():
+def get_repo_estado_resultados(current_user = Depends(get_current_user)):
     from fastapi import HTTPException
     from backend.services.reportes import ReporteService
     db = SessionLocal()
     try:
-        return ReporteService.obtener_estado_resultados(db)
+        return ReporteService.obtener_estado_resultados(db, tenant_id=current_user.tenant_id if current_user else None)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:

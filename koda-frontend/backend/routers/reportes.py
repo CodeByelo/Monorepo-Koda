@@ -45,28 +45,28 @@ class DashboardResumenResponse(BaseModel):
 
 # --- Endpoints ---
 
-@router.get("/balance-comprobacion", response_model=BalanceComprobacionResponse, dependencies=[Depends(role_required(['Admin', 'Contabilidad']))])
-def get_balance_comprobacion(db: Session = Depends(get_db)):
+@router.get("/balance-comprobacion", response_model=BalanceComprobacionResponse)
+def get_balance_comprobacion(db: Session = Depends(get_db), current_user = Depends(role_required(['Admin', 'Contabilidad']))):
     """
     Obtiene el balance de comprobación agrupado por cuenta contable,
-    verificando la igualdad (Debe == Haber) general.
+    verificando la igualdad (Debe == Haber) general con alcance por tenant.
     """
     try:
-        return ReporteService.obtener_balance_comprobacion(db)
+        return ReporteService.obtener_balance_comprobacion(db, tenant_id=current_user.tenant_id if current_user else None)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al generar balance de comprobación: {str(e)}"
         )
 
-@router.get("/estado-resultados", response_model=EstadoResultadosResponse, dependencies=[Depends(role_required(['Admin', 'Contabilidad']))])
-def get_estado_resultados(db: Session = Depends(get_db)):
+@router.get("/estado-resultados", response_model=EstadoResultadosResponse)
+def get_estado_resultados(db: Session = Depends(get_db), current_user = Depends(role_required(['Admin', 'Contabilidad']))):
     """
     Obtiene el estado de resultados consolidado en USD (Ingresos, Costos, Gastos,
-    Utilidad Bruta y Neta) a partir del libro contable.
+    Utilidad Bruta y Neta) a partir del libro contable con alcance por tenant.
     """
     try:
-        return ReporteService.obtener_estado_resultados(db)
+        return ReporteService.obtener_estado_resultados(db, tenant_id=current_user.tenant_id if current_user else None)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
