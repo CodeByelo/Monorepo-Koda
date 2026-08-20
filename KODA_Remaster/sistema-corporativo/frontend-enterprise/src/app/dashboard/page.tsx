@@ -4567,7 +4567,7 @@ export default function Dashboard() {
     setIsBillingLoading(true);
     // Must open synchronously within the click's user-activation window, or
     // browsers silently block the popup once the fetch below resolves.
-    const billingTab = window.open("", "_blank", "noopener,noreferrer");
+    const billingTab = window.open("", "_blank");
     try {
       const url = await fetchBillingUrl();
       if (billingTab) {
