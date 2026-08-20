@@ -200,7 +200,7 @@ async function directDbMethod(session: string): Promise<NextResponse> {
     );
   }
 
-  // 3. Verificar que el tenant existe
+  // 3. Verificar/asegurar que el tenant exista en organizations
   const tenants = (await sql`
     SELECT id FROM organizations
     WHERE id = ${user.tenant_id}::uuid
@@ -208,10 +208,15 @@ async function directDbMethod(session: string): Promise<NextResponse> {
   `) as unknown as Array<{ id: string }>;
 
   if (!tenants || tenants.length === 0) {
-    return NextResponse.json(
-      { detail: "La empresa asociada a este usuario no existe en el ERP." },
-      { status: 404 },
-    );
+    try {
+      await sql`
+        INSERT INTO organizations (id, nombre, config)
+        VALUES (${user.tenant_id}::uuid, 'Organización KODA', '{}'::jsonb)
+        ON CONFLICT (id) DO NOTHING
+      `;
+    } catch {
+      // Best effort si ya existía o restricción de esquema
+    }
   }
 
   // 4. Crear la tabla exchange_codes si no existe (idempotente)
