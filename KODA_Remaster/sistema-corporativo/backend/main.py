@@ -2011,7 +2011,6 @@ async def list_documentos(
                 AND (
                     $1::uuid IS NULL
                     OR d.tenant_id = $1::uuid
-                    OR d.tenant_id IS NULL
                 )
             ORDER BY d.fecha_creacion DESC
         """
