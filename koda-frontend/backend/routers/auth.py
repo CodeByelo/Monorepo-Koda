@@ -300,8 +300,24 @@ def login(request: Request, user_in: UserLogin, db: Session = Depends(get_db)):
         )
         
     # Buscar el usuario por email o username ignorando mayúsculas/minúsculas
-    user = db.query(Profile).filter((func.lower(Profile.email) == identifier) | (func.lower(Profile.username) == identifier)).first()
-    if not user or not verify_password(user_in.password, user.password_hash):
+    user = None
+    try:
+        user = db.query(Profile).filter((func.lower(Profile.email) == identifier) | (func.lower(Profile.username) == identifier)).first()
+    except Exception as db_err:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error de conexión con la base de datos: {str(db_err)}"
+        )
+
+    is_valid_password = False
+    if user and user.password_hash:
+        try:
+            is_valid_password = verify_password(user_in.password, user.password_hash)
+        except Exception:
+            is_valid_password = False
+
+    if not user or not is_valid_password:
         # Incrementar contador de intentos fallidos
         failed_count = (lock_row.failed_count if lock_row else 0) + 1
         locked_until = None
@@ -340,9 +356,12 @@ def login(request: Request, user_in: UserLogin, db: Session = Depends(get_db)):
             
     # Resetear bloqueo si el login es exitoso
     if lock_row:
-        lock_row.failed_count = 0
-        lock_row.locked_until = None
-        db.commit()
+        try:
+            lock_row.failed_count = 0
+            lock_row.locked_until = None
+            db.commit()
+        except Exception:
+            db.rollback()
     
     # Registrar el login exitoso con la IP real en el Ledger de Auditoría
     real_ip = get_real_ip_str(request)

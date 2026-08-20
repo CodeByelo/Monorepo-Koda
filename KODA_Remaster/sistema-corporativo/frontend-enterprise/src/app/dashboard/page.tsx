@@ -104,7 +104,7 @@ import {
 } from "../../lib/api";
 import { ApiDocument, ApiUser } from "../../lib/api";
 import { uiAlert, uiConfirm, uiPrompt } from "../../lib/ui-dialog";
-import { fetchBillingUrl, BillingBridgeError } from "./utils/billingBridge";
+import { fetchBillingUrl, getBillingBaseUrl, BillingBridgeError } from "./utils/billingBridge";
 const ResponsiveContainerCompat =
   ResponsiveContainer as unknown as React.ComponentType<any>;
 const PieChartCompat = PieChart as unknown as React.ComponentType<any>;
@@ -4565,8 +4565,7 @@ export default function Dashboard() {
   const openBillingModule = useCallback(async () => {
     if (isBillingLoading) return;
     setIsBillingLoading(true);
-    // Must open synchronously within the click's user-activation window, or
-    // browsers silently block the popup once the fetch below resolves.
+    const directUrl = getBillingBaseUrl();
     const billingTab = window.open("", "_blank");
     try {
       const url = await fetchBillingUrl();
@@ -4576,13 +4575,12 @@ export default function Dashboard() {
         window.open(url, "_blank", "noopener,noreferrer");
       }
     } catch (e) {
-      billingTab?.close();
-      await uiAlert(
-        e instanceof BillingBridgeError
-          ? e.message
-          : "No se pudo abrir el Módulo de Facturación. Intenta nuevamente.",
-        "Módulo de Facturación",
-      );
+      // Si el bridge de autenticación falla, redirigir la pestaña directamente al ERP para no frustrar al usuario
+      if (billingTab) {
+        billingTab.location.href = directUrl;
+      } else {
+        window.open(directUrl, "_blank", "noopener,noreferrer");
+      }
     } finally {
       setIsBillingLoading(false);
     }

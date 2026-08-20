@@ -7,17 +7,23 @@ const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoading) return;
+    setIsLoading(true);
+    setError('');
     try {
       const response = await api.post<{access_token: string}>('/auth/login', { email, password });
       login(response.access_token);
       navigate('/');
     } catch (err: any) {
-      setError(err.message || 'Error al iniciar sesión');
+      setError(err.message || 'Error al iniciar sesión. Verifica tus credenciales.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -63,9 +69,10 @@ const Login = () => {
           </div>
           <button 
             type="submit" 
-            className="w-full bg-[#0b5156] text-white font-black py-4 rounded-xl uppercase text-[11px] tracking-widest shadow-lg shadow-teal-900/10 hover:shadow-teal-900/20 active:scale-95 transition-all mt-4"
+            disabled={isLoading}
+            className={`w-full bg-[#0b5156] text-white font-black py-4 rounded-xl uppercase text-[11px] tracking-widest shadow-lg shadow-teal-900/10 hover:shadow-teal-900/20 active:scale-95 transition-all mt-4 flex items-center justify-center gap-2 ${isLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
           >
-            Ingresar
+            {isLoading ? 'Iniciando sesión…' : 'Ingresar'}
           </button>
         </form>
       </div>
