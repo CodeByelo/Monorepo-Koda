@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { Link } from 'react-router-dom';
 import { api } from '@/api/client';
 import { useAuth } from '@/providers/AuthProvider';
 import { QuickCreateClienteModal } from '@/components/customers/QuickCreateClienteModal';
@@ -213,6 +214,9 @@ const POS = () => {
              <button onClick={() => showToast('Descargando Manual de Operador POS...', 'success')} className="bg-white text-slate-500 px-6 py-2.5 rounded-xl text-sm font-black uppercase tracking-widest border border-slate-200 hover:bg-slate-50 transition-all">
                 Manual POS
              </button>
+             <Link to="/historial" className="bg-white text-slate-500 px-6 py-2.5 rounded-xl text-sm font-black uppercase tracking-widest border border-slate-200 hover:bg-slate-50 transition-all flex items-center">
+                Facturas Emitidas
+             </Link>
              <button onClick={handleCheckout} className="bg-[#0b5156] text-white px-8 py-2.5 rounded-xl text-sm font-black uppercase tracking-widest shadow-lg shadow-[#0b5156]/20 hover:scale-105 transition-all">
                 Cobrar Ticket Actual
              </button>
