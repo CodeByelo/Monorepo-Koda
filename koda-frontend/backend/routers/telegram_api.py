@@ -165,16 +165,43 @@ def get_linking_token(code: str) -> Optional[str]:
     return None
 
 # Endpoints
+# Helper server-to-server para sincronizar comandos hacia KODA_Remaster (bot_commands)
+async def _sync_command_to_remaster(method: str, endpoint: str, tenant_id: str, payload: Optional[dict] = None) -> Optional[dict]:
+    if not KODA_REMASTER_API_URL or not TELEGRAM_LINK_INTERNAL_API_KEY:
+        return None
+    url = f"{KODA_REMASTER_API_URL}/webhook/telegram{endpoint}"
+    headers = {
+        "X-Telegram-Link-Key": TELEGRAM_LINK_INTERNAL_API_KEY,
+        "X-Tenant-Id": str(tenant_id)
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            if method == "GET":
+                res = await client.get(url, headers=headers)
+            elif method == "POST":
+                res = await client.post(url, json=payload, headers=headers)
+            elif method == "DELETE":
+                res = await client.delete(url, headers=headers)
+            else:
+                return None
+            if res.status_code < 400:
+                try:
+                    return res.json()
+                except Exception:
+                    return {}
+    except Exception as e:
+        print(f"[TELEGRAM_SYNC] Fallo de sincronización con KODA_Remaster ({method} {endpoint}): {e}")
+    return None
+
+# Endpoints
 @router.get("/commands", response_model=List[TelegramCommandResponse])
 def list_commands(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     """Obtiene la lista de comandos dinámicos del bot de Telegram para el tenant activo."""
-    # current_tenant_id_var has automatically been set by get_current_user if it's not a developer,
-    # so the global SQLAlchemy filter applies. For developers/transversal we can query directly.
     return db.query(TelegramCommand).order_by(TelegramCommand.id).all()
 
 @router.post("/commands", response_model=TelegramCommandResponse, status_code=status.HTTP_201_CREATED)
-def create_command(request: Request, cmd_in: TelegramCommandCreate, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
-    """Crea un nuevo comando dinámico asociado al tenant actual."""
+async def create_command(request: Request, cmd_in: TelegramCommandCreate, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    """Crea un nuevo comando dinámico y lo sincroniza con KODA_Remaster (public.bot_commands)."""
     # Ensure command starts with /
     trigger = cmd_in.trigger_command.strip()
     if not trigger.startswith("/"):
@@ -206,11 +233,27 @@ def create_command(request: Request, cmd_in: TelegramCommandCreate, db: Session 
 
     db.commit()
     db.refresh(new_cmd)
+
+    # Sincronizar server-to-server hacia KODA_Remaster (fuente de verdad del webhook del bot)
+    await _sync_command_to_remaster(
+        method="POST",
+        endpoint="/commands",
+        tenant_id=str(current_user.tenant_id),
+        payload={
+            "trigger_command": trigger,
+            "response_text": cmd_in.response_text.strip(),
+            "internal_action": cmd_in.internal_action.strip() if cmd_in.internal_action else None,
+            "is_active": cmd_in.is_active,
+            "tenant_id": str(current_user.tenant_id),
+            "user_id": str(current_user.id)
+        }
+    )
+
     return new_cmd
 
 @router.delete("/commands/{cmd_id}")
-def delete_command(request: Request, cmd_id: int, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
-    """Elimina un comando dinámico de Telegram."""
+async def delete_command(request: Request, cmd_id: int, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    """Elimina un comando dinámico de Telegram y lo remueve en KODA_Remaster."""
     cmd = db.query(TelegramCommand).filter(TelegramCommand.id == cmd_id).first()
     if not cmd:
         raise HTTPException(status_code=404, detail="Comando no encontrado")
@@ -229,6 +272,14 @@ def delete_command(request: Request, cmd_id: int, db: Session = Depends(get_db),
     ))
 
     db.commit()
+
+    # Sincronizar eliminación hacia KODA_Remaster por trigger_command
+    await _sync_command_to_remaster(
+        method="DELETE",
+        endpoint=f"/commands/{trigger}",
+        tenant_id=str(current_user.tenant_id)
+    )
+
     return {"ok": True, "message": f"Comando '{trigger}' eliminado exitosamente."}
 
 @router.post("/generate-token")

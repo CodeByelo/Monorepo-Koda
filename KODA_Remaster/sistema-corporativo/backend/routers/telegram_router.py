@@ -787,13 +787,29 @@ class BotCommandCreate(BaseModel):
     response_text: str
     internal_action: Optional[str] = None
     is_active: bool = True
+    tenant_id: Optional[str] = None
+    user_id: Optional[str] = None
 
 @router.get("/telegram/commands")
 async def list_bot_commands(
-    current_user: dict = Depends(get_current_user),
+    request: Request,
+    bearer_token: Optional[str] = Depends(oauth2_scheme),
     conn = Depends(get_db_connection)
 ):
-    tenant_id = current_user.get("tenant_id")
+    service_key = request.headers.get("X-Telegram-Link-Key", "")
+    tenant_id = None
+    if (
+        service_key
+        and TELEGRAM_LINK_INTERNAL_API_KEY
+        and hmac.compare_digest(service_key, TELEGRAM_LINK_INTERNAL_API_KEY)
+    ):
+        tenant_id = request.headers.get("X-Tenant-Id")
+        if not tenant_id:
+            raise HTTPException(status_code=400, detail="Falta header X-Tenant-Id en llamada de servicio.")
+    else:
+        current_user = await get_current_user(request, bearer_token)
+        tenant_id = current_user.get("tenant_id")
+
     if not tenant_id:
         raise HTTPException(status_code=400, detail="Falta tenant_id en la sesión.")
         
@@ -814,16 +830,29 @@ async def list_bot_commands(
 
 @router.post("/telegram/commands")
 async def create_bot_command(
+    request: Request,
     payload: BotCommandCreate,
-    current_user: dict = Depends(get_current_user),
+    bearer_token: Optional[str] = Depends(oauth2_scheme),
     conn = Depends(get_db_connection)
 ):
-    role = current_user.get("role")
-    if role not in ("Administrador", "Administrator", "CEO", "Desarrollador", "Administrative Master"):
-        raise HTTPException(status_code=403, detail="No tienes permisos para crear comandos.")
-        
-    tenant_id = current_user.get("tenant_id")
-    user_id = current_user.get("sub")
+    service_key = request.headers.get("X-Telegram-Link-Key", "")
+    tenant_id = None
+    user_id = None
+    if (
+        service_key
+        and TELEGRAM_LINK_INTERNAL_API_KEY
+        and hmac.compare_digest(service_key, TELEGRAM_LINK_INTERNAL_API_KEY)
+    ):
+        tenant_id = payload.tenant_id or request.headers.get("X-Tenant-Id")
+        user_id = payload.user_id or str(uuid.uuid4())
+    else:
+        current_user = await get_current_user(request, bearer_token)
+        role = current_user.get("role")
+        if role not in ("Administrador", "Administrator", "CEO", "Desarrollador", "Administrative Master"):
+            raise HTTPException(status_code=403, detail="No tienes permisos para crear comandos.")
+        tenant_id = current_user.get("tenant_id")
+        user_id = current_user.get("sub")
+
     if not tenant_id or not user_id:
         raise HTTPException(status_code=400, detail="Falta información de sesión.")
         
@@ -855,18 +884,31 @@ async def create_bot_command(
             logger.error(f"[TELEGRAM] Error al guardar comando: {e}")
             raise HTTPException(status_code=500, detail=f"Error al guardar el comando: {e}")
 
-@router.delete("/telegram/commands/{command_id}")
+@router.delete("/telegram/commands/{command_identifier}")
 async def delete_bot_command(
-    command_id: uuid.UUID,
-    current_user: dict = Depends(get_current_user),
+    command_identifier: str,
+    request: Request,
+    bearer_token: Optional[str] = Depends(oauth2_scheme),
     conn = Depends(get_db_connection)
 ):
-    role = current_user.get("role")
-    if role not in ("Administrador", "Administrator", "CEO", "Desarrollador", "Administrative Master"):
-        raise HTTPException(status_code=403, detail="No tienes permisos para eliminar comandos.")
-        
-    tenant_id = current_user.get("tenant_id")
-    user_id = current_user.get("sub")
+    service_key = request.headers.get("X-Telegram-Link-Key", "")
+    tenant_id = None
+    user_id = None
+    if (
+        service_key
+        and TELEGRAM_LINK_INTERNAL_API_KEY
+        and hmac.compare_digest(service_key, TELEGRAM_LINK_INTERNAL_API_KEY)
+    ):
+        tenant_id = request.headers.get("X-Tenant-Id")
+        user_id = str(uuid.uuid4())
+    else:
+        current_user = await get_current_user(request, bearer_token)
+        role = current_user.get("role")
+        if role not in ("Administrador", "Administrator", "CEO", "Desarrollador", "Administrative Master"):
+            raise HTTPException(status_code=403, detail="No tienes permisos para eliminar comandos.")
+        tenant_id = current_user.get("tenant_id")
+        user_id = current_user.get("sub")
+
     if not tenant_id or not user_id:
         raise HTTPException(status_code=400, detail="Falta información de sesión.")
         
@@ -874,16 +916,34 @@ async def delete_bot_command(
         await conn.execute("SELECT set_config('app.current_tenant', $1, true)", str(tenant_id))
         await conn.execute("SELECT set_config('app.current_user_id', $1, true)", str(user_id))
         
-        result = await conn.execute(
-            """
-            DELETE FROM public.bot_commands
-            WHERE id = $1::uuid AND tenant_id = $2::uuid
-            """,
-            command_id,
-            uuid.UUID(tenant_id)
-        )
+        # Permitir eliminar por UUID o por trigger_command (ej. /horario o /info)
+        is_uuid = False
+        try:
+            cmd_uuid = uuid.UUID(command_identifier)
+            is_uuid = True
+        except ValueError:
+            is_uuid = False
+
+        if is_uuid:
+            result = await conn.execute(
+                """
+                DELETE FROM public.bot_commands
+                WHERE id = $1::uuid AND tenant_id = $2::uuid
+                """,
+                cmd_uuid,
+                uuid.UUID(tenant_id)
+            )
+        else:
+            result = await conn.execute(
+                """
+                DELETE FROM public.bot_commands
+                WHERE trigger_command = $1 AND tenant_id = $2::uuid
+                """,
+                command_identifier,
+                uuid.UUID(tenant_id)
+            )
         
         if "DELETE 0" in result:
             raise HTTPException(status_code=404, detail="Comando no encontrado o no pertenece a tu organización.")
             
-    return {"status": "deleted", "id": str(command_id)}
+    return {"status": "deleted", "id": command_identifier}
