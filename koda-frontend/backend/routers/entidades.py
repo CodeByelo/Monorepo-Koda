@@ -9,7 +9,7 @@ from backend.core.database import get_db
 from backend.core.security import get_current_user
 from backend.models.core import Profile
 from backend.models.operations import Cliente
-from backend.models.erp_extended import Empresa, Sucursal
+from backend.models.erp_extended import Empresa, Sucursal, PlantillaDocumento
 from backend.schemas.operations import ClienteCreate, ClienteResponse
 from backend.services.auth import role_required
 from backend.services.org_sync_client import sync_organization_name, OrgSyncError
@@ -57,6 +57,101 @@ def _get_or_create_empresa(db: Session, current_user: Profile) -> Empresa:
         db.commit()
         db.refresh(emp)
     return emp
+
+
+# Catálogo cerrado de campos configurables del ticket — el frontend (Fase 3)
+# debe restringirse a estos IDs; cualquier otro se rechaza para no permitir
+# que un config corrupto/arbitrario rompa el render del PDF.
+CAMPOS_TICKET_VALIDOS = {
+    "logo", "empresa_nombre", "empresa_rif", "empresa_telefono",
+    "factura_numero", "factura_fecha", "cliente", "tabla_productos_inicio",
+    "subtotal", "iva", "igtf", "total", "tasa_bcv", "total_bs",
+    "garantia_texto", "agradecimiento",
+}
+
+# Diseño por defecto: reproduce el layout actual del ticket (el que ya está
+# en producción) expresado como coordenadas, para que un tenant sin
+# configuración propia vea exactamente lo mismo que ve hoy.
+DEFAULT_TICKET_TEMPLATE = {
+    "logo":               {"x": 40, "y": 6,  "font_size": 0,  "bold": False, "align": "center", "visible": True},
+    "empresa_nombre":     {"x": 40, "y": 16, "font_size": 10, "bold": True,  "align": "center", "visible": True},
+    "empresa_rif":        {"x": 40, "y": 21, "font_size": 8,  "bold": False, "align": "center", "visible": True},
+    "empresa_telefono":   {"x": 40, "y": 25, "font_size": 8,  "bold": False, "align": "center", "visible": True},
+    "factura_numero":     {"x": 4,  "y": 32, "font_size": 8,  "bold": False, "align": "left",   "visible": True},
+    "factura_fecha":      {"x": 4,  "y": 37, "font_size": 8,  "bold": False, "align": "left",   "visible": True},
+    "cliente":            {"x": 4,  "y": 42, "font_size": 8,  "bold": False, "align": "left",   "visible": True},
+    "tabla_productos_inicio": {"x": 4, "y": 49, "font_size": 8, "bold": False, "align": "left", "visible": True},
+    "subtotal":           {"x": 4,  "y": 0,  "font_size": 9,  "bold": False, "align": "left",   "visible": True},
+    "iva":                {"x": 4,  "y": 0,  "font_size": 9,  "bold": False, "align": "left",   "visible": True},
+    "igtf":               {"x": 4,  "y": 0,  "font_size": 9,  "bold": False, "align": "left",   "visible": True},
+    "total":              {"x": 4,  "y": 0,  "font_size": 11, "bold": True,  "align": "left",   "visible": True},
+    "tasa_bcv":           {"x": 4,  "y": 0,  "font_size": 8,  "bold": False, "align": "left",   "visible": True},
+    "total_bs":           {"x": 4,  "y": 0,  "font_size": 9,  "bold": True,  "align": "left",   "visible": True},
+    "garantia_texto":     {"x": 40, "y": 0,  "font_size": 7,  "bold": False, "align": "center", "visible": False, "texto": ""},
+    "agradecimiento":     {"x": 40, "y": 0,  "font_size": 8,  "bold": False, "align": "center", "visible": True, "texto": "¡Gracias por su compra!"},
+}
+# Nota: los campos con "y": 0 se calculan dinámicamente en el momento de
+# generar el PDF (fluyen después de la tabla de productos, cuya altura
+# varía por venta) — su "y" guardado se IGNORA para esos campos específicos
+# en la Fase 1. Solo importan su font_size/bold/align/visible. Esto se
+# documenta también en el endpoint GET para que el futuro editor visual
+# (Fase 3) sepa que esos campos no se pueden arrastrar verticalmente,
+# solo activar/desactivar y cambiar estilo.
+
+class PlantillaTicketUpdate(BaseModel):
+    config: dict
+
+@router.get("/plantilla-ticket")
+def obtener_plantilla_ticket(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    plantilla = db.query(PlantillaDocumento).filter(
+        PlantillaDocumento.tenant_id == current_user.tenant_id,
+        PlantillaDocumento.tipo_documento == "ticket",
+    ).first()
+    if plantilla:
+        # Merge sobre el default: si en el futuro se agregan campos nuevos
+        # al default, un tenant con config antigua no se queda sin ellos.
+        merged = {**DEFAULT_TICKET_TEMPLATE, **plantilla.config}
+        return {"config": merged, "es_personalizado": True}
+    return {"config": DEFAULT_TICKET_TEMPLATE, "es_personalizado": False}
+
+@router.put("/plantilla-ticket", dependencies=[Depends(role_required(['Admin']))])
+def guardar_plantilla_ticket(
+    payload: PlantillaTicketUpdate,
+    db: Session = Depends(get_db),
+    current_user: Profile = Depends(get_current_user),
+):
+    claves_invalidas = set(payload.config.keys()) - CAMPOS_TICKET_VALIDOS
+    if claves_invalidas:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Campos no reconocidos: {', '.join(claves_invalidas)}",
+        )
+    for campo_id, estilo in payload.config.items():
+        if not isinstance(estilo, dict):
+            raise HTTPException(status_code=400, detail=f"Configuración inválida para '{campo_id}'.")
+        x, y = estilo.get("x"), estilo.get("y")
+        if x is not None and not (0 <= x <= 80):
+            raise HTTPException(status_code=400, detail=f"'{campo_id}': x debe estar entre 0 y 80mm (ancho del ticket).")
+        if y is not None and not (0 <= y <= 400):
+            raise HTTPException(status_code=400, detail=f"'{campo_id}': y fuera de rango.")
+
+    plantilla = db.query(PlantillaDocumento).filter(
+        PlantillaDocumento.tenant_id == current_user.tenant_id,
+        PlantillaDocumento.tipo_documento == "ticket",
+    ).first()
+    if plantilla:
+        plantilla.config = payload.config
+        plantilla.actualizado_por = getattr(current_user, "id", None)
+    else:
+        plantilla = PlantillaDocumento(
+            tenant_id=current_user.tenant_id,
+            tipo_documento="ticket",
+            config=payload.config,
+            actualizado_por=getattr(current_user, "id", None),
+        )
+        db.add(plantilla)
+    db.commit()
+    return {"ok": True, "config": plantilla.config}
 
 import os
 import uuid

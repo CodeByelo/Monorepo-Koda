@@ -1091,3 +1091,27 @@ class NotaEntregaItem(Base):
 
     nota_entrega = relationship("NotaEntrega", back_populates="items")
 
+
+class PlantillaDocumento(Base):
+    """Configuración de diseño (posición/estilo de cada campo) para un tipo
+    de documento imprimible, por tenant. Fase 1: solo se usa para
+    tipo_documento='ticket'. El campo `config` es un JSON de la forma:
+    {"campo_id": {"x": <mm>, "y": <mm>, "font_size": <int>, "bold": <bool>,
+    "align": "left"|"center"|"right", "visible": <bool>}, ...}
+    Coordenadas en milímetros, origen (0,0) en la esquina SUPERIOR IZQUIERDA
+    del ticket (más intuitivo para un futuro editor visual que el sistema
+    de coordenadas nativo de reportlab, que es desde abajo — la conversión
+    se hace en el momento de dibujar, no aquí)."""
+    __tablename__ = "plantillas_documento"
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'tipo_documento', name='_tenant_plantilla_tipo_uc'),
+        {'schema': 'public'}
+    )
+    tenant_id = Column(UUID(as_uuid=True))
+
+    id = Column(Integer, primary_key=True, index=True)
+    tipo_documento = Column(String(30), nullable=False, default="ticket")
+    config = Column(JSON, nullable=False)
+    actualizado_por = Column(UUID(as_uuid=True), nullable=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+

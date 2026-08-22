@@ -4888,14 +4888,15 @@ def descargar_ticket_pdf(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
-    """Genera un PDF en formato ticket (recibo corto, tipo punto de venta),
-    como alternativa a la factura fiscal completa de /ventas/{id}/pdf. Mismos
-    datos, presentación compacta pensada para imprimirse en impresora térmica
-    (ancho ~80mm)."""
+    """Genera el ticket (recibo corto) leyendo la plantilla configurable del
+    tenant (tabla plantillas_documento, ver routers/entidades.py). Si el
+    tenant no personalizó nada, usa DEFAULT_TICKET_TEMPLATE, que reproduce
+    el layout original de esta función antes de que fuera configurable."""
     import io
     from fastapi.responses import StreamingResponse
     from backend.models.operations import Venta
-    from backend.routers.entidades import _get_or_create_empresa
+    from backend.models.erp_extended import PlantillaDocumento
+    from backend.routers.entidades import _get_or_create_empresa, _logo_path, DEFAULT_TICKET_TEMPLATE
 
     venta = db.query(Venta).filter(
         Venta.id == id,
@@ -4906,56 +4907,99 @@ def descargar_ticket_pdf(
 
     empresa = _get_or_create_empresa(db, current_user)
 
+    plantilla_row = db.query(PlantillaDocumento).filter(
+        PlantillaDocumento.tenant_id == current_user.tenant_id,
+        PlantillaDocumento.tipo_documento == "ticket",
+    ).first()
+    cfg = {**DEFAULT_TICKET_TEMPLATE, **(plantilla_row.config if plantilla_row else {})}
+
     try:
         from reportlab.pdfgen import canvas
         from reportlab.lib.units import mm
+        import os
     except ImportError:
         raise HTTPException(status_code=500, detail="Librería reportlab no instalada.")
 
     ANCHO = 80 * mm
-    # Alto dinámico: cabecera + una línea por producto + totales + pie.
     alto_estimado = (95 + len(venta.detalles) * 14 + 90) * (72 / 25.4 / 10)
     ALTO = max(150 * mm, alto_estimado * mm)
 
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=(ANCHO, ALTO))
-    y = ALTO - 10 * mm
 
-    def linea(texto, tam=8, negrita=False, centrado=False):
-        nonlocal y
-        c.setFont("Helvetica-Bold" if negrita else "Helvetica", tam)
-        if centrado:
-            c.drawCentredString(ANCHO / 2, y, texto)
+    def dibujar(campo_id, texto, y_dinamico=None):
+        """Dibuja un campo según su estilo configurado. y_dinamico (en
+        puntos reportlab, ya calculado desde abajo) se usa para los campos
+        que fluyen después de la tabla de productos (los que tienen
+        "y": 0 en el default); si no se pasa, se usa la "y" guardada
+        (convertida de mm-desde-arriba a puntos-desde-abajo)."""
+        estilo = cfg.get(campo_id, {})
+        if not estilo.get("visible", True):
+            return y_dinamico
+        tam = estilo.get("font_size", 8)
+        c.setFont("Helvetica-Bold" if estilo.get("bold") else "Helvetica", tam)
+        x_pt = estilo.get("x", 4) * mm
+        y_pt = y_dinamico if y_dinamico is not None else (ALTO - estilo.get("y", 10) * mm)
+        align = estilo.get("align", "left")
+        if align == "center":
+            c.drawCentredString(ANCHO / 2, y_pt, texto)
+        elif align == "right":
+            c.drawRightString(ANCHO - 4 * mm, y_pt, texto)
         else:
-            c.drawString(4 * mm, y, texto)
-        y -= (tam + 3)
+            c.drawString(x_pt, y_pt, texto)
+        return y_pt
 
-    linea(empresa.razon_social, 10, negrita=True, centrado=True)
-    linea(f"RIF: {empresa.rif}", 8, centrado=True)
-    linea("-" * 42, 8, centrado=True)
-    linea(f"Factura: {venta.numero_factura}", 8)
-    linea(f"Fecha: {venta.fecha.strftime('%d/%m/%Y %H:%M')}", 8)
+    # --- Logo (si existe) ---
+    logo_cfg = cfg.get("logo", {})
+    if logo_cfg.get("visible", True):
+        logo_path = _logo_path(current_user.tenant_id)
+        if os.path.exists(logo_path):
+            try:
+                logo_w, logo_h = 24 * mm, 16 * mm
+                x_pt = (ANCHO - logo_w) / 2 if logo_cfg.get("align", "center") == "center" else logo_cfg.get("x", 4) * mm
+                y_pt = ALTO - logo_cfg.get("y", 6) * mm - logo_h
+                c.drawImage(logo_path, x_pt, y_pt, width=logo_w, height=logo_h, preserveAspectRatio=True, mask='auto')
+            except Exception:
+                pass  # Logo corrupto no debe tumbar la generación del ticket.
+
+    # --- Cabecera ---
+    dibujar("empresa_nombre", empresa.razon_social)
+    dibujar("empresa_rif", f"RIF: {empresa.rif}")
+    if empresa.telefono:
+        dibujar("empresa_telefono", f"Tel: {empresa.telefono}")
+    dibujar("factura_numero", f"Factura: {venta.numero_factura}")
+    dibujar("factura_fecha", f"Fecha: {venta.fecha.strftime('%d/%m/%Y %H:%M')}")
     cliente_nombre = venta.cliente.nombre if venta.cliente else "CLIENTE GENERAL"
-    linea(f"Cliente: {cliente_nombre}", 8)
-    linea("-" * 42, 8, centrado=True)
+    dibujar("cliente", f"Cliente: {cliente_nombre}")
 
+    # --- Tabla de productos: arranca en el Y configurado, fluye hacia abajo ---
+    y = ALTO - cfg["tabla_productos_inicio"].get("y", 49) * mm
+    tam_tabla = cfg["tabla_productos_inicio"].get("font_size", 8)
+    c.setFont("Helvetica", tam_tabla)
+    c.line(4 * mm, y + 4, ANCHO - 4 * mm, y + 4)
+    y -= (tam_tabla + 3)
     for item in venta.detalles:
         prod_nombre = item.producto.nombre if item.producto else "Producto"
         precio = float(item.precio_usd_capturado)
         cantidad = float(item.cantidad)
-        linea(f"{cantidad:g}x {prod_nombre[:24]}", 8)
-        linea(f"   ${precio:.2f} c/u = ${precio * cantidad:.2f}", 8)
+        c.drawString(4 * mm, y, f"{cantidad:g}x {prod_nombre[:24]}")
+        y -= (tam_tabla + 3)
+        c.drawString(4 * mm, y, f"   ${precio:.2f} c/u = ${precio * cantidad:.2f}")
+        y -= (tam_tabla + 3)
+    c.line(4 * mm, y + 4, ANCHO - 4 * mm, y + 4)
+    y -= 10
 
-    linea("-" * 42, 8, centrado=True)
-    linea(f"Subtotal: ${float(venta.subtotal_usd):.2f}", 9)
-    linea(f"IVA: ${float(venta.iva_usd):.2f}", 9)
+    # --- Totales y pie: fluyen desde donde terminó la tabla ---
+    y = dibujar("subtotal", f"Subtotal: ${float(venta.subtotal_usd):.2f}", y) - (cfg["subtotal"].get("font_size", 9) + 3)
+    y = dibujar("iva", f"IVA: ${float(venta.iva_usd):.2f}", y) - (cfg["iva"].get("font_size", 9) + 3)
     if float(venta.igtf_usd) > 0:
-        linea(f"IGTF: ${float(venta.igtf_usd):.2f}", 9)
-    linea(f"TOTAL: ${float(venta.total_usd):.2f}", 11, negrita=True)
-    linea(f"Tasa BCV: {float(venta.tasa_cambio_bs):.2f}", 8)
-    linea(f"Total Bs: {float(venta.total_usd) * float(venta.tasa_cambio_bs):.2f}", 9, negrita=True)
-    linea("-" * 42, 8, centrado=True)
-    linea("¡Gracias por su compra!", 8, centrado=True)
+        y = dibujar("igtf", f"IGTF: ${float(venta.igtf_usd):.2f}", y) - (cfg["igtf"].get("font_size", 9) + 3)
+    y = dibujar("total", f"TOTAL: ${float(venta.total_usd):.2f}", y) - (cfg["total"].get("font_size", 11) + 4)
+    y = dibujar("tasa_bcv", f"Tasa BCV: {float(venta.tasa_cambio_bs):.2f}", y) - (cfg["tasa_bcv"].get("font_size", 8) + 3)
+    y = dibujar("total_bs", f"Total Bs: {float(venta.total_usd) * float(venta.tasa_cambio_bs):.2f}", y) - (cfg["total_bs"].get("font_size", 9) + 6)
+    if cfg["garantia_texto"].get("visible") and cfg["garantia_texto"].get("texto"):
+        y = dibujar("garantia_texto", cfg["garantia_texto"]["texto"], y) - (cfg["garantia_texto"].get("font_size", 7) + 4)
+    dibujar("agradecimiento", cfg["agradecimiento"].get("texto", "¡Gracias por su compra!"), y)
 
     c.showPage()
     c.save()
