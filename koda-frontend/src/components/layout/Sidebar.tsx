@@ -2,7 +2,7 @@ import {
   Home, Bell, ShoppingBag, FileText, ShoppingCart,
   Package, ShieldCheck, CreditCard, Landmark,
   Layers, BookOpen, PieChart, Settings, ChevronDown,
-  Users, Truck, HelpCircle
+  Users, Truck, HelpCircle, LogOut
 } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useState, useEffect, useMemo } from 'react';
@@ -443,7 +443,7 @@ const Sidebar = ({ isOpen = true }: SidebarProps) => {
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const { activeSystem, setActiveSystem } = useSystem();
-  const { userRole, userName, tenantName } = useAuth();
+  const { userRole, userName, tenantName, logout } = useAuth();
 
   const displayName = userName
     ? userName.split('@')[0].charAt(0).toUpperCase() + userName.split('@')[0].slice(1)
@@ -647,6 +647,14 @@ const Sidebar = ({ isOpen = true }: SidebarProps) => {
               {displayRole} {tenantName ? `| 🏢 ${tenantName}` : ''}
             </p>
           </div>
+          <button
+            type="button"
+            onClick={logout}
+            title="Cerrar sesión"
+            className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+          >
+            <LogOut size={16} />
+          </button>
         </div>
       </div>
     </aside>
