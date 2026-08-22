@@ -6,10 +6,10 @@ from backend.models.core import Profile
 from backend.models.erp_extended import TelegramCommand, AuditoriaLog
 from pydantic import BaseModel
 from typing import Optional, List
-import random
 import os
 import redis
 import time
+import httpx
 from backend.utils.ip_utils import get_real_ip_str
 
 router = APIRouter(prefix="/webhook/telegram", tags=["Telegram Integration"])
@@ -41,6 +41,104 @@ except Exception:
 # Fallback tokens dict
 local_tokens = {}
 
+# --- Vinculación REAL de Telegram (server-to-server hacia KODA_Remaster) ---
+# El código KODA-XXXXXX que el bot valida realmente vive SOLO en
+# KODA_Remaster/sistema-corporativo/backend/routers/telegram_router.py
+# (_TELEGRAM_LINK_TOKENS/Redis, poblado por generate_telegram_token). Este
+# backend (el ERP) ya NO genera un código propio: en vez de eso pide el
+# código real a ESE backend, server-to-server, reutilizando el mismo patrón
+# (header de clave compartida + httpx) que
+# KODA_Remaster/.../services/bot_api_client.py, en la dirección inversa
+# (aquí el ERP es el emisor, KODA_Remaster el receptor).
+#
+# KODA_REMASTER_API_URL ya existe en este backend (ver
+# services/org_sync_client.py, sincronización de nombre de organización):
+# se reutiliza la misma variable, apuntando al mismo backend institucional.
+#
+# TELEGRAM_LINK_INTERNAL_API_KEY es un secreto PROPIO (no BOT_INTERNAL_API_KEY):
+# BOT_INTERNAL_API_KEY está reservado, a propósito, para la dirección inversa
+# (KODA_Remaster como emisor hacia /bot/* de este backend, ver
+# services/bot_api_client.py y routers/bot_api.py). Reutilizarlo aquí
+# rompería ese límite de confianza direccional ya documentado en este mismo
+# backend (ver ORG_SYNC_API_KEY/SSO_BRIDGE_INTERNAL_KEY: "una capacidad de
+# servicio = una clave propia").
+KODA_REMASTER_API_URL = os.getenv("KODA_REMASTER_API_URL", "").strip().rstrip("/")
+TELEGRAM_LINK_INTERNAL_API_KEY = os.getenv("TELEGRAM_LINK_INTERNAL_API_KEY", "").strip()
+
+
+class TelegramLinkError(Exception):
+    """Error controlado al comunicarse con KODA_Remaster/sistema-corporativo/backend
+    para pedir el código real de vinculación de Telegram."""
+
+    def __init__(self, message: str, status_code: Optional[int] = None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+async def _request_real_linking_token(tenant_id: str, user_id: str) -> str:
+    """
+    POST {KODA_REMASTER_API_URL}/webhook/telegram/generate-token
+
+    Pide, server-to-server, el código real KODA-XXXXXX al backend
+    institucional — la única fuente de verdad que el bot de Telegram real
+    valida (ver telegram_router.py::_TELEGRAM_LINK_TOKENS/Redis). Lanza
+    TelegramLinkError ante cualquier problema (config faltante, red, timeout,
+    respuesta >= 400) para que el llamador decida cómo traducirlo a un
+    mensaje de usuario claro; nunca deja pasar un código que de todos modos
+    no funcionaría.
+    """
+    if not KODA_REMASTER_API_URL:
+        raise TelegramLinkError(
+            "KODA_REMASTER_API_URL no está configurada en este backend (ver .env.template)."
+        )
+    if not TELEGRAM_LINK_INTERNAL_API_KEY:
+        raise TelegramLinkError(
+            "TELEGRAM_LINK_INTERNAL_API_KEY no está configurada en este backend (ver .env.template)."
+        )
+
+    url = f"{KODA_REMASTER_API_URL}/webhook/telegram/generate-token"
+    headers = {"X-Telegram-Link-Key": TELEGRAM_LINK_INTERNAL_API_KEY}
+    payload = {"tenant_id": tenant_id, "user_id": user_id}
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+    except httpx.HTTPError as e:
+        raise TelegramLinkError(
+            f"No se pudo contactar al sistema institucional (KODA_Remaster): {e}"
+        )
+
+    if response.status_code >= 400:
+        detail = response.text
+        try:
+            body = response.json()
+            detail = body.get("detail", detail)
+        except Exception:
+            pass
+        raise TelegramLinkError(str(detail), status_code=response.status_code)
+
+    try:
+        data = response.json()
+    except Exception:
+        raise TelegramLinkError(
+            "Respuesta inválida del sistema institucional al generar el código de vinculación."
+        )
+
+    code = data.get("code")
+    if not code:
+        raise TelegramLinkError(
+            "El sistema institucional no devolvió un código de vinculación válido."
+        )
+    return code
+
+
+# NO USAR — código muerto, ver telegram_router.py del backend institucional
+# (KODA_Remaster/sistema-corporativo/backend, función generate_telegram_token)
+# que es la única fuente de verdad real validada por el bot. Este código
+# local (formato KOD-XXXXXX) nunca llegaba a _TELEGRAM_LINK_TOKENS/Redis del
+# otro backend, por eso la vinculación nunca funcionaba. Se deja la función y
+# su almacenamiento (local_tokens / Redis "telegram_link:*") sin borrar,
+# marcados en desuso: generate_linking_token ya NO la invoca.
 def store_linking_token(code: str, user_id: str):
     if redis_client:
         try:
@@ -134,8 +232,28 @@ def delete_command(request: Request, cmd_id: int, db: Session = Depends(get_db),
     return {"ok": True, "message": f"Comando '{trigger}' eliminado exitosamente."}
 
 @router.post("/generate-token")
-def generate_linking_token(current_user: Profile = Depends(get_current_user)):
-    """Genera un token temporal de 6 dígitos para vincular el chat de Telegram de este usuario."""
-    code = f"KOD-{random.randint(100000, 999999)}"
-    store_linking_token(code, str(current_user.id))
+async def generate_linking_token(current_user: Profile = Depends(get_current_user)):
+    """
+    Pide, server-to-server, el token REAL de vinculación de Telegram
+    (formato KODA-XXXXXX) a KODA_Remaster/sistema-corporativo/backend — la
+    única fuente de verdad que el bot real valida — en nombre del
+    tenant_id/user_id ya autenticados en este ERP. Ya NO genera un código
+    local (ver store_linking_token más arriba, marcada en desuso): ese
+    código nunca era validado por el bot real y por eso la vinculación nunca
+    funcionaba.
+    """
+    try:
+        code = await _request_real_linking_token(
+            tenant_id=str(current_user.tenant_id),
+            user_id=str(current_user.id),
+        )
+    except TelegramLinkError as e:
+        raise HTTPException(
+            status_code=(
+                status.HTTP_502_BAD_GATEWAY
+                if e.status_code is not None
+                else status.HTTP_504_GATEWAY_TIMEOUT
+            ),
+            detail="No se pudo generar el código de vinculación de Telegram. Intenta de nuevo en unos segundos.",
+        )
     return {"code": code}

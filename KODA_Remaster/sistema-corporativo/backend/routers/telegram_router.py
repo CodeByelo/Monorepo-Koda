@@ -11,7 +11,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from database.async_db import get_db_connection
-from auth.supabase_auth import get_current_user
+from auth.supabase_auth import get_current_user, oauth2_scheme
 from redis.asyncio import Redis
 from services.bot_api_client import get_stock as bot_get_stock, registrar_venta, BotApiError
 
@@ -59,6 +59,29 @@ LOGISTICS_INTERNAL_FORWARD_KEY = os.getenv("LOGISTICS_INTERNAL_FORWARD_KEY", "")
 if TELEGRAM_BOT_TOKEN and (not LOGISTICS_INTERNAL_FORWARD_KEY or len(LOGISTICS_INTERNAL_FORWARD_KEY) < 32):
     raise RuntimeError(
         "LOGISTICS_INTERNAL_FORWARD_KEY no configurado o inseguro: con TELEGRAM_BOT_TOKEN "
+        "habilitado, debe definirse como variable de entorno con un valor de al menos 32 "
+        "caracteres. No existe valor por defecto. Debe coincidir con el mismo valor "
+        "configurado en koda-frontend/backend."
+    )
+
+# Clave compartida de servicio-a-servicio para autenticar la llamada ENTRANTE
+# desde koda-frontend/backend (el ERP) hacia POST /webhook/telegram/generate-token
+# de ESTE backend, cuando un usuario pide vincular su Telegram desde la
+# pantalla "Vincular cuenta de Telegram" del ERP en vez de desde este mismo
+# backend. Dirección INVERSA a BOT_INTERNAL_API_KEY (aquí este backend es el
+# RECEPTOR, no el emisor) — mismo patrón ya usado para ORG_SYNC_API_KEY
+# (routers/internal_router.py) — pero deliberadamente un secreto PROPIO,
+# distinto de BOT_INTERNAL_API_KEY/ORG_SYNC_API_KEY/SSO_BRIDGE_INTERNAL_KEY/
+# LOGISTICS_INTERNAL_FORWARD_KEY: en este backend, "una capacidad de servicio
+# = una clave propia" es la convención ya establecida (ver comentarios de
+# esas otras claves), y emitir un código real de vinculación no es lo mismo
+# que sincronizar el nombre de una organización ni reenviar un webhook. Debe
+# ser el MISMO valor que TELEGRAM_LINK_INTERNAL_API_KEY en
+# koda-frontend/backend.
+TELEGRAM_LINK_INTERNAL_API_KEY = os.getenv("TELEGRAM_LINK_INTERNAL_API_KEY", "").strip()
+if TELEGRAM_BOT_TOKEN and (not TELEGRAM_LINK_INTERNAL_API_KEY or len(TELEGRAM_LINK_INTERNAL_API_KEY) < 32):
+    raise RuntimeError(
+        "TELEGRAM_LINK_INTERNAL_API_KEY no configurado o inseguro: con TELEGRAM_BOT_TOKEN "
         "habilitado, debe definirse como variable de entorno con un valor de al menos 32 "
         "caracteres. No existe valor por defecto. Debe coincidir con el mismo valor "
         "configurado en koda-frontend/backend."
@@ -490,27 +513,75 @@ async def _handle_callback_query(callback_query: TelegramCallbackQuery) -> dict:
     return {"status": "success", "invoice": numero_factura}
 
 # =============================================================================
-# ENDPOINT: POST /webhook/telegram
+# ENDPOINT: POST /webhook/telegram/generate-token
 # =============================================================================
+class GenerateTelegramTokenRequest(BaseModel):
+    """
+    Body opcional. Solo se usa (y solo entonces es obligatorio) en el modo
+    server-to-server: cuando la petición trae el header de servicio
+    `X-Telegram-Link-Key` válido (ver TELEGRAM_LINK_INTERNAL_API_KEY), no hay
+    sesión JWT de ESTE backend de la cual inferir tenant_id/user_id —
+    koda-frontend/backend (el ERP) los envía explícitos aquí, tomados de SU
+    propio current_user ya autenticado del otro lado.
+    """
+    tenant_id: Optional[str] = None
+    user_id: Optional[str] = None
+
+
 @router.post("/telegram/generate-token")
 async def generate_telegram_token(
-    current_user: dict = Depends(get_current_user)
+    request: Request,
+    body: GenerateTelegramTokenRequest = GenerateTelegramTokenRequest(),
+    bearer_token: Optional[str] = Depends(oauth2_scheme),
 ):
-    user_id = current_user.get("sub")
-    tenant_id = current_user.get("tenant_id")
-    
+    """
+    Genera el token real de 6 caracteres (formato KODA-XXXXXX) para vincular
+    un chat de Telegram, y lo guarda en _TELEGRAM_LINK_TOKENS/Redis vía
+    _save_link_token — la ÚNICA fuente de verdad que valida el bot real en
+    POST /webhook/telegram (flujo /start <code>).
+
+    Dos formas válidas de invocarlo:
+
+    1. Modo normal (SIN CAMBIOS de comportamiento): un usuario autenticado en
+       ESTE backend pide su propio código vía JWT de sesión
+       (cookie httpOnly o header Authorization), resuelto igual que siempre
+       por `get_current_user`.
+    2. Modo server-to-server: koda-frontend/backend (el ERP) pide el código
+       en nombre de SU usuario ya autenticado de ese lado. Se identifica
+       exclusivamente por el header `X-Telegram-Link-Key` con el valor de
+       TELEGRAM_LINK_INTERNAL_API_KEY; en ese modo tenant_id/user_id vienen
+       explícitos en el body (no hay JWT de este backend que decodificar).
+    """
+    service_key = request.headers.get("X-Telegram-Link-Key", "")
+    if (
+        service_key
+        and TELEGRAM_LINK_INTERNAL_API_KEY
+        and hmac.compare_digest(service_key, TELEGRAM_LINK_INTERNAL_API_KEY)
+    ):
+        if not body.tenant_id or not body.user_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Modo server-to-server: tenant_id y user_id son obligatorios en el body."
+            )
+        user_id = body.user_id
+        tenant_id = body.tenant_id
+    else:
+        current_user = await get_current_user(request, bearer_token)
+        user_id = current_user.get("sub")
+        tenant_id = current_user.get("tenant_id")
+
     if not user_id or not tenant_id:
         raise HTTPException(
             status_code=400,
             detail="Información de sesión inválida: falta user_id o tenant_id."
         )
-        
+
     code = generate_linking_code()
     payload = {
         "user_id": str(user_id),
         "tenant_id": str(tenant_id)
     }
-    
+
     await _save_link_token(code, payload)
     logger.info(f"[TELEGRAM] Token de vinculación generado: {code} para user_id {user_id}")
     return {"code": code}
