@@ -13,7 +13,7 @@ import {
   Send
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { api } from '@/api/client';
+import { api, BASE_URL } from '@/api/client';
 import AuditConfig from '@/components/admin/AuditConfig';
 import TelegramLinker from '@/components/admin/TelegramLinker';
 
@@ -251,7 +251,11 @@ const AdminDashboard = ({ defaultTab = 'compania' }: AdminDashboardProps) => {
                     <div className="flex gap-6 items-center bg-slate-50 p-6 rounded-2xl border border-slate-100">
                       <div className="w-20 h-20 rounded-xl bg-white border border-slate-200 shadow-sm flex items-center justify-center overflow-hidden">
                         {perfil?.logo_url ? (
-                          <img src={perfil.logo_url} alt="Logo" className="w-full h-full object-contain" />
+                          <img 
+                            src={perfil.logo_url.startsWith('http') ? perfil.logo_url : `${BASE_URL.replace(/\/$/, '')}${perfil.logo_url.startsWith('/') ? '' : '/'}${perfil.logo_url}`} 
+                            alt="Logo" 
+                            className="w-full h-full object-contain" 
+                          />
                         ) : (
                           <Building2 size={32} className="text-[#0b5156]" />
                         )}

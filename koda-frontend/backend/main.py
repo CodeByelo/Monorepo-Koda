@@ -71,6 +71,7 @@ try:
         connection.execute(text(sql_profiles))
         if engine.name != "sqlite":
             connection.execute(text("ALTER TABLE public.productos ADD COLUMN IF NOT EXISTS imagen_url TEXT;"))
+            connection.execute(text("ALTER TABLE public.empresa ADD COLUMN IF NOT EXISTS logo_url VARCHAR(500);"))
             connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS vendedor_id INTEGER;"))
             connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS retencion_iva_usd NUMERIC(15,2) DEFAULT 0.00;"))
             connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS igtf_usd NUMERIC(15,2) DEFAULT 0.00;"))
