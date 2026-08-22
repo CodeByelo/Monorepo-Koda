@@ -586,6 +586,41 @@ async def generate_telegram_token(
     logger.info(f"[TELEGRAM] Token de vinculación generado: {code} para user_id {user_id}")
     return {"code": code}
 
+class VerifyTelegramTokenRequest(BaseModel):
+    code: str
+
+@router.post("/telegram/verify-token")
+async def verify_telegram_token(
+    request: Request,
+    body: VerifyTelegramTokenRequest,
+    conn = Depends(get_db_connection)
+):
+    """
+    Verifica y consume un token de vinculación de Telegram server-to-server.
+    Permite a koda-frontend/backend validar códigos de vinculación para choferes
+    o usuarios contra la misma fuente de verdad (_TELEGRAM_LINK_TOKENS / Redis).
+    """
+    service_key = request.headers.get("X-Telegram-Link-Key", "")
+    if not (
+        service_key
+        and TELEGRAM_LINK_INTERNAL_API_KEY
+        and hmac.compare_digest(service_key, TELEGRAM_LINK_INTERNAL_API_KEY)
+    ):
+        raise HTTPException(status_code=401, detail="No autorizado.")
+
+    link_info = await _get_link_token(body.code.strip())
+    if not link_info:
+        raise HTTPException(status_code=404, detail="Token no encontrado o expirado.")
+
+    # Consumir el token
+    await _delete_link_token(body.code.strip())
+
+    return {
+        "valid": True,
+        "user_id": link_info.get("user_id"),
+        "tenant_id": link_info.get("tenant_id")
+    }
+
 @router.post("/telegram")
 async def telegram_webhook(
     update: TelegramUpdate,

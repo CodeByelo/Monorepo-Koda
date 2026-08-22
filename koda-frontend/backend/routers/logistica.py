@@ -1071,17 +1071,33 @@ async def telegram_webhook(
         if len(parts) > 1:
             token_code = parts[1].strip()
             from backend.models.core import Profile
-            from backend.routers.telegram_api import get_linking_token
-            user_id = get_linking_token(token_code)
+            from backend.routers.telegram_api import _verify_real_linking_token, get_linking_token
+            
+            # 1. Intentar validar server-to-server con el backend institucional (fuente de verdad real)
+            link_info = await _verify_real_linking_token(token_code)
+            user_id = link_info.get("user_id") if link_info else None
+            
+            # Fallback legacy en caso de compatibilidad
+            if not user_id:
+                user_id = get_linking_token(token_code)
+                
             if user_id:
                 user = db.query(Profile).filter(Profile.id == user_id).first()
                 if user:
                     user.telegram_chat_id = chat_id
+                    # Si el usuario además es chofer registrado, actualizar su Chofer.telegram_chat_id
+                    chofer_perfil = db.query(Chofer).filter(
+                        Chofer.tenant_id == user.tenant_id,
+                        Chofer.nombre.ilike(f"%{user.nombre}%")
+                    ).first()
+                    if chofer_perfil and not chofer_perfil.telegram_chat_id:
+                        chofer_perfil.telegram_chat_id = chat_id
+                        
                     db.commit()
                     mensaje_success = (
                         "✅ *VINCULACIÓN EXITOSA - KODA ERP*\n\n"
                         f"Tu cuenta de Telegram ha sido enlazada al usuario *{user.nombre}* ({user.email}).\n\n"
-                        "Ahora recibirás alertas de seguridad y reportes del ERP en tiempo real."
+                        "Ahora recibirás alertas de seguridad, reportes y órdenes de despacho en tiempo real."
                     )
                     await _enviar_telegram(chat_id, mensaje_success)
                     return {"status": "linking_success", "user_id": user_id}

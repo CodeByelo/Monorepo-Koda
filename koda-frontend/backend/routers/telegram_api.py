@@ -132,6 +132,31 @@ async def _request_real_linking_token(tenant_id: str, user_id: str) -> str:
     return code
 
 
+async def _verify_real_linking_token(code: str) -> Optional[dict]:
+    """
+    POST {KODA_REMASTER_API_URL}/webhook/telegram/verify-token
+
+    Valida y consume, server-to-server, el código KODA-XXXXXX contra el
+    backend institucional (_TELEGRAM_LINK_TOKENS / Redis).
+    Devuelve dict con {"user_id": str, "tenant_id": str} o None si no es válido.
+    """
+    if not KODA_REMASTER_API_URL or not TELEGRAM_LINK_INTERNAL_API_KEY:
+        return None
+
+    url = f"{KODA_REMASTER_API_URL}/webhook/telegram/verify-token"
+    headers = {"X-Telegram-Link-Key": TELEGRAM_LINK_INTERNAL_API_KEY}
+    payload = {"code": code.strip()}
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            res = await client.post(url, json=payload, headers=headers)
+            if res.status_code == 200:
+                return res.json()
+    except Exception as e:
+        print(f"[TELEGRAM_VERIFY] Error al verificar token server-to-server: {e}")
+    return None
+
+
 # NO USAR — código muerto, ver telegram_router.py del backend institucional
 # (KODA_Remaster/sistema-corporativo/backend, función generate_telegram_token)
 # que es la única fuente de verdad real validada por el bot. Este código
