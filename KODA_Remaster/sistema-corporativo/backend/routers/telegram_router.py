@@ -341,6 +341,91 @@ async def _get_vendedor_for_user(conn, tenant_id: str, user_id: str) -> Optional
         return None
 
 
+# =============================================================================
+# DESPACHADORES DINÁMICOS PARA COMANDOS DEL BOT (DATOS REALES DEL ERP)
+# =============================================================================
+
+async def _dyn_query_rates(conn, tenant_id) -> str:
+    row = await conn.fetchrow(
+        """
+        SELECT valor_ves, fecha FROM public.tasas_cambio
+        WHERE tenant_id = $1 OR tenant_id IS NULL
+        ORDER BY fecha DESC LIMIT 1
+        """,
+        uuid.UUID(str(tenant_id))
+    )
+    if not row or row["valor_ves"] is None:
+        return "⚠️ No hay tasa de cambio registrada todavía en el sistema."
+    fecha_str = row["fecha"].strftime("%d/%m/%Y %H:%M") if row["fecha"] else "N/D"
+    return (
+        f"💱 *TASA BCV — KODA ERP*\n"
+        f"Bs. {float(row['valor_ves']):.2f} por USD\n"
+        f"🕒 Actualizada: {fecha_str}"
+    )
+
+
+async def _dyn_query_sales(conn, tenant_id) -> str:
+    row = await conn.fetchrow(
+        """
+        SELECT COUNT(*) AS cnt, COALESCE(SUM(total_usd), 0) AS total
+        FROM public.ventas
+        WHERE tenant_id = $1 AND estado != 'ANULADA' AND fecha >= CURRENT_DATE
+        """,
+        uuid.UUID(str(tenant_id))
+    )
+    return (
+        f"🧾 *VENTAS DE HOY — KODA ERP*\n"
+        f"Facturas emitidas: {row['cnt']}\n"
+        f"Total facturado: ${float(row['total']):.2f}"
+    )
+
+
+async def _dyn_query_stock(conn, tenant_id) -> str:
+    rows = await conn.fetch(
+        """
+        SELECT nombre, stock, stock_minimo FROM public.productos
+        WHERE tenant_id = $1 AND stock <= stock_minimo
+        ORDER BY stock ASC LIMIT 5
+        """,
+        uuid.UUID(str(tenant_id))
+    )
+    if not rows:
+        return "📦 *INVENTARIO — KODA ERP*\n✅ No hay productos en stock crítico."
+    lineas = "\n".join(
+        f"• {r['nombre']}: {r['stock']} (mín. {r['stock_minimo']})" for r in rows
+    )
+    return f"📦 *STOCK CRÍTICO — KODA ERP*\n{lineas}"
+
+
+async def _dyn_query_collections(conn, tenant_id) -> str:
+    row = await conn.fetchrow(
+        """
+        SELECT COUNT(*) AS cnt,
+               COALESCE(SUM(monto_total_usd - monto_pagado_usd), 0) AS saldo
+        FROM public.cuentas_por_cobrar
+        WHERE tenant_id = $1 AND estado != 'PAGADA'
+        """,
+        uuid.UUID(str(tenant_id))
+    )
+    return (
+        f"💰 *CUENTAS POR COBRAR — KODA ERP*\n"
+        f"Facturas pendientes: {row['cnt']}\n"
+        f"Saldo total por cobrar: ${float(row['saldo']):.2f}"
+    )
+
+
+# Registro de despachadores: la clave debe coincidir EXACTAMENTE con el valor
+# guardado en bot_commands.internal_action. Cualquier internal_action que no
+# esté aquí simplemente usa el response_text estático de siempre (fallback
+# seguro, no rompe los comandos que aún no tienen versión dinámica).
+_DYNAMIC_COMMAND_HANDLERS = {
+    "query_rates": _dyn_query_rates,
+    "query_sales": _dyn_query_sales,
+    "query_stock": _dyn_query_stock,
+    "query_collections": _dyn_query_collections,
+}
+
+
 def _parse_venta_command(text: str):
     """
     Parsea "/venta <sku> <cantidad> [rif_cliente]".
@@ -794,9 +879,9 @@ async def telegram_webhook(
         # Filtramos explícitamente por tenant_id además del contexto RLS para total fiabilidad.
         cmd_row = await conn.fetchrow(
             """
-            SELECT response_text 
-            FROM public.bot_commands 
-            WHERE trigger_command = $1 
+            SELECT response_text, internal_action
+            FROM public.bot_commands
+            WHERE trigger_command = $1
               AND (tenant_id = $2::uuid OR tenant_id IS NULL)
               AND is_active = TRUE
             """,
@@ -807,6 +892,17 @@ async def telegram_webhook(
         # 5. Responder a Telegram con el resultado correspondiente
         if cmd_row:
             reply_text = cmd_row["response_text"]
+            handler = _DYNAMIC_COMMAND_HANDLERS.get(cmd_row["internal_action"])
+            if handler:
+                try:
+                    reply_text = await handler(conn, tenant_id)
+                except Exception as dyn_err:
+                    logger.error(
+                        f"[TELEGRAM] Error en despachador dinámico "
+                        f"'{cmd_row['internal_action']}' para {command_text}: {dyn_err}"
+                    )
+                    # Si falla la consulta dinámica, cae de vuelta al texto
+                    # estático guardado en vez de dejar al usuario sin respuesta.
             await send_telegram_message(chat_id, reply_text)
             return {"status": "success", "response": reply_text}
         else:
