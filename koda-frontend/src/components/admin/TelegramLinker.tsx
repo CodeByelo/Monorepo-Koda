@@ -77,8 +77,11 @@ export default function TelegramLinker() {
   const handleDeleteCommand = async (id: string) => {
     if (!confirm('¿Estás seguro de que deseas eliminar este comando?')) return;
     try {
-      await api.delete(`/webhook/telegram/commands/${id}`);
+      const res: any = await api.delete(`/webhook/telegram/commands/${id}`);
       setCommands(prev => prev.filter(c => c.id !== id));
+      if (res?.sync_warning) {
+        alert(res.sync_warning);
+      }
     } catch (err: any) {
       console.error('Error al eliminar comando:', err);
       alert(err.message || 'Error al eliminar el comando.');
@@ -103,7 +106,7 @@ export default function TelegramLinker() {
     
     setCreating(true);
     try {
-      await api.post('/webhook/telegram/commands', {
+      const res: any = await api.post('/webhook/telegram/commands', {
         trigger_command: trigger,
         response_text: responseText,
         internal_action: newAction.trim() || null,
@@ -115,6 +118,10 @@ export default function TelegramLinker() {
       setNewAction('');
       setShowForm(false);
       fetchCommands();
+
+      if (res?.sync_warning) {
+        alert(res.sync_warning);
+      }
     } catch (err: any) {
       console.error('Error al crear comando:', err);
       setFormError(err.message || 'Error al conectar con el servidor.');

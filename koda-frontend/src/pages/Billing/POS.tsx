@@ -12,7 +12,8 @@ import {
   Calculator,
   CheckCircle,
   ArrowRight,
-  Package
+  Package,
+  UserPlus
 } from 'lucide-react';
 
 // Tarifa de negocio usada como punto de partida al agregar un producto al
@@ -240,9 +241,12 @@ const POS = () => {
         <div className="lg:col-span-2 space-y-6">
           <section className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
             <h3 className="text-xl font-black uppercase tracking-tight text-slate-800 font-mono">Búsqueda de Rubros</h3>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-start">
-               <div className="space-y-1.5">
-                  <label className="text-sm font-black text-slate-500 uppercase tracking-widest">Código / SKU / Nombre</label>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-start">
+               {/* 1. Código / SKU / Nombre */}
+               <div className="flex flex-col space-y-2">
+                  <div className="min-h-[22px] flex items-center">
+                     <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Código / SKU / Nombre</label>
+                  </div>
                   <div className="relative">
                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
                      <input 
@@ -250,42 +254,52 @@ const POS = () => {
                        value={searchTerm} 
                        onChange={(e) => setSearchTerm(e.target.value)} 
                        placeholder="BUSCAR PRODUCTO..." 
-                       className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase" 
+                       className="w-full h-11 pl-10 pr-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors" 
                      />
                   </div>
                </div>
-               <div className="space-y-1.5">
-                  <div className="flex justify-between items-center">
-                     <label className="text-sm font-black text-slate-500 uppercase tracking-widest">Identificación Cliente</label>
+
+               {/* 2. Identificación Cliente */}
+               <div className="flex flex-col space-y-2">
+                  <div className="min-h-[22px] flex items-center justify-between">
+                     <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Identificación Cliente</label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                     <select
+                       value={client}
+                       onChange={(e) => setClient(e.target.value)}
+                       className="flex-1 min-w-0 h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors truncate"
+                     >
+                        {clientes.map((c) => (
+                          <option key={c.id} value={c.id.toString()}>
+                            {c.nombre} ({c.rif})
+                          </option>
+                        ))}
+                        {clientes.length === 0 && (
+                          <option value="">No hay clientes cargados</option>
+                        )}
+                     </select>
                      <button
                        type="button"
                        onClick={() => setIsQuickCreateOpen(true)}
-                       className="text-[10px] font-black text-[#0b5156] uppercase hover:underline tracking-widest"
+                       className="h-11 px-3 bg-[#0b5156]/10 hover:bg-[#0b5156] text-[#0b5156] hover:text-white border border-[#0b5156]/20 hover:border-[#0b5156] rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shrink-0 transition-all active:scale-95 shadow-xs"
+                       title="Crear cliente rápido"
                      >
-                       + Nuevo cliente
+                       <UserPlus size={14} />
+                       <span className="hidden sm:inline">+ Cliente</span>
                      </button>
                   </div>
-                  <select
-                    value={client}
-                    onChange={(e) => setClient(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase"
-                  >
-                     {clientes.map((c) => (
-                       <option key={c.id} value={c.id.toString()}>
-                         {c.nombre} ({c.rif})
-                       </option>
-                     ))}
-                     {clientes.length === 0 && (
-                       <option value="">No hay clientes cargados</option>
-                     )}
-                  </select>
                </div>
-               <div className="space-y-1.5">
-                  <label className="text-sm font-black text-slate-500 uppercase tracking-widest">Vendedor (opcional)</label>
+
+               {/* 3. Vendedor */}
+               <div className="flex flex-col space-y-2">
+                  <div className="min-h-[22px] flex items-center">
+                     <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Vendedor (opcional)</label>
+                  </div>
                   <select
                     value={vendedorId}
                     onChange={(e) => setVendedorId(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase"
+                    className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors"
                   >
                      <option value="">Sin vendedor asignado</option>
                      {vendedores.map((v) => (
@@ -295,12 +309,16 @@ const POS = () => {
                      ))}
                   </select>
                </div>
-               <div className="space-y-1.5">
-                  <label className="text-sm font-black text-slate-500 uppercase tracking-widest">Tarifa</label>
+
+               {/* 4. Tarifa */}
+               <div className="flex flex-col space-y-2">
+                  <div className="min-h-[22px] flex items-center">
+                     <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Tarifa</label>
+                  </div>
                   <select
                     value={tarifa}
                     onChange={(e) => setTarifa(e.target.value as Tarifa)}
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase"
+                    className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors"
                   >
                      <option value="Mayor">Mayor</option>
                      <option value="Detal">Detal</option>

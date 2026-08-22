@@ -223,7 +223,7 @@ async def initialize_core_schema(conn: Any) -> None:
             pass
 
     # Aplicar migraciones SQL pendientes si existen
-    for mig_filename in ["004_rls_hardening.sql", "011_telegram_bot_schema.sql"]:
+    for mig_filename in ["004_rls_hardening.sql", "011_telegram_bot_schema.sql", "013_fix_bot_administrator_roles.sql"]:
         try:
             migration_path = Path(__file__).parent / "migrations" / mig_filename
             if migration_path.exists():

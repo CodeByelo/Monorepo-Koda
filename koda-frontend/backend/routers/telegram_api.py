@@ -27,6 +27,7 @@ class TelegramCommandResponse(BaseModel):
     response_text: str
     internal_action: Optional[str]
     is_active: bool
+    sync_warning: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -260,7 +261,7 @@ async def create_command(request: Request, cmd_in: TelegramCommandCreate, db: Se
     db.refresh(new_cmd)
 
     # Sincronizar server-to-server hacia KODA_Remaster (fuente de verdad del webhook del bot)
-    await _sync_command_to_remaster(
+    sync_res = await _sync_command_to_remaster(
         method="POST",
         endpoint="/commands",
         tenant_id=str(current_user.tenant_id),
@@ -274,7 +275,21 @@ async def create_command(request: Request, cmd_in: TelegramCommandCreate, db: Se
         }
     )
 
-    return new_cmd
+    sync_warning = None
+    if sync_res is None:
+        sync_warning = (
+            "⚠️ El comando se guardó en el ERP, pero no se pudo sincronizar con el bot de Telegram en tiempo real. "
+            "Verifique la conexión con el backend institucional o la clave de servicio."
+        )
+
+    return TelegramCommandResponse(
+        id=new_cmd.id,
+        trigger_command=new_cmd.trigger_command,
+        response_text=new_cmd.response_text,
+        internal_action=new_cmd.internal_action,
+        is_active=new_cmd.is_active,
+        sync_warning=sync_warning
+    )
 
 @router.delete("/commands/{cmd_id}")
 async def delete_command(request: Request, cmd_id: int, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
@@ -299,13 +314,23 @@ async def delete_command(request: Request, cmd_id: int, db: Session = Depends(ge
     db.commit()
 
     # Sincronizar eliminación hacia KODA_Remaster por trigger_command
-    await _sync_command_to_remaster(
+    sync_res = await _sync_command_to_remaster(
         method="DELETE",
         endpoint=f"/commands/{trigger}",
         tenant_id=str(current_user.tenant_id)
     )
 
-    return {"ok": True, "message": f"Comando '{trigger}' eliminado exitosamente."}
+    sync_warning = None
+    if sync_res is None:
+        sync_warning = (
+            "⚠️ El comando se eliminó del ERP, pero no se pudo sincronizar la baja con el bot institucional de Telegram."
+        )
+
+    return {
+        "ok": True,
+        "message": f"Comando '{trigger}' eliminado exitosamente.",
+        "sync_warning": sync_warning
+    }
 
 @router.post("/generate-token")
 async def generate_linking_token(current_user: Profile = Depends(get_current_user)):
