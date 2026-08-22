@@ -7,7 +7,9 @@ import {
   Download,
   Ban,
   Maximize2,
-  Minimize2
+  Minimize2,
+  Receipt,
+  Truck
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '@/api/client';
@@ -106,13 +108,26 @@ const BillingDashboard = () => {
 
   const handleDownloadPdf = async (id: number) => {
     try {
-      // Nota: se usa api.download (crea un <a download> oculto) en vez de
-      // window.open(blobUrl) porque window.open llamado después de un await
-      // pierde el "user activation" del click y los navegadores lo bloquean
-      // silenciosamente como popup — el botón parecía "no hacer nada".
       await api.download(`/ventas/${id}/pdf`, `Factura-${id}.pdf`);
     } catch (error: any) {
       alert(error.message || 'Error al descargar PDF');
+    }
+  };
+
+  const handleDownloadTicket = async (id: number) => {
+    try {
+      await api.download(`/ventas/${id}/ticket`, `Ticket-${id}.pdf`);
+    } catch (error: any) {
+      alert(error.message || 'Error al descargar el ticket');
+    }
+  };
+
+  const handleGenerarNotaEntrega = async (id: number) => {
+    try {
+      const res: any = await api.post(`/ventas/${id}/generar-nota-entrega`, {});
+      alert(`Nota de entrega ${res.numero_nota} generada. Complétala en Ventas > Notas de Entrega.`);
+    } catch (error: any) {
+      alert(error.message || 'Error al generar la nota de entrega');
     }
   };
 
@@ -218,6 +233,12 @@ const BillingDashboard = () => {
                     <div className="flex justify-end gap-2">
                         <button onClick={() => handleDownloadPdf(inv.dbId)} className="p-2 hover:bg-white rounded-lg text-[#0b5156] transition-colors" title="Ver PDF">
                            <Download size={14} />
+                        </button>
+                        <button onClick={() => handleDownloadTicket(inv.dbId)} className="p-2 hover:bg-white rounded-lg text-[#0b5156] transition-colors" title="Descargar Ticket">
+                          <Receipt size={14} />
+                        </button>
+                        <button onClick={() => handleGenerarNotaEntrega(inv.dbId)} className="p-2 hover:bg-white rounded-lg text-[#0b5156] transition-colors" title="Generar Nota de Entrega">
+                          <Truck size={14} />
                         </button>
                        {inv.status !== 'ANULADA' && inv.status !== 'Anulada' && (
                          <button onClick={() => {

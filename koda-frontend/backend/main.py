@@ -76,6 +76,7 @@ try:
             connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS retencion_iva_usd NUMERIC(15,2) DEFAULT 0.00;"))
             connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS igtf_usd NUMERIC(15,2) DEFAULT 0.00;"))
             connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS creado_por UUID;"))
+            connection.execute(text("ALTER TABLE public.notas_entrega ADD COLUMN IF NOT EXISTS venta_id INTEGER REFERENCES public.ventas(id);"))
             # Migración para que correlativos_fiscales sea único por (tenant_id, tipo_documento) y no global
             connection.execute(text("DROP INDEX IF EXISTS public.ix_public_correlativos_fiscales_tipo_documento;"))
             connection.execute(text("DROP INDEX IF EXISTS public.ix_correlativos_fiscales_tipo_documento;"))

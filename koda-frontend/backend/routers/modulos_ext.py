@@ -4883,38 +4883,27 @@ def descargar_factura_pdf(
 
 
 @ventas_ext_router.get("/{id}/ticket")
-def descargar_factura_ticket_pdf(
+def descargar_ticket_pdf(
     id: int,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
-    """Genera un TICKET compacto (formato 80mm, estilo impresora térmica de
-    punto de venta) para una factura ya emitida — documento visualmente
-    distinto a la factura formal de `descargar_factura_pdf` (usada por
-    NuevaFactura.tsx), pensado para POS.tsx.
-
-    No duplica ningún cálculo fiscal: IVA/IGTF/totales ya fueron calculados
-    y congelados en `Venta` por `facturacion_service` al momento de emitir
-    (ver `routers/facturacion.py`). Esta función solo LEE esos mismos campos
-    persistidos y cambia el layout/tamaño de página; es una función nueva e
-    independiente para no chocar con ediciones en paralelo sobre
-    `descargar_factura_pdf` (p. ej. el fix del logo).
-    """
+    """Genera un PDF en formato ticket (recibo corto, tipo punto de venta),
+    como alternativa a la factura fiscal completa de /ventas/{id}/pdf. Mismos
+    datos, presentación compacta pensada para imprimirse en impresora térmica
+    (ancho ~80mm)."""
     import io
     from fastapi.responses import StreamingResponse
     from backend.models.operations import Venta
     from backend.routers.entidades import _get_or_create_empresa
 
-    venta = (
-        db.query(Venta)
-        .filter(Venta.id == id, Venta.tenant_id == current_user.tenant_id)
-        .first()
-    )
+    venta = db.query(Venta).filter(
+        Venta.id == id,
+        Venta.tenant_id == current_user.tenant_id,
+    ).first()
     if not venta:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
 
-    # Mismos datos reales del emisor que usa la factura formal
-    # (descargar_factura_pdf) — nunca hardcodear el nombre/RIF de la empresa.
     empresa = _get_or_create_empresa(db, current_user)
 
     try:
@@ -4923,91 +4912,53 @@ def descargar_factura_ticket_pdf(
     except ImportError:
         raise HTTPException(status_code=500, detail="Librería reportlab no instalada.")
 
-    ancho = 80 * mm
-    alto = max(230 + len(venta.detalles) * 11, 260)
+    ANCHO = 80 * mm
+    # Alto dinámico: cabecera + una línea por producto + totales + pie.
+    alto_estimado = (95 + len(venta.detalles) * 14 + 90) * (72 / 25.4 / 10)
+    ALTO = max(150 * mm, alto_estimado * mm)
 
     buffer = io.BytesIO()
-    c = canvas.Canvas(buffer, pagesize=(ancho, alto))
-    y = alto - 18
+    c = canvas.Canvas(buffer, pagesize=(ANCHO, ALTO))
+    y = ALTO - 10 * mm
 
-    c.setFont("Helvetica-Bold", 10)
-    c.drawCentredString(ancho / 2, y, empresa.razon_social)
-    y -= 11
-    c.setFont("Helvetica", 7)
-    c.drawCentredString(ancho / 2, y, f"R.I.F.: {empresa.rif}")
-    y -= 14
-    c.setFont("Helvetica-Bold", 9)
-    c.drawCentredString(ancho / 2, y, "TICKET DE VENTA")
-    y -= 11
-    c.setFont("Helvetica", 7)
-    c.drawCentredString(ancho / 2, y, f"Control: {venta.numero_factura}")
-    y -= 9
-    c.drawCentredString(ancho / 2, y, venta.fecha.strftime('%d/%m/%Y %H:%M'))
-    y -= 10
-    c.line(6, y, ancho - 6, y)
-    y -= 12
+    def linea(texto, tam=8, negrita=False, centrado=False):
+        nonlocal y
+        c.setFont("Helvetica-Bold" if negrita else "Helvetica", tam)
+        if centrado:
+            c.drawCentredString(ANCHO / 2, y, texto)
+        else:
+            c.drawString(4 * mm, y, texto)
+        y -= (tam + 3)
 
+    linea(empresa.razon_social, 10, negrita=True, centrado=True)
+    linea(f"RIF: {empresa.rif}", 8, centrado=True)
+    linea("-" * 42, 8, centrado=True)
+    linea(f"Factura: {venta.numero_factura}", 8)
+    linea(f"Fecha: {venta.fecha.strftime('%d/%m/%Y %H:%M')}", 8)
     cliente_nombre = venta.cliente.nombre if venta.cliente else "CLIENTE GENERAL"
-    c.setFont("Helvetica", 7)
-    c.drawString(6, y, f"Cliente: {cliente_nombre[:28]}")
-    y -= 10
-    c.drawString(6, y, f"Pago: {venta.metodo_pago}")
-    y -= 10
-    c.line(6, y, ancho - 6, y)
-    y -= 12
+    linea(f"Cliente: {cliente_nombre}", 8)
+    linea("-" * 42, 8, centrado=True)
 
-    c.setFont("Helvetica-Bold", 7)
-    c.drawString(6, y, "CANT DESCRIPCION")
-    c.drawRightString(ancho - 6, y, "TOTAL")
-    y -= 9
-    c.setFont("Helvetica", 7)
     for item in venta.detalles:
-        prod_nombre = (item.producto.nombre if item.producto else "Producto")[:22]
-        cantidad = float(item.cantidad)
+        prod_nombre = item.producto.nombre if item.producto else "Producto"
         precio = float(item.precio_usd_capturado)
-        sub_total_linea = precio * cantidad
-        c.drawString(6, y, f"{cantidad:.0f}x {prod_nombre}")
-        c.drawRightString(ancho - 6, y, f"${sub_total_linea:.2f}")
-        y -= 10
+        cantidad = float(item.cantidad)
+        linea(f"{cantidad:g}x {prod_nombre[:24]}", 8)
+        linea(f"   ${precio:.2f} c/u = ${precio * cantidad:.2f}", 8)
 
-    y -= 3
-    c.line(6, y, ancho - 6, y)
-    y -= 11
-
-    subtotal = float(venta.subtotal_usd)
-    iva = float(venta.iva_usd)
-    igtf = float(venta.igtf_usd)
-    total_usd = float(venta.total_usd)
-    total_bs = total_usd * float(venta.tasa_cambio_bs)
-
-    c.setFont("Helvetica", 7)
-    c.drawString(6, y, "Subtotal:")
-    c.drawRightString(ancho - 6, y, f"${subtotal:.2f}")
-    y -= 9
-    c.drawString(6, y, "IVA (16%):")
-    c.drawRightString(ancho - 6, y, f"${iva:.2f}")
-    y -= 9
-    if igtf > 0:
-        c.drawString(6, y, "IGTF (3%):")
-        c.drawRightString(ancho - 6, y, f"${igtf:.2f}")
-        y -= 9
-
-    c.setFont("Helvetica-Bold", 8)
-    c.drawString(6, y, "TOTAL USD:")
-    c.drawRightString(ancho - 6, y, f"${total_usd:.2f}")
-    y -= 10
-    c.drawString(6, y, "TOTAL BS:")
-    c.drawRightString(ancho - 6, y, f"Bs. {total_bs:.2f}")
-    y -= 15
-
-    c.setFont("Helvetica-Oblique", 6)
-    c.drawCentredString(ancho / 2, y, "Representación tipo ticket de la Factura Fiscal emitida.")
-    y -= 8
-    c.drawCentredString(ancho / 2, y, "Gracias por su compra.")
+    linea("-" * 42, 8, centrado=True)
+    linea(f"Subtotal: ${float(venta.subtotal_usd):.2f}", 9)
+    linea(f"IVA: ${float(venta.iva_usd):.2f}", 9)
+    if float(venta.igtf_usd) > 0:
+        linea(f"IGTF: ${float(venta.igtf_usd):.2f}", 9)
+    linea(f"TOTAL: ${float(venta.total_usd):.2f}", 11, negrita=True)
+    linea(f"Tasa BCV: {float(venta.tasa_cambio_bs):.2f}", 8)
+    linea(f"Total Bs: {float(venta.total_usd) * float(venta.tasa_cambio_bs):.2f}", 9, negrita=True)
+    linea("-" * 42, 8, centrado=True)
+    linea("¡Gracias por su compra!", 8, centrado=True)
 
     c.showPage()
     c.save()
-
     buffer.seek(0)
     filename = f"Ticket-{venta.numero_factura}.pdf"
     return StreamingResponse(
@@ -5782,6 +5733,73 @@ def actualizar_estado_nota_entrega(
     db.commit()
     db.refresh(nota)
     return {"id": nota.id, "estado": nota.estado}
+
+
+@ventas_ext_router.post("/{id}/generar-nota-entrega", status_code=201)
+def generar_nota_entrega_desde_venta(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Crea una Nota de Entrega prellenada a partir de una Venta/Factura ya
+    emitida: cliente e items se copian de la venta, y se guarda `venta_id`
+    para dejar trazabilidad de cuál factura la originó. Los datos logísticos
+    (transportista, placa, destino) quedan vacíos — se completan después
+    desde el módulo de Notas de Entrega antes del despacho."""
+    from backend.models.operations import Venta
+
+    venta = db.query(Venta).filter(
+        Venta.id == id,
+        Venta.tenant_id == current_user.tenant_id,
+    ).first()
+    if not venta:
+        raise HTTPException(status_code=404, detail="Factura no encontrada.")
+
+    ya_existe = db.query(NotaEntrega).filter(
+        NotaEntrega.tenant_id == current_user.tenant_id,
+        NotaEntrega.venta_id == id,
+    ).first()
+    if ya_existe:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ya existe la nota de entrega {ya_existe.numero_nota} para esta factura.",
+        )
+
+    cliente_nombre = venta.cliente.nombre if venta.cliente else "CLIENTE GENERAL"
+
+    count = db.query(NotaEntrega).filter(NotaEntrega.tenant_id == current_user.tenant_id).count()
+    numero_nota = f"NE-{datetime.now(timezone.utc).year}-{str(count + 1).zfill(4)}"
+
+    nueva_nota = NotaEntrega(
+        tenant_id=current_user.tenant_id,
+        numero_nota=numero_nota,
+        cliente_id=venta.cliente_id,
+        cliente_nombre=cliente_nombre,
+        venta_id=venta.id,
+        fecha_emision=datetime.now(timezone.utc).date(),
+        estado="PENDIENTE",
+        creado_por=getattr(current_user, "id", None),
+    )
+    for detalle in venta.detalles:
+        nueva_nota.items.append(NotaEntregaItem(
+            producto_id=detalle.producto_id,
+            descripcion=detalle.producto.nombre if detalle.producto else "Producto",
+            cantidad=detalle.cantidad,
+        ))
+
+    try:
+        db.add(nueva_nota)
+        db.commit()
+        db.refresh(nueva_nota)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al generar la nota de entrega: {str(e)}")
+
+    return {
+        "id": nueva_nota.id,
+        "numero_nota": nueva_nota.numero_nota,
+        "venta_id": nueva_nota.venta_id,
+    }
 
 
 # --- INVENTARIO EXTENDIDO ---
