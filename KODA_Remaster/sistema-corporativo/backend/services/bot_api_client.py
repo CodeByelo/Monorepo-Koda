@@ -86,6 +86,16 @@ async def get_stock(tenant_id: str, sku: str) -> dict:
     )
 
 
+async def buscar_productos(tenant_id: str, query: str) -> list:
+    """GET {KODA_FRONTEND_API_URL}/bot/productos/buscar?tenant_id=...&q=..."""
+    data = await _request(
+        "GET", "/bot/productos/buscar", params={"tenant_id": tenant_id, "q": query}
+    )
+    if isinstance(data, dict):
+        return data.get("resultados") or []
+    return data or []
+
+
 async def get_alertas(tenant_id: str) -> list:
     """GET {KODA_FRONTEND_API_URL}/bot/alertas?tenant_id=..."""
     data = await _request("GET", "/bot/alertas", params={"tenant_id": tenant_id})

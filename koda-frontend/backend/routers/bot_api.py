@@ -340,6 +340,52 @@ def consultar_stock_bot(
 
 
 # ==========================================
+# GET /bot/productos/buscar
+# ==========================================
+
+@router.get("/productos/buscar")
+def buscar_productos_bot(
+    tenant_id: str,
+    q: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Búsqueda de productos por nombre (ILIKE, parcial) para el flujo de venta
+    conversacional del bot (/comprar). Usa Producto.stock DIRECTO (el mismo
+    campo que valida y descuenta /bot/venta al emitir la factura) para que el
+    número mostrado aquí coincida exactamente con lo que se va a validar al
+    confirmar — a propósito NO usa StockPorAlmacen (que es una fuente
+    distinta, usada solo por /bot/stock para otro caso de uso).
+    """
+    tid = _parse_tenant_id(tenant_id)
+    _set_tenant_scope(db, tid)
+
+    query = (q or "").strip()
+    if len(query) < 2:
+        raise HTTPException(status_code=400, detail="Escribe al menos 2 caracteres para buscar.")
+
+    productos = (
+        db.query(Producto)
+        .filter(Producto.tenant_id == tid, Producto.nombre.ilike(f"%{query}%"))
+        .order_by(Producto.nombre.asc())
+        .limit(8)
+        .all()
+    )
+
+    return {
+        "resultados": [
+            {
+                "sku": p.sku,
+                "nombre": p.nombre,
+                "precio_usd": to_float(p.precio_usd),
+                "stock": to_float(p.stock),
+            }
+            for p in productos
+        ]
+    }
+
+
+# ==========================================
 # GET /bot/alertas
 # ==========================================
 

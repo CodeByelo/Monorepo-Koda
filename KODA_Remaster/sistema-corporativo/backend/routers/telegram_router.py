@@ -13,7 +13,12 @@ from pydantic import BaseModel
 from database.async_db import get_db_connection
 from auth.supabase_auth import get_current_user, oauth2_scheme
 from redis.asyncio import Redis
-from services.bot_api_client import get_stock as bot_get_stock, registrar_venta, BotApiError
+from services.bot_api_client import (
+    get_stock as bot_get_stock,
+    buscar_productos as bot_buscar_productos,
+    registrar_venta,
+    BotApiError,
+)
 
 # Almacenamiento temporal en memoria como fallback cuando Redis no esté disponible
 _TELEGRAM_LINK_TOKENS: dict = {}
@@ -200,6 +205,22 @@ async def answer_telegram_callback(callback_query_id: str, text: Optional[str] =
             await client.post(url, json=payload)
     except Exception as e:
         logger.error(f"[TELEGRAM] Error respondiendo callback_query: {e}")
+
+
+async def edit_telegram_message(chat_id: int, message_id: int, text: str, reply_markup: Optional[dict] = None) -> None:
+    """Edita un mensaje ya enviado (usado para refrescar el selector de
+    cantidad sin llenar el chat de mensajes nuevos cada vez que se toca +/-)."""
+    if not TELEGRAM_BOT_TOKEN:
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageText"
+    payload = {"chat_id": chat_id, "message_id": message_id, "text": text}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(url, json=payload)
+    except Exception as e:
+        logger.error(f"[TELEGRAM] Error editando mensaje: {e}")
 
 # Helper para guardar tokens de vinculación (Redis + Memoria)
 async def _save_link_token(code: str, payload: dict):
@@ -510,6 +531,62 @@ async def _handle_venta_command(command_text: str, chat_id: int, session_row, co
     return {"status": "confirmation_pending", "token": token}
 
 
+async def _handle_comprar_command(command_text: str, chat_id: int, session_row, conn) -> dict:
+    """/comprar <texto de búsqueda> — flujo conversacional: busca por nombre,
+    el vendedor elige con botones, ajusta cantidad y confirma."""
+    user_id = str(session_row["user_id"])
+    tenant_id = str(session_row["tenant_id"])
+
+    vendedor = await _get_vendedor_for_user(conn, tenant_id, user_id)
+    if not vendedor:
+        await send_telegram_message(
+            chat_id,
+            "❌ Tu cuenta no tiene un perfil de Vendedor activo asociado. "
+            "El comando /comprar solo está disponible para vendedores registrados."
+        )
+        return {"status": "not_a_vendedor"}
+
+    query = command_text[len("/comprar"):].strip()
+    if len(query) < 2:
+        await send_telegram_message(chat_id, "Uso: /comprar <nombre del producto>\nEjemplo: /comprar forro")
+        return {"status": "invalid_command_format"}
+
+    try:
+        candidatos = await bot_buscar_productos(tenant_id, query)
+    except BotApiError as e:
+        await send_telegram_message(chat_id, f"❌ No se pudo buscar el producto: {e}")
+        return {"status": "search_failed", "detail": str(e)}
+
+    candidatos = [c for c in candidatos if c.get("stock", 0) > 0]
+    if not candidatos:
+        await send_telegram_message(chat_id, f"No encontré productos con stock disponible que coincidan con '{query}'.")
+        return {"status": "no_results"}
+
+    token = secrets.token_urlsafe(8)
+    await _save_pending_venta(token, {
+        "stage": "select",
+        "tenant_id": tenant_id,
+        "vendedor_id": vendedor["id"],
+        "chat_id": chat_id,
+        "candidatos": candidatos,
+    })
+
+    botones = [
+        [{
+            "text": f"{c['nombre']} — ${c['precio_usd']:.2f} (stock: {c['stock']:g})",
+            "callback_data": f"elegir_producto:{token}:{idx}",
+        }]
+        for idx, c in enumerate(candidatos)
+    ]
+    nota = "\n\n_Mostrando hasta 8 resultados — escribe algo más específico si no ves lo que buscas._" if len(candidatos) == 8 else ""
+    await send_telegram_message(
+        chat_id,
+        f"🔍 Resultados para '{query}':{nota}",
+        reply_markup={"inline_keyboard": botones},
+    )
+    return {"status": "selection_pending", "token": token}
+
+
 async def _handle_stock_command(command_text: str, chat_id: int, session_row) -> dict:
     parts = command_text.split()
     if len(parts) < 2:
@@ -533,8 +610,36 @@ async def _handle_stock_command(command_text: str, chat_id: int, session_row) ->
     return {"status": "success"}
 
 
+def _texto_confirmacion(pending: dict) -> str:
+    cantidad = pending.get("cantidad", 1)
+    subtotal = cantidad * pending.get("precio_usd", 0)
+    return (
+        "🧾 Confirmar venta\n\n"
+        f"Producto: {pending.get('nombre')}\n"
+        f"Precio unitario: ${pending.get('precio_usd', 0):.2f}\n"
+        f"Cantidad: {cantidad}\n"
+        f"Subtotal: ${subtotal:.2f}\n\n"
+        "Ajusta la cantidad si hace falta y confirma."
+    )
+
+
+def _botones_confirmacion(token: str) -> dict:
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "➖", "callback_data": f"qty_menos:{token}"},
+                {"text": "➕", "callback_data": f"qty_mas:{token}"},
+            ],
+            [
+                {"text": "✅ Confirmar", "callback_data": f"confirmar_venta:{token}"},
+                {"text": "❌ Cancelar", "callback_data": f"cancelar_venta:{token}"},
+            ],
+        ]
+    }
+
+
 async def _handle_callback_query(callback_query: TelegramCallbackQuery) -> dict:
-    """Procesa la respuesta del usuario a los botones inline Confirmar/Cancelar de /venta."""
+    """Procesa la respuesta del usuario a los botones inline Confirmar/Cancelar/Selección/Cantidad."""
     data = callback_query.data or ""
     chat_id = callback_query.message.chat.id if callback_query.message else None
 
@@ -542,10 +647,19 @@ async def _handle_callback_query(callback_query: TelegramCallbackQuery) -> dict:
         await answer_telegram_callback(callback_query.id)
         return {"status": "ignored", "detail": "malformed callback data"}
 
-    action, token = data.split(":", 1)
-    if action not in ("confirmar_venta", "cancelar_venta"):
+    parts = data.split(":")
+    action = parts[0]
+    token = parts[1] if len(parts) > 1 else None
+    idx = None
+    if action == "elegir_producto" and len(parts) > 2:
+        try:
+            idx = int(parts[2])
+        except ValueError:
+            idx = None
+
+    if not token or action not in ("confirmar_venta", "cancelar_venta", "elegir_producto", "qty_mas", "qty_menos"):
         await answer_telegram_callback(callback_query.id)
-        return {"status": "ignored", "detail": "unknown action"}
+        return {"status": "ignored", "detail": "unknown action or malformed callback data"}
 
     pending = await _get_pending_venta(token)
     if not pending:
@@ -553,15 +667,50 @@ async def _handle_callback_query(callback_query: TelegramCallbackQuery) -> dict:
         if chat_id:
             await send_telegram_message(
                 chat_id,
-                "⏱️ Esta confirmación expiró o ya fue procesada. Vuelve a iniciar la venta con /venta."
+                "⏱️ Esta confirmación expiró o ya fue procesada. Vuelve a iniciar con /venta o /comprar."
             )
         return {"status": "expired_or_missing"}
 
-    # Se borra inmediatamente para que el botón no pueda re-ejecutarse dos veces (doble tap).
+    target_chat_id = pending.get("chat_id", chat_id)
+    message_id = callback_query.message.message_id if callback_query.message else None
+
+    # --- Selección de producto desde /comprar (no borra el token: sigue en curso) ---
+    if action == "elegir_producto":
+        await answer_telegram_callback(callback_query.id)
+        candidatos = pending.get("candidatos") or []
+        if idx is None or idx < 0 or idx >= len(candidatos):
+            await send_telegram_message(target_chat_id, "❌ Selección inválida, vuelve a intentar con /comprar.")
+            await _delete_pending_venta(token)
+            return {"status": "invalid_selection"}
+
+        elegido = candidatos[idx]
+        pending.update({
+            "stage": "confirm",
+            "sku": elegido["sku"],
+            "nombre": elegido["nombre"],
+            "precio_usd": elegido["precio_usd"],
+            "cantidad": 1,
+            "rif_cliente": None,
+        })
+        await _save_pending_venta(token, pending)
+        if message_id:
+            await edit_telegram_message(target_chat_id, message_id, _texto_confirmacion(pending), reply_markup=_botones_confirmacion(token))
+        return {"status": "product_selected"}
+
+    # --- Ajuste de cantidad (+/-) — sigue en curso, no borra el token ---
+    if action in ("qty_mas", "qty_menos"):
+        await answer_telegram_callback(callback_query.id)
+        cantidad_actual = pending.get("cantidad", 1)
+        nueva_cantidad = cantidad_actual + 1 if action == "qty_mas" else max(1, cantidad_actual - 1)
+        pending["cantidad"] = nueva_cantidad
+        await _save_pending_venta(token, pending)
+        if message_id:
+            await edit_telegram_message(target_chat_id, message_id, _texto_confirmacion(pending), reply_markup=_botones_confirmacion(token))
+        return {"status": "quantity_updated", "cantidad": nueva_cantidad}
+
+    # --- Confirmar / cancelar: aquí sí se borra el token (operación final) ---
     await _delete_pending_venta(token)
     await answer_telegram_callback(callback_query.id)
-
-    target_chat_id = pending.get("chat_id", chat_id)
 
     if action == "cancelar_venta":
         await send_telegram_message(target_chat_id, "🚫 Venta cancelada. No se realizó ningún cambio.")
@@ -867,13 +1016,16 @@ async def telegram_webhook(
                 str(user_id)
             )
 
-        # 3.1 Comandos de negocio propios del bot (/venta y /stock), evaluados
+        # 3.1 Comandos de negocio propios del bot (/venta, /stock, /comprar), evaluados
         #     antes que el catálogo genérico de bot_commands.
         if command_text.startswith("/venta"):
             return await _handle_venta_command(command_text, chat_id, session_row, conn)
 
         if command_text.startswith("/stock"):
             return await _handle_stock_command(command_text, chat_id, session_row)
+
+        if command_text.startswith("/comprar"):
+            return await _handle_comprar_command(command_text, chat_id, session_row, conn)
 
         # 4. Buscar si el comando coincide con algún trigger_command del tenant.
         # Filtramos explícitamente por tenant_id además del contexto RLS para total fiabilidad.
