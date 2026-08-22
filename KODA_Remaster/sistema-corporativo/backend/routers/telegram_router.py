@@ -763,19 +763,24 @@ async def telegram_webhook(
             await send_telegram_message(chat_id, response_msg)
             return {"status": "not_linked"}
 
+        user_id = session_row["user_id"]
         tenant_id = session_row["tenant_id"]
 
-        # 3. Inyectar el tenant_id en el contexto de sesión de la DB.
+        # 3. Inyectar el tenant_id y user_id en el contexto de sesión de la DB.
         # Esto activará las políticas RLS de PostgreSQL para las consultas subsiguientes.
         await conn.execute(
             "SELECT set_config('app.current_tenant', $1, true)", 
             str(tenant_id)
         )
-        
-        # Opcionalmente simulamos el rol de Administrador para RLS si es necesario para CRUD.
-        # Dado que el bot ejecuta lecturas de consultas en nombre del tenant, 'app.current_tenant' es suficiente.
-        # Sin embargo, si quisiéramos simular el rol de Administrator:
-        # await conn.execute("SELECT set_config('app.current_user_role', 'Administrator', true)")
+        await conn.execute(
+            "SELECT set_config('app.current_tenant_id', $1, true)", 
+            str(tenant_id)
+        )
+        if user_id:
+            await conn.execute(
+                "SELECT set_config('app.current_user_id', $1, true)", 
+                str(user_id)
+            )
 
         # 3.1 Comandos de negocio propios del bot (/venta y /stock), evaluados
         #     antes que el catálogo genérico de bot_commands.
@@ -786,14 +791,17 @@ async def telegram_webhook(
             return await _handle_stock_command(command_text, chat_id, session_row)
 
         # 4. Buscar si el comando coincide con algún trigger_command del tenant.
-        # Gracias a RLS, PostgreSQL filtrará automáticamente para buscar solo en el tenant correspondiente.
+        # Filtramos explícitamente por tenant_id además del contexto RLS para total fiabilidad.
         cmd_row = await conn.fetchrow(
             """
             SELECT response_text 
             FROM public.bot_commands 
-            WHERE trigger_command = $1 AND is_active = TRUE
+            WHERE trigger_command = $1 
+              AND (tenant_id = $2::uuid OR tenant_id IS NULL)
+              AND is_active = TRUE
             """,
-            command_text
+            command_text,
+            uuid.UUID(str(tenant_id))
         )
 
         # 5. Responder a Telegram con el resultado correspondiente
