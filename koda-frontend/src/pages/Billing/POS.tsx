@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '@/api/client';
 import { useAuth } from '@/providers/AuthProvider';
-import { 
-  Search, 
-  Banknote, 
-  Plus, 
+import { QuickCreateClienteModal } from '@/components/customers/QuickCreateClienteModal';
+import {
+  Search,
+  Banknote,
+  Plus,
   Zap,
   Monitor,
   Calculator,
@@ -45,6 +46,7 @@ const POS = () => {
   const [tarifa, setTarifa] = useState<Tarifa>('Detal');
   const [metodoPago, setMetodoPago] = useState<'Efectivo' | 'Divisa' | 'Transferencia' | 'PagoMovil'>('Divisa');
   const [toast, setToast] = useState<{message: string, type: 'error' | 'success'} | null>(null);
+  const [isQuickCreateOpen, setIsQuickCreateOpen] = useState(false);
 
   const showToast = (message: string, type: 'error' | 'success' = 'error') => {
     setToast({ message, type });
@@ -126,6 +128,14 @@ const POS = () => {
     setCart((prevCart) => prevCart.map((item) =>
       item.id === id ? { ...item, price: Number.isFinite(newPrice) ? newPrice : 0 } : item
     ));
+  };
+
+  // Solo agrega el cliente nuevo al array en memoria y lo selecciona como
+  // activo; no debe tocar carrito/cantidades/totales de la venta en curso.
+  const handleClienteCreated = (cliente: any) => {
+    setClientes((prev) => [...prev, cliente]);
+    setClient(cliente.id.toString());
+    showToast(`Cliente ${cliente.nombre} creado y seleccionado`, 'success');
   };
 
   const handleCheckout = () => {
@@ -245,8 +255,17 @@ const POS = () => {
                   </div>
                </div>
                <div className="space-y-1.5">
-                  <label className="text-sm font-black text-slate-500 uppercase tracking-widest">Identificación Cliente</label>
-                  <select 
+                  <div className="flex justify-between items-center">
+                     <label className="text-sm font-black text-slate-500 uppercase tracking-widest">Identificación Cliente</label>
+                     <button
+                       type="button"
+                       onClick={() => setIsQuickCreateOpen(true)}
+                       className="text-[10px] font-black text-[#0b5156] uppercase hover:underline tracking-widest"
+                     >
+                       + Nuevo cliente
+                     </button>
+                  </div>
+                  <select
                     value={client}
                     onChange={(e) => setClient(e.target.value)}
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase"
@@ -490,6 +509,12 @@ const POS = () => {
           </section>
         </aside>
       </div>
+
+      <QuickCreateClienteModal
+        isOpen={isQuickCreateOpen}
+        onClose={() => setIsQuickCreateOpen(false)}
+        onCreated={handleClienteCreated}
+      />
     </div>
   );
 };
