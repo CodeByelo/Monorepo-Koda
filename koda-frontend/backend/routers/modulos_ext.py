@@ -479,7 +479,7 @@ def procesar_recepcion(
         # Crear Hoja de Recepción
         count = db.query(RecepcionStock).filter(RecepcionStock.tenant_id == current_user.tenant_id).count() + 1
         hoja_id = f"REC-{count:04d}"
-        
+
         nueva_recepcion = RecepcionStock(
             hoja_id=hoja_id,
             orden_compra=req.orden_compra,
@@ -490,10 +490,26 @@ def procesar_recepcion(
             fecha=datetime.now(timezone.utc),
             tenant_id=current_user.tenant_id
         )
-        
+
         db.add(nueva_recepcion)
+
+        # Grabar en Libro Mayor de Inventario (Kardex): la recepción de
+        # compra modifica stock real igual que una venta o un ajuste, pero
+        # hasta ahora no dejaba rastro en el Kardex. Cantidad positiva
+        # porque es una entrada; mismo documento (hoja_id) que ya identifica
+        # la recepción en el resto del flujo.
+        movimiento = KardexMovimiento(
+            producto_id=req.producto_id,
+            tipo_movimiento="Compra",
+            cantidad=nueva_cantidad,
+            almacen_id=almacen_id,
+            documento_referencia=hoja_id,
+            tenant_id=current_user.tenant_id
+        )
+        db.add(movimiento)
+
         db.commit()
-        
+
         return {"ok": True, "hoja_id": hoja_id}
     except HTTPException:
         raise
@@ -6035,6 +6051,12 @@ def kardex_stats(db: Session = Depends(get_db), current_user = Depends(get_curre
     }
 
 
+# NOTA: esta es la implementación ACTIVA de GET /inventario/kardex/{producto_id}.
+# Existe una segunda definición del mismo path en routers/inventory.py
+# (obtener_kardex_producto) bajo un router distinto con el mismo prefix
+# "/inventario"; como inventario_ext_router (este archivo) se registra en
+# main.py ANTES que inventory.router, FastAPI siempre matchea esta función y
+# la de inventory.py queda muerta (shadowed). Ver comentario en ese archivo.
 @inventario_ext_router.get("/kardex/{producto_id}")
 def kardex_producto(producto_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     prod = db.query(Producto).filter(Producto.id == producto_id, Producto.tenant_id == current_user.tenant_id).first()
@@ -6045,6 +6067,58 @@ def kardex_producto(producto_id: int, db: Session = Depends(get_db), current_use
         KardexMovimiento.tenant_id == current_user.tenant_id
     ).order_by(KardexMovimiento.fecha.desc()).all()
     return [{"tipo": m.tipo_movimiento, "cantidad": m.cantidad, "doc": m.documento_referencia, "fecha": m.fecha.isoformat()} for m in movs]
+
+
+@inventario_ext_router.get("/kardex/{producto_id}/almacenes")
+def kardex_producto_por_almacen(producto_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """Desglose de stock actual por almacén para un producto.
+
+    Contrato de respuesta (estable, lo consume una sección nueva del
+    frontend en Kardex.tsx): lista de objetos, uno por cada almacén ACTIVO
+    del tenant, con la forma:
+
+        {
+            "almacen_id": int,
+            "codigo": str,
+            "nombre": str,
+            "cantidad": float,   # StockPorAlmacen.cantidad; 0.0 si no tiene fila
+            "es_principal": bool  # True para el almacén activo de menor id
+                                    # del tenant (ver get_almacen_principal_id)
+        }
+
+    Incluye TODOS los almacenes activos del tenant, no sólo los que ya
+    tienen movimientos, para que el frontend pueda mostrar "0" en los
+    almacenes donde el producto simplemente no tiene stock todavía.
+    """
+    prod = db.query(Producto).filter(Producto.id == producto_id, Producto.tenant_id == current_user.tenant_id).first()
+    if not prod:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+
+    principal_id = get_almacen_principal_id(db, current_user.tenant_id)
+
+    almacenes = db.query(Almacen).filter(
+        Almacen.tenant_id == current_user.tenant_id,
+        Almacen.activo == True  # noqa: E712
+    ).order_by(Almacen.id.asc()).all()
+
+    stocks_por_almacen = {
+        s.almacen_id: s.cantidad
+        for s in db.query(StockPorAlmacen).filter(
+            StockPorAlmacen.producto_id == producto_id,
+            StockPorAlmacen.tenant_id == current_user.tenant_id
+        ).all()
+    }
+
+    return [
+        {
+            "almacen_id": a.id,
+            "codigo": a.codigo,
+            "nombre": a.nombre,
+            "cantidad": to_float(stocks_por_almacen.get(a.id, 0)),
+            "es_principal": a.id == principal_id
+        }
+        for a in almacenes
+    ]
 
 
 class TransferenciaCreate(BaseModel):
@@ -6148,6 +6222,32 @@ def recibir_transferencia(transfer_id: int, db: Session = Depends(get_db), curre
         db.add(destino_stock)
 
     t.estado = "COMPLETADA"
+
+    # Grabar en Libro Mayor de Inventario (Kardex): una transferencia mueve
+    # stock real entre dos almacenes pero hasta ahora no dejaba rastro en el
+    # Kardex. Se registran DOS movimientos (salida en origen, entrada en
+    # destino) en vez de uno neto, para que el Kardex de cada almacén sea
+    # auditable de forma independiente.
+    doc_ref = f"TRF-{str(t.id).zfill(6)}"
+    movimiento_salida = KardexMovimiento(
+        producto_id=t.producto_id,
+        tipo_movimiento="Transferencia_Salida",
+        cantidad=-t.cantidad,
+        almacen_id=t.origen_almacen_id,
+        documento_referencia=doc_ref,
+        tenant_id=current_user.tenant_id
+    )
+    movimiento_entrada = KardexMovimiento(
+        producto_id=t.producto_id,
+        tipo_movimiento="Transferencia_Entrada",
+        cantidad=t.cantidad,
+        almacen_id=t.destino_almacen_id,
+        documento_referencia=doc_ref,
+        tenant_id=current_user.tenant_id
+    )
+    db.add(movimiento_salida)
+    db.add(movimiento_entrada)
+
     db.commit()
     return {"ok": True, "mensaje": "Transferencia recibida e ingresada al almacén destino."}
 

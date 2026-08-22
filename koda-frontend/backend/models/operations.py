@@ -130,8 +130,15 @@ class KardexMovimiento(Base):
     # Cantidad exacta que se movió. Negativo para salidas, positivo para entradas.
     cantidad = Column(Numeric(15, 2), nullable=False) 
     # Documento que justifica el movimiento. Ej: FAC-00000001, AJU-2026-001
-    documento_referencia = Column(String(100), nullable=False) 
+    documento_referencia = Column(String(100), nullable=False)
     estado = Column(String(20), default="ACTIVO", nullable=False)
+    # Almacén donde ocurrió físicamente el movimiento. Nullable por
+    # compatibilidad con filas existentes y con flujos que todavía no son
+    # conscientes de almacén; cuando el llamador no informa almacen_id
+    # explícito, se resuelve el almacén "principal" del tenant como fallback
+    # (ver backend.utils.helpers.get_almacen_principal_id), mismo patrón que
+    # AjusteInventario.almacen_id.
+    almacen_id = Column(Integer, ForeignKey("public.almacenes.id"), nullable=True)
     fecha = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
 class AjusteInventario(Base):

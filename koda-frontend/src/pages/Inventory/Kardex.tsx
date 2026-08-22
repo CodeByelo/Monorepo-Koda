@@ -20,6 +20,11 @@ const Kardex = () => {
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [kardexStats, setKardexStats] = useState<any>(null);
 
+  // Desglose de stock por almacén para el producto buscado
+  const [stockPorAlmacen, setStockPorAlmacen] = useState<any[]>([]);
+  const [isLoadingAlmacenes, setIsLoadingAlmacenes] = useState(false);
+  const [almacenesError, setAlmacenesError] = useState(false);
+
   // States for date filtering and toasts
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [startDate, setStartDate] = useState('');
@@ -67,6 +72,22 @@ const Kardex = () => {
       setMovements([]);
     } finally {
       setIsLoading(false);
+    }
+
+    // Desglose de stock por almacén: se resuelve en paralelo y de forma
+    // independiente para no bloquear ni romper la tabla de movimientos
+    // si esta llamada falla.
+    setIsLoadingAlmacenes(true);
+    setAlmacenesError(false);
+    try {
+      const almacenesData = await api.get<any[]>(`/inventario/kardex/${id}/almacenes`);
+      setStockPorAlmacen(almacenesData || []);
+    } catch (error) {
+      console.error("Error al consultar el stock por almacén:", error);
+      setStockPorAlmacen([]);
+      setAlmacenesError(true);
+    } finally {
+      setIsLoadingAlmacenes(false);
     }
   };
 
@@ -382,6 +403,57 @@ const Kardex = () => {
              )}
          </div>
       </article>
+
+      {/* Desglose de Stock por Almacén del Producto Buscado */}
+      {searchId !== '' && (
+        <article className="w-full bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
+          <div className="flex justify-between items-center flex-wrap gap-4">
+            <h3 className="text-xl font-black uppercase tracking-tight text-slate-800">Desglose por Almacén</h3>
+            {stockPorAlmacen.length > 0 && (
+              <span className="bg-slate-50 text-slate-500 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider border border-slate-200">
+                {stockPorAlmacen.length} {stockPorAlmacen.length === 1 ? 'Almacén' : 'Almacenes'}
+              </span>
+            )}
+          </div>
+
+          {isLoadingAlmacenes ? (
+            <div className="py-12 text-center text-slate-400 font-bold text-xs uppercase tracking-widest animate-pulse">
+              Consultando stock por almacén...
+            </div>
+          ) : almacenesError ? (
+            <div className="py-8 text-center text-red-500 font-bold text-xs uppercase tracking-widest bg-red-50 border border-red-100 rounded-2xl">
+              No se pudo cargar el desglose por almacén. Intente nuevamente.
+            </div>
+          ) : stockPorAlmacen.length === 0 ? (
+            <div className="py-12 text-center text-slate-400 font-bold text-xs uppercase tracking-widest">
+              No hay almacenes configurados.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {stockPorAlmacen.map((a: any) => (
+                <div
+                  key={a.almacen_id}
+                  className={`p-5 rounded-2xl border flex flex-col gap-3 transition-all ${a.es_principal ? 'bg-emerald-50/50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}
+                >
+                  <div className="flex justify-between items-start gap-2">
+                    <div className="flex flex-col">
+                      <span className="text-xs font-black text-slate-800 uppercase leading-tight">{a.nombre}</span>
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter font-mono">{a.codigo}</span>
+                    </div>
+                    <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-tighter shrink-0 border ${a.es_principal ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                      {a.es_principal ? 'Local Principal' : 'Otros Almacenes'}
+                    </span>
+                  </div>
+                  <div className="pt-2 border-t border-slate-200/70">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">Cantidad en Stock</span>
+                    <strong className="text-xl font-black text-[#0b5156] tracking-tighter font-mono">{a.cantidad}</strong>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </article>
+      )}
 
       {/* Floating Toast Notification */}
       {toast && (

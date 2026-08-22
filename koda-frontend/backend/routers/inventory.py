@@ -186,6 +186,15 @@ def aprobar_ajuste(
     db.refresh(ajuste)
     return ajuste
 
+# NOTA: esta ruta está MUERTA (shadowed). Existe una segunda definición del
+# mismo path GET /inventario/kardex/{producto_id} en
+# routers/modulos_ext.py (kardex_producto, bajo inventario_ext_router). En
+# main.py, app.include_router(modulos_ext.inventario_ext_router) se ejecuta
+# ANTES que app.include_router(inventory.router), y FastAPI resuelve rutas
+# usando la primera coincidencia registrada, así que la request real siempre
+# la responde modulos_ext.kardex_producto. Se deja esta función sin borrar
+# por si en algún momento se invierte el orden de inclusión de routers, pero
+# hoy no se ejecuta nunca.
 @router.get("/kardex/{producto_id}", response_model=List[KardexMovimientoResponse])
 def obtener_kardex_producto(
     producto_id: int,

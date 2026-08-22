@@ -606,6 +606,25 @@ async def _handle_stock_command(command_text: str, chat_id: int, session_row) ->
     bajo_minimo = stock_info.get("below_minimum", stock_info.get("bajo_minimo", False))
     alerta = "\n⚠️ Por debajo del stock mínimo." if bajo_minimo else ""
     msg = f"📦 SKU: {sku}\nStock actual: {stock_actual}\nStock mínimo: {minimo}{alerta}"
+
+    # Desglose por almacén: campo nuevo y opcional del lado del ERP
+    # (bot_get_stock reenvía la respuesta tal cual). Sólo se agrega la
+    # sección si viene con más de un almacén; si no viene (ERP viejo sin
+    # actualizar) o trae uno solo, se conserva el mensaje de siempre.
+    por_almacen = stock_info.get("por_almacen") or []
+    if len(por_almacen) > 1:
+        principal = next((a for a in por_almacen if a.get("es_principal")), None)
+        otros = [a for a in por_almacen if a is not principal]
+        lineas = ["📦 SKU: " + sku, f"Stock total: {stock_actual}", ""]
+        if principal:
+            lineas.append(f"🏢 Almacén principal ({principal.get('nombre')}): {principal.get('cantidad')}")
+        if otros:
+            lineas.append("📍 Otros almacenes:")
+            for a in otros:
+                lineas.append(f"• {a.get('nombre')}: {a.get('cantidad')}")
+        lineas.append(f"Stock mínimo: {minimo}{alerta}")
+        msg = "\n".join(lineas)
+
     await send_telegram_message(chat_id, msg)
     return {"status": "success"}
 

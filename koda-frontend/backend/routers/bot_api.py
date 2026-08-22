@@ -39,14 +39,14 @@ from sqlalchemy.orm import Session
 from backend.core.database import get_db, current_tenant_id_var
 from backend.core.security import verify_bot_api_key
 from backend.models.operations import Cliente, Producto
-from backend.models.erp_extended import AuditoriaLog, StockPorAlmacen, Vendedor
+from backend.models.erp_extended import Almacen, AuditoriaLog, StockPorAlmacen, Vendedor
 from backend.services.facturacion_service import LineaFactura, procesar_emision_factura
 from backend.services.analitica_inventario import (
     calcular_matriz_abc,
     calcular_rentabilidad,
     calcular_stock_critico,
 )
-from backend.utils.helpers import to_float
+from backend.utils.helpers import get_almacen_principal_id, to_float
 
 router = APIRouter(
     prefix="/bot",
@@ -329,6 +329,26 @@ def consultar_stock_bot(
     stock_total = sum(to_float(s.cantidad) for s in total_stock)
     minimo = to_float(producto.stock_minimo)
 
+    # Desglose por almacén (mismo criterio de "principal" que
+    # GET /inventario/kardex/{producto_id}/almacenes en modulos_ext.py):
+    # se agrega como campo NUEVO ("por_almacen") sin tocar ninguno de los
+    # campos existentes, para no romper a quien ya consume este endpoint.
+    principal_id = get_almacen_principal_id(db, tid)
+    cantidad_por_almacen = {s.almacen_id: s.cantidad for s in total_stock}
+    almacenes = db.query(Almacen).filter(
+        Almacen.tenant_id == tid,
+        Almacen.activo == True,  # noqa: E712
+    ).order_by(Almacen.id.asc()).all()
+    por_almacen = [
+        {
+            "almacen_id": a.id,
+            "nombre": a.nombre,
+            "cantidad": to_float(cantidad_por_almacen.get(a.id, 0)),
+            "es_principal": a.id == principal_id,
+        }
+        for a in almacenes
+    ]
+
     return {
         "sku": producto.sku,
         "nombre": producto.nombre,
@@ -336,6 +356,7 @@ def consultar_stock_bot(
         "stock_minimo": minimo,
         "bajo_minimo": stock_total <= minimo,
         "precio_usd": to_float(producto.precio_usd),
+        "por_almacen": por_almacen,
     }
 
 
