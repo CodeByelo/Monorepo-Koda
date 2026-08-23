@@ -24,6 +24,7 @@ interface VentaRow {
   subtotal?: number | string;
   iva?: number | string;
   total?: number | string;
+  tasa_cambio_bs?: number | string;
   estado: string;
   cliente?: {
     nombre: string;
