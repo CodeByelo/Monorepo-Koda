@@ -332,21 +332,28 @@ async def delete_command(request: Request, cmd_id: int, db: Session = Depends(ge
         "sync_warning": sync_warning
     }
 
+class GenerateTokenBody(BaseModel):
+    user_id: Optional[str] = None
+
 @router.post("/generate-token")
-async def generate_linking_token(current_user: Profile = Depends(get_current_user)):
+async def generate_linking_token(
+    body: Optional[GenerateTokenBody] = None,
+    current_user: Profile = Depends(get_current_user)
+):
     """
     Pide, server-to-server, el token REAL de vinculación de Telegram
-    (formato KODA-XXXXXX) a KODA_Remaster/sistema-corporativo/backend — la
-    única fuente de verdad que el bot real valida — en nombre del
-    tenant_id/user_id ya autenticados en este ERP. Ya NO genera un código
-    local (ver store_linking_token más arriba, marcada en desuso): ese
-    código nunca era validado por el bot real y por eso la vinculación nunca
-    funcionaba.
+    (formato KODA-XXXXXX) a KODA_Remaster/sistema-corporativo/backend en nombre del
+    usuario autenticado o de un vendedor/usuario específico (si es Admin).
     """
+    target_user_id = str(current_user.id)
+    # Si es Admin o Gerente y envió un usuario específico a vincular
+    if body and body.user_id and getattr(current_user, "rol", "").lower() in ["admin", "gerente", "desarrollador"]:
+        target_user_id = str(body.user_id)
+
     try:
         code = await _request_real_linking_token(
             tenant_id=str(current_user.tenant_id),
-            user_id=str(current_user.id),
+            user_id=target_user_id,
         )
     except TelegramLinkError as e:
         raise HTTPException(
@@ -357,4 +364,4 @@ async def generate_linking_token(current_user: Profile = Depends(get_current_use
             ),
             detail="No se pudo generar el código de vinculación de Telegram. Intenta de nuevo en unos segundos.",
         )
-    return {"code": code}
+    return {"code": code, "user_id": target_user_id}

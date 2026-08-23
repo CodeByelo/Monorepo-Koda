@@ -33,8 +33,20 @@ export default function TelegramLinker() {
   const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Selector de usuario/vendedor para Administradores
+  const [usuarios, setUsuarios] = useState<any[]>([]);
+  const [selectedUserId, setSelectedUserId] = useState<string>('');
+  const [selectedUserName, setSelectedUserName] = useState<string>('');
+
   // Cuenta regresiva del token (10 minutos)
   const [timeLeft, setTimeLeft] = useState<number>(600);
+
+  useEffect(() => {
+    // Cargar usuarios para permitir a German seleccionar vendedores
+    api.get<any[]>('/admin/usuarios').then((data) => {
+      setUsuarios(data || []);
+    }).catch(() => setUsuarios([]));
+  }, []);
 
   useEffect(() => {
     if (!linkingCode) return;
@@ -134,7 +146,15 @@ export default function TelegramLinker() {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.post<any>('/webhook/telegram/generate-token', {});
+      const payload: any = {};
+      if (selectedUserId) {
+        payload.user_id = selectedUserId;
+        const target = usuarios.find(u => String(u.id) === String(selectedUserId));
+        setSelectedUserName(target?.nombre || target?.username || target?.email || 'Vendedor');
+      } else {
+        setSelectedUserName('Mi Cuenta (Administrador)');
+      }
+      const data = await api.post<any>('/webhook/telegram/generate-token', payload);
       setLinkingCode(data.code);
     } catch (err: any) {
       console.error('Error al generar token de Telegram:', err);
@@ -217,22 +237,41 @@ export default function TelegramLinker() {
               </div>
             </div>
 
-            {error && (
-              <div className="bg-red-50 border border-red-200 p-4 rounded-xl text-red-700 text-xs font-bold text-center max-w-md mx-auto mb-4 animate-in fade-in duration-200">
-                {error}
+            {/* SELECTOR DE USUARIO / VENDEDOR */}
+            <div className="p-6 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                <div>
+                  <h4 className="text-xs font-black text-[#0b5156] uppercase tracking-wider font-mono">
+                    Generar Token para un Usuario o Vendedor
+                  </h4>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase">
+                    Como Administrador, puedes generar el código de vinculación para ti o para cualquiera de tus vendedores.
+                  </p>
+                </div>
               </div>
-            )}
 
-            <div className="text-center pt-2">
-              <button
-                onClick={handleStartLinking}
-                className="bg-[#0b5156] hover:bg-[#083a3d] text-white font-black px-8 py-4 rounded-xl text-xs uppercase tracking-widest shadow-md hover:shadow-lg active:scale-95 transition-all w-full md:w-auto"
-              >
-                Vincular cuenta de Telegram
-              </button>
+              <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                <select
+                  value={selectedUserId}
+                  onChange={(e) => setSelectedUserId(e.target.value)}
+                  className="flex-1 px-4 py-3 bg-white border border-slate-200 rounded-xl text-xs font-black text-slate-800 uppercase focus:outline-none focus:border-[#0b5156]"
+                >
+                  <option value="">Mi Cuenta (German / Administrador)</option>
+                  {usuarios.map((u) => (
+                    <option key={u.id} value={u.id.toString()}>
+                      {u.nombre || u.username || u.email} ({u.rol || 'Vendedor'})
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  onClick={handleStartLinking}
+                  className="bg-[#0b5156] hover:bg-[#083a3d] text-white font-black px-8 py-3.5 rounded-xl text-xs uppercase tracking-widest shadow-md hover:shadow-lg active:scale-95 transition-all shrink-0"
+                >
+                  Generar Token
+                </button>
+              </div>
             </div>
-          </div>
-        )}
 
         {/* Pantalla de Carga */}
         {loading && (
@@ -317,7 +356,7 @@ export default function TelegramLinker() {
                     </span>
                   </div>
                   <p className="text-[10px] text-slate-600 font-bold uppercase tracking-tight">
-                    Envía este comando exacto al bot en Telegram:
+                    Envía este comando exacto al bot en Telegram {selectedUserName ? `(Asignado a: ${selectedUserName})` : ''}:
                   </p>
                 </div>
 
