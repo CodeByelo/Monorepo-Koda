@@ -6,6 +6,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useSystem, SystemKey } from '@/providers/SystemProvider';
 import { SessionGuard } from '@/components/common/SessionGuard';
 import { useAuth } from '@/providers/AuthProvider';
+import { api, BASE_URL } from '@/api/client';
 
 const isPathAllowed = (path: string, system: SystemKey): boolean => {
   if (system === 'all' || path === '/' || path === '/alertas') return true;
@@ -50,10 +51,11 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
 
   useEffect(() => {
     // Cargar logo de la empresa para el avatar del header
-    api.get('/entidades/empresa/perfil')
-      .then(res => {
-        if (res.data?.logo_url) {
-          setHeaderLogo(res.data.logo_url);
+    api.get<any>('/entidades/empresa/perfil')
+      .then((res: any) => {
+        const logo = res?.logo_url || res?.data?.logo_url;
+        if (logo) {
+          setHeaderLogo(logo);
         }
       })
       .catch(() => {});
