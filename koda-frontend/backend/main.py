@@ -184,7 +184,8 @@ async def startup_db_init():
                 connection.execute(text(sql_profiles))
                 if engine.name != "sqlite":
                     connection.execute(text("ALTER TABLE public.productos ADD COLUMN IF NOT EXISTS imagen_url TEXT;"))
-                    connection.execute(text("ALTER TABLE public.empresa ADD COLUMN IF NOT EXISTS logo_url VARCHAR(500);"))
+                    connection.execute(text("ALTER TABLE public.empresa ADD COLUMN IF NOT EXISTS logo_url TEXT;"))
+                    connection.execute(text("ALTER TABLE public.empresa ALTER COLUMN logo_url TYPE TEXT;"))
                     connection.execute(text("ALTER TABLE public.empresa ADD COLUMN IF NOT EXISTS instagram VARCHAR(100);"))
                     connection.execute(text("ALTER TABLE public.empresa ADD COLUMN IF NOT EXISTS mensaje_garantia TEXT;"))
                     connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS vendedor_id INTEGER;"))
