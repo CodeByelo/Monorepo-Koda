@@ -14,7 +14,10 @@ import {
   CheckCircle,
   ArrowRight,
   Package,
-  UserPlus
+  UserPlus,
+  FileText,
+  Truck,
+  Receipt
 } from 'lucide-react';
 
 // Tarifa de negocio usada como punto de partida al agregar un producto al
@@ -162,6 +165,26 @@ const POS = () => {
     setClientes((prev) => [...prev, cliente]);
     setClient(cliente.id.toString());
     showToast(`Cliente ${cliente.nombre} creado y seleccionado`, 'success');
+  };
+
+  const handleDownloadTicket = async (ticket: any) => {
+    try {
+      const targetId = ticket.venta_id || ticket.id;
+      showToast('Descargando Ticket Térmico...', 'success');
+      await api.download(`/ventas/${targetId}/ticket`, `Ticket-${ticket.id}.pdf`);
+    } catch (err: any) {
+      showToast(err?.message || 'Error al descargar ticket');
+    }
+  };
+
+  const handleDownloadNotaEntrega = async (ticket: any) => {
+    try {
+      const targetId = ticket.venta_id || ticket.id;
+      showToast('Descargando Nota de Entrega...', 'success');
+      await api.download(`/ventas/${targetId}/nota-entrega/pdf`, `NotaEntrega-${ticket.id}.pdf`);
+    } catch (err: any) {
+      showToast(err?.message || 'Error al descargar nota de entrega');
+    }
   };
 
   const handleCheckout = () => {
@@ -514,47 +537,68 @@ const POS = () => {
           </section>
 
           <section className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-             <div className="p-8 border-b border-slate-100 bg-slate-50/50">
-                <h3 className="text-xl font-black uppercase tracking-tight text-slate-800 font-mono text-[#0b5156]">Auditoría de Tickets</h3>
+             <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+                <div>
+                   <h3 className="text-xl font-black uppercase tracking-tight text-slate-800 font-mono text-[#0b5156]">Auditoría de Tickets</h3>
+                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Emisiones del día y descarga de documentos</p>
+                </div>
+                <Link to="/historial" className="text-xs font-black text-[#0b5156] hover:underline uppercase tracking-wider">
+                   Ver Todas →
+                </Link>
              </div>
              <div className="overflow-x-auto no-scrollbar">
                 <table className="w-full text-left">
                    <thead>
                       <tr className="text-xs font-black text-slate-500 uppercase tracking-widest border-b border-slate-100 bg-slate-50/30">
-                         <th className="py-4 px-8">N° TICKET</th>
-                         <th className="py-4 px-6">CLIENTE</th>
-                         <th className="py-4 px-6 text-right">TOTAL ($ / Bs.)</th>
-                         <th className="py-4 px-6 text-center">ESTADO</th>
+                         <th className="py-4 px-6">N° TICKET</th>
+                         <th className="py-4 px-6">Nombre del CLIENTE</th>
+                         <th className="py-4 px-6 text-right">TOTAL Bs.</th>
+                         <th className="py-4 px-6 text-right">TOTAL $</th>
+                         <th className="py-4 px-6 text-center">Acciones</th>
                       </tr>
                    </thead>
                    <tbody className="divide-y divide-slate-50">
                       {recentTickets.length > 0 ? (
                         recentTickets.map(t => {
-                          const numericTotal = typeof t.total === 'string' ? parseFloat(t.total.replace(/[^0-9.-]+/g, '')) : Number(t.total || 0);
-                          const totalBsTicket = tasaBCV > 0 && !isNaN(numericTotal) ? `Bs. ${(numericTotal * tasaBCV).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
+                          const valUsd = t.total_usd != null ? Number(t.total_usd) : (typeof t.total === 'string' ? parseFloat(t.total.replace(/[^0-9.-]+/g, '')) : Number(t.total || 0));
+                          const valBs = t.total_bs != null ? Number(t.total_bs) : (valUsd * (tasaBCV || 1));
+                          
                           return (
                             <tr key={t.id} className="group hover:bg-[#bdafa1]/5 transition-colors">
-                               <td className="py-5 px-8 text-sm font-black text-slate-800 font-mono">{t.id}</td>
-                               <td className="py-5 px-6 text-slate-500 text-sm font-bold uppercase">{t.client}</td>
-                               <td className="py-5 px-6 text-right">
-                                 <div className="flex flex-col items-end">
-                                   <span className="font-black text-slate-800 font-mono text-sm">{t.total}</span>
-                                   {totalBsTicket && (
-                                     <span className="text-[10px] font-bold text-[#0b5156] font-mono">{totalBsTicket}</span>
-                                   )}
-                                 </div>
+                               <td className="py-4 px-6 text-sm font-black text-slate-800 font-mono">{t.id}</td>
+                               <td className="py-4 px-6 text-slate-600 text-sm font-bold uppercase">{t.client}</td>
+                               <td className="py-4 px-6 text-right font-black text-[#0b5156] font-mono text-sm">
+                                 Bs. {valBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                               <td className="py-4 px-6 text-right font-black text-slate-800 font-mono text-sm">
+                                 ${valUsd.toFixed(2)}
                                </td>
-                               <td className="py-5 px-6 text-center">
-                                  <span className={`text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-tighter border ${t.color}`}>
-                                     {t.status}
-                                  </span>
+                               <td className="py-4 px-6 text-center">
+                                 <div className="flex items-center justify-center gap-2">
+                                   <button
+                                     onClick={() => handleDownloadTicket(t)}
+                                     className="px-3 py-1.5 bg-[#0b5156]/10 hover:bg-[#0b5156] text-[#0b5156] hover:text-white rounded-xl text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all shadow-xs"
+                                     title="Descargar Ticket Térmico"
+                                   >
+                                     <Receipt size={13} />
+                                     <span>Ticket</span>
+                                   </button>
+                                   <button
+                                     onClick={() => handleDownloadNotaEntrega(t)}
+                                     className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-600 text-amber-700 hover:text-white rounded-xl text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all shadow-xs"
+                                     title="Descargar Nota de Entrega"
+                                   >
+                                     <Truck size={13} />
+                                     <span>Nota</span>
+                                   </button>
+                                 </div>
                                </td>
                             </tr>
                           );
                         })
                       ) : (
                         <tr>
-                           <td colSpan={4} className="py-8 text-center text-slate-400 font-bold uppercase text-xs">
+                           <td colSpan={5} className="py-8 text-center text-slate-400 font-bold uppercase text-xs">
                               No hay tickets emitidos hoy.
                            </td>
                         </tr>

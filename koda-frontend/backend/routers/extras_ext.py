@@ -168,9 +168,12 @@ def pos_contexto(db: Session = Depends(get_db), current_user: Profile = Depends(
         "tickets_recientes": [
             {
                 "id": v.numero_factura,
-                "client": "Consumidor final",
+                "venta_id": v.id,
+                "client": v.cliente.nombre if v.cliente else "Consumidor Final",
                 "time": v.fecha.strftime("%H:%M"),
-                "total": _fmt_money(to_float(v.total)),
+                "total_usd": to_float(v.total_usd or v.total or 0),
+                "total_bs": to_float(v.total_usd or v.total or 0) * (to_float(v.tasa_cambio_bs) if to_float(v.tasa_cambio_bs) > 0 else (to_float(tasa) if to_float(tasa) > 0 else 1.0)),
+                "total": _fmt_money(to_float(v.total_usd or v.total or 0)),
                 "method": v.metodo_pago,
                 "status": "EMITIDO",
             }
