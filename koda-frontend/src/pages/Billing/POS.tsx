@@ -47,6 +47,7 @@ const POS = () => {
   const [vendedorId, setVendedorId] = useState('');
   const [tarifa, setTarifa] = useState<Tarifa>('Detal');
   const [metodoPago, setMetodoPago] = useState<'Efectivo' | 'Divisa' | 'Transferencia' | 'PagoMovil'>('Divisa');
+  const [formatoDocumento, setFormatoDocumento] = useState<'BIMONETARIO' | 'SOLO_USD' | 'SOLO_VES'>('BIMONETARIO');
   const [tipoTasa, setTipoTasa] = useState<'BCV' | 'PERSONALIZADA'>('BCV');
   const [tasaPersonalizada, setTasaPersonalizada] = useState<string>('');
   const [toast, setToast] = useState<{message: string, type: 'error' | 'success'} | null>(null);
@@ -177,11 +178,22 @@ const POS = () => {
       return;
     }
 
+    // Determinar la moneda del documento según selección del usuario
+    let docMoneda = 'USD';
+    if (formatoDocumento === 'SOLO_VES') {
+      docMoneda = 'VED';
+    } else if (formatoDocumento === 'SOLO_USD') {
+      docMoneda = 'USD';
+    } else {
+      // Por Defecto (Bimonetario)
+      docMoneda = (metodoPago === 'Transferencia' || metodoPago === 'PagoMovil' || metodoPago === 'Efectivo') ? 'VED' : 'USD';
+    }
+
     const payload = {
       cliente_id: parseInt(client, 10),
       metodo_pago: metodoPago,
       aplica_igtf: metodoPago === 'Divisa',
-      moneda_documento: (metodoPago === 'Transferencia' || metodoPago === 'PagoMovil' || metodoPago === 'Efectivo') ? 'VED' : 'USD',
+      moneda_documento: docMoneda,
       tasa_cambio_bs: tasaEfectiva,
       vendedor_id: vendedorId ? parseInt(vendedorId, 10) : null,
       detalles: cart.map(item => ({
@@ -360,45 +372,23 @@ const POS = () => {
                    </select>
                 </div>
 
-                {/* 4. Tasa de Cambio de Transacción */}
+                {/* 4. Formato de Moneda del Documento */}
                 <div className="flex flex-col space-y-2">
                    <div className="min-h-[22px] flex items-center justify-between">
-                      <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Tasa de Cambio</label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (tipoTasa === 'BCV') {
-                            setTipoTasa('PERSONALIZADA');
-                          } else {
-                            setTipoTasa('BCV');
-                            setTasaPersonalizada(String(tasaBCV || ''));
-                          }
-                        }}
-                        className="text-[10px] font-black text-[#0b5156] hover:underline uppercase"
-                        title="Alternar entre tasa BCV y personalizada"
-                      >
-                        {tipoTasa === 'BCV' ? 'Manual ✎' : 'Auto BCV'}
-                      </button>
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Moneda Documento</label>
+                      <span className="text-[9px] font-black text-[#0b5156] uppercase font-mono">
+                        {formatoDocumento === 'BIMONETARIO' ? 'USD + BS' : formatoDocumento === 'SOLO_USD' ? 'SOLO $' : 'SOLO BS'}
+                      </span>
                    </div>
-                   {tipoTasa === 'BCV' ? (
-                     <div className="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-[#0b5156] flex items-center justify-between font-mono">
-                        <span>BCV Oficial</span>
-                        <strong>Bs. {tasaBCV ? tasaBCV.toFixed(2) : '0.00'}</strong>
-                     </div>
-                   ) : (
-                     <div className="relative">
-                        <span className="absolute left-3 top-3 text-xs font-bold text-slate-400 font-mono">Bs.</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={tasaPersonalizada}
-                          onChange={(e) => setTasaPersonalizada(e.target.value)}
-                          placeholder="779.95"
-                          className="w-full h-11 pl-9 pr-3 bg-white border border-[#0b5156] rounded-xl text-xs font-black text-[#0b5156] font-mono focus:outline-none shadow-xs"
-                          title="Tasa de cambio personalizada para esta venta"
-                        />
-                     </div>
-                   )}
+                   <select
+                     value={formatoDocumento}
+                     onChange={(e) => setFormatoDocumento(e.target.value as any)}
+                     className="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors"
+                   >
+                      <option value="BIMONETARIO">🌐 Dólares + Bolívares (Por Defecto)</option>
+                      <option value="SOLO_USD">💵 Solo Divisas (USD $)</option>
+                      <option value="SOLO_VES">🇻🇪 Solo Bolívares (Bs.)</option>
+                   </select>
                 </div>
             </div>
           </section>

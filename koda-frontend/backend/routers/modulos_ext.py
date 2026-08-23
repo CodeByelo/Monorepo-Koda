@@ -4799,19 +4799,25 @@ def descargar_factura_pdf(
     c.setFont("Helvetica", 10)
     cliente_nombre = venta.cliente.nombre if venta.cliente else "CLIENTE GENERAL"
     cliente_rif = venta.cliente.rif if venta.cliente else "N/A"
-    es_pago_bolivares_puro = (venta.metodo_pago in ["Efectivo", "Transferencia", "PagoMovil"]) and float(venta.igtf_usd) <= 0
+    # Modalidad de Moneda del Documento:
+    # 1. SOLO_VES: puro bolívares (sin $ ni IGTF)
+    # 2. SOLO_USD: puro divisas (sin conversión en Bs.)
+    # 3. BIMONETARIO: desglose en USD + IGTF + Total Equivalente en Bs.
+    es_solo_bolivares = (venta.moneda_documento == 'VED') or ((venta.metodo_pago in ["Efectivo", "Transferencia", "PagoMovil"]) and float(venta.igtf_usd) <= 0 and venta.moneda_documento != 'USD')
+    es_solo_divisas = (venta.moneda_documento == 'USD' and venta.metodo_pago == 'Divisa' and float(venta.igtf_usd) > 0) or (venta.moneda_documento == 'USD' and float(venta.tasa_cambio_bs) <= 1)
+    
     tasa_val = float(venta.tasa_cambio_bs) if float(venta.tasa_cambio_bs) > 0 else 1.0
 
     c.drawString(50, alto - 148, f"Razón Social: {cliente_nombre}")
     c.drawString(50, alto - 162, f"R.I.F. / C.I.: {cliente_rif}")
     c.drawString(50, alto - 176, f"Método de Pago: {venta.metodo_pago}")
-    if not es_pago_bolivares_puro:
+    if not es_solo_bolivares:
         c.drawString(50, alto - 190, f"Tasa de Cambio: Bs. {tasa_val:.2f}")
     
     # Tabla de Detalles
     c.line(50, alto - 210, ancho - 50, alto - 210)
     
-    if es_pago_bolivares_puro:
+    if es_solo_bolivares:
         data_tabla = [["CANT.", "DESCRIPCIÓN PRODUCTO", "PRECIO (Bs.)", "TOTAL (Bs.)"]]
     else:
         data_tabla = [["CANT.", "DESCRIPCIÓN PRODUCTO", "PRECIO (USD)", "TOTAL (USD)"]]
@@ -4821,7 +4827,7 @@ def descargar_factura_pdf(
         precio_usd = float(item.precio_usd_capturado)
         cantidad = float(item.cantidad)
         
-        if es_pago_bolivares_puro:
+        if es_solo_bolivares:
             precio_bs = precio_usd * tasa_val
             sub_total_linea_bs = precio_bs * cantidad
             data_tabla.append([
@@ -4872,7 +4878,7 @@ def descargar_factura_pdf(
     total_usd = float(venta.total_usd)
     total_bs = total_usd * tasa_val
     
-    if es_pago_bolivares_puro:
+    if es_solo_bolivares:
         subtotal_bs = subtotal_usd * tasa_val
         iva_bs = iva_usd * tasa_val
         
@@ -4907,10 +4913,12 @@ def descargar_factura_pdf(
         c.drawString(350, pos_y_totales - offset_y, "TOTAL GENERAL (USD):")
         c.drawRightString(ancho - 50, pos_y_totales - offset_y, f"${total_usd:.2f}")
         
-        c.setFont("Helvetica-Bold", 10)
-        c.setFillColor(colors.HexColor("#1e293b"))
-        c.drawString(350, pos_y_totales - offset_y - 18, "TOTAL EQUIVALENTE (Bs.):")
-        c.drawRightString(ancho - 50, pos_y_totales - offset_y - 18, f"Bs. {total_bs:,.2f}")
+        # Mostrar equivalente en Bs sólo si no es una factura configurada como Solo Divisas estricta
+        if venta.moneda_documento != 'USD_ONLY':
+            c.setFont("Helvetica-Bold", 10)
+            c.setFillColor(colors.HexColor("#1e293b"))
+            c.drawString(350, pos_y_totales - offset_y - 18, "TOTAL EQUIVALENTE (Bs.):")
+            c.drawRightString(ancho - 50, pos_y_totales - offset_y - 18, f"Bs. {total_bs:,.2f}")
     
     # Pie de Página Legal
     c.setFillColor(colors.black)
