@@ -72,32 +72,21 @@ const POS = () => {
       }
     }).catch(() => {});
 
-    // 2. Obtener métricas y contexto complementario
+    // 2. Obtener tasa oficial activa en tiempo real desde /tasa/actual
+    api.get<any>('/tasa/actual').then((tData) => {
+      const tVal = Number(tData?.valor_ves || tData?.tasa || 0);
+      if (tVal > 0) setTasaBCV(tVal);
+    }).catch(() => {});
+
+    // 3. Obtener métricas y tickets recientes
     api.get<any>('/ventas/pos/contexto').then((res) => {
-      if (res?.productos && res.productos.length > 0) {
-        setProductos(res.productos);
-      }
       setTotalHoy(res?.total_hoy || 0);
       setCountHoy(res?.count_hoy || 0);
-      const val = Number(res?.tasa_bcv || 0);
-      if (val > 0) {
-        setTasaBCV(val);
-      } else {
-        api.get<any>('/tasa/actual').then((tData) => {
-          const tVal = Number(tData?.valor_ves || tData?.tasa || 0);
-          if (tVal > 0) setTasaBCV(tVal);
-        }).catch(() => {});
-      }
       setRecentTickets((res?.tickets_recientes || []).map((t: any) => ({
         ...t,
         color: t.status === 'EMITIDO' ? 'bg-[#8fb09f]/10 text-[#43584b] border-[#8fb09f]/20' : 'bg-[#bdafa1]/10 text-slate-500 border-[#bdafa1]/20',
       })));
-    }).catch(() => {
-      api.get<any>('/tasa/actual').then((tData) => {
-        const tVal = Number(tData?.valor_ves || tData?.tasa || 0);
-        if (tVal > 0) setTasaBCV(tVal);
-      }).catch(() => {});
-    });
+    }).catch(() => {});
 
     api.get<any[]>('/inventario/criticos').then((data) => {
       setCriticos(data || []);

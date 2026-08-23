@@ -100,13 +100,15 @@ TASA_CAMBIO_FALLBACK_DEFAULT = 36.52
 def tasa_actual(db: Session, tenant_id) -> float:
     tasa = (
         db.query(TasaCambio)
-        .filter(TasaCambio.tenant_id == tenant_id)
+        .filter((TasaCambio.tenant_id == tenant_id) | (TasaCambio.tenant_id.is_(None)))
         .order_by(TasaCambio.fecha.desc())
         .first()
     )
     if tasa and getattr(tasa, "valor_ves", None):
-        return to_float(tasa.valor_ves) or TASA_CAMBIO_FALLBACK_DEFAULT
-    return TASA_CAMBIO_FALLBACK_DEFAULT
+        val = to_float(tasa.valor_ves)
+        if val > 0:
+            return val
+    return 784.66
 
 
 def margen_bruto_pct(db: Session) -> float:

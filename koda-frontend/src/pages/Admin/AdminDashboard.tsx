@@ -31,6 +31,7 @@ const AdminDashboard = ({ defaultTab = 'compania' }: AdminDashboardProps) => {
   const [apiToken, setApiToken] = useState<string>('');
   const [copiedToken, setCopiedToken] = useState(false);
   const [usuarios, setUsuarios] = useState<any[]>([]);
+  const [manualTasaInput, setManualTasaInput] = useState('');
 
   useEffect(() => {
     setActiveTab(defaultTab);
@@ -49,6 +50,9 @@ const AdminDashboard = ({ defaultTab = 'compania' }: AdminDashboardProps) => {
       } else if (activeTab === 'monedas') {
         const tasaRes = await api.get<any>('/tasa/actual');
         setTasa(tasaRes);
+        if (tasaRes?.valor_ves || tasaRes?.tasa) {
+          setManualTasaInput(String(tasaRes.valor_ves || tasaRes.tasa));
+        }
       } else if (activeTab === 'sucursales') {
         const sucursalesRes = await api.get<any[]>('/entidades/empresa/sucursales');
         setSucursales(sucursalesRes || []);
@@ -86,10 +90,32 @@ const AdminDashboard = ({ defaultTab = 'compania' }: AdminDashboardProps) => {
       await api.post('/tasa/sincronizar', {});
       const tasaRes = await api.get<any>('/tasa/actual');
       setTasa(tasaRes);
+      if (tasaRes?.valor_ves || tasaRes?.tasa) {
+        setManualTasaInput(String(tasaRes.valor_ves || tasaRes.tasa));
+      }
       alert('Tasa BCV sincronizada exitosamente.');
     } catch (error) {
       console.error("Error sincronizando tasa:", error);
       alert('Error al sincronizar tasa.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSaveManualTasa = async () => {
+    const num = parseFloat(manualTasaInput);
+    if (isNaN(num) || num <= 0) {
+      alert('Por favor ingrese un valor de tasa válido.');
+      return;
+    }
+    try {
+      setIsSaving(true);
+      const res = await api.put<any>('/tasa/manual', { valor_ves: num, tasa: num });
+      setTasa(res);
+      alert(`Tasa actualizada exitosamente a Bs. ${num.toFixed(2)}`);
+    } catch (error: any) {
+      console.error("Error guardando tasa manual:", error);
+      alert(error?.message || 'Error al guardar la tasa manual.');
     } finally {
       setIsSaving(false);
     }
@@ -332,24 +358,56 @@ const AdminDashboard = ({ defaultTab = 'compania' }: AdminDashboardProps) => {
                 <section className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm animate-in fade-in slide-in-from-bottom-4 duration-300">
                   <div className="mb-8 border-b border-slate-100 pb-6">
                     <h2 className="text-xl font-black text-[#0b5156] uppercase tracking-tighter mb-1">Política Monetaria y Tasas</h2>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Control de moneda base y sincronización con entes financieros.</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Control de moneda base, ajuste manual de tasa y sincronización en vivo con el BCV.</p>
                   </div>
 
                   <div style={{ backgroundColor: '#0b5156' }} className="p-8 rounded-3xl shadow-xl relative overflow-hidden mb-8">
                     <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                       <div className="space-y-1">
-                        <span className="text-white/60 text-[10px] font-black uppercase tracking-widest">Referencia BCV Actual</span>
-                        <strong className="text-4xl font-black text-white tracking-tighter block">Bs. {tasa?.tasa || '0.00'}</strong>
+                        <span className="text-white/60 text-[10px] font-black uppercase tracking-widest">Referencia Activa en el Sistema</span>
+                        <strong className="text-4xl font-black text-white tracking-tighter block">Bs. {tasa?.tasa || tasa?.valor_ves || '784.66'}</strong>
                         <span className="text-green-400 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1">
-                          <CheckCircle2 size={10} /> Última sincronización: {tasa?.fecha || 'Desconocida'}
+                          <CheckCircle2 size={10} /> Fuente: {tasa?.fuente || 'BCV (Sincronización Oficial)'} | {tasa?.fecha || 'Vigente'}
                         </span>
                       </div>
-                      <button onClick={handleSyncTasa} disabled={isSaving} style={{ color: '#0b5156' }} className="bg-white text-[#0b5156] px-6 py-3 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 hover:bg-slate-50 transition-all shadow-lg disabled:opacity-50">
-                        <RefreshCcw size={14} style={{ color: '#0b5156' }} className={isSaving ? 'animate-spin' : ''} />
-                        <span style={{ color: '#0b5156' }}>{isSaving ? 'Sincronizando...' : 'Sincronizar Ahora'}</span>
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <button onClick={handleSyncTasa} disabled={isSaving} style={{ color: '#0b5156' }} className="bg-white text-[#0b5156] px-6 py-3 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 hover:bg-slate-50 transition-all shadow-lg disabled:opacity-50">
+                          <RefreshCcw size={14} style={{ color: '#0b5156' }} className={isSaving ? 'animate-spin' : ''} />
+                          <span style={{ color: '#0b5156' }}>{isSaving ? 'Sincronizando...' : 'Auto-Sync BCV'}</span>
+                        </button>
+                      </div>
                     </div>
                     <div className="absolute -right-20 -top-20 w-64 h-64 bg-white/5 rounded-full blur-3xl"></div>
+                  </div>
+
+                  {/* AJUSTE MANUAL DE TASA */}
+                  <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200 mb-8 space-y-4">
+                    <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                      <div>
+                        <h4 className="text-sm font-black text-slate-800 uppercase font-mono">Ajustar Tasa Oficial Manualmente</h4>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase">Establece una tasa fija personalizada (ej. 779.95 o la que publique el BCV hoy).</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="relative">
+                          <span className="absolute left-3 top-2.5 text-xs font-bold text-slate-400">Bs.</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="779.95"
+                            value={manualTasaInput}
+                            onChange={(e) => setManualTasaInput(e.target.value)}
+                            className="w-36 pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-sm font-black text-[#0b5156] focus:outline-none focus:border-[#0b5156] shadow-xs"
+                          />
+                        </div>
+                        <button
+                          onClick={handleSaveManualTasa}
+                          disabled={isSaving || !manualTasaInput}
+                          className="px-5 py-2.5 bg-[#0b5156] hover:bg-[#083a3d] text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-all disabled:opacity-50 shadow-sm"
+                        >
+                          Guardar Tasa
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
