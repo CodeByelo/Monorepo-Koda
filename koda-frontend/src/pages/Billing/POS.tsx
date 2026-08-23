@@ -333,33 +333,81 @@ const POS = () => {
           </section>
 
           <section className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
-            <div className="flex justify-between items-center">
-               <h3 className="text-xl font-black uppercase tracking-tight text-slate-800 font-mono">Productos Rápidos</h3>
-               <button onClick={() => showToast('Abriendo Catálogo Completo de Rubros...', 'success')} className="text-sm font-black text-[#0b5156] uppercase hover:underline tracking-widest">Ver Catálogo</button>
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+               <div className="flex items-center gap-3">
+                 <h3 className="text-xl font-black uppercase tracking-tight text-slate-800 font-mono">Productos del Almacén</h3>
+                 <span className="bg-[#0b5156]/10 text-[#0b5156] text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">
+                   {filteredProducts.length} disponibles
+                 </span>
+               </div>
+               {searchTerm && (
+                 <button 
+                   onClick={() => setSearchTerm('')} 
+                   className="text-xs font-bold text-slate-400 hover:text-red-500 uppercase tracking-wider transition-colors self-start sm:self-auto"
+                 >
+                   ✕ Limpiar búsqueda
+                 </button>
+               )}
             </div>
+            
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
                {filteredProducts.length > 0 ? (
-                 filteredProducts.map((p) => (
-                   <div 
-                     key={p.id} 
-                     onClick={() => handleAddToCart(p)}
-                     className="p-4 bg-slate-50/50 rounded-2xl border border-slate-100 space-y-3 hover:border-[#0b5156] cursor-pointer transition-all group relative overflow-hidden"
-                   >
-                      <h4 className="text-sm font-black text-slate-800 uppercase leading-tight h-8">{p.nombre}</h4>
-                      <div className="flex justify-between items-end">
-                         <div>
-                            <p className="text-xs font-bold text-slate-500 uppercase font-mono">${resolveTierPrice(p, tarifa).toFixed(2)}</p>
-                            <p className="text-xs font-black text-[#0b5156] tracking-tighter uppercase font-mono">{p.sku}</p>
-                         </div>
-                         <div className="w-6 h-6 bg-[#0b5156] rounded-lg flex items-center justify-center text-white shadow-sm opacity-0 group-hover:opacity-100 transition-opacity">
-                            <Plus size={14} />
-                         </div>
-                      </div>
-                   </div>
-                 ))
+                 filteredProducts.map((p) => {
+                   const precioActual = resolveTierPrice(p, tarifa);
+                   const tieneStock = Number(p.stock) > 0;
+                   return (
+                     <div 
+                       key={p.id} 
+                       onClick={() => tieneStock && handleAddToCart(p)}
+                       className={`p-4 rounded-2xl border transition-all relative overflow-hidden flex flex-col justify-between h-36 ${
+                         tieneStock 
+                           ? 'bg-slate-50/70 border-slate-200/80 hover:border-[#0b5156] hover:bg-white hover:shadow-md cursor-pointer group active:scale-[0.98]' 
+                           : 'bg-slate-100/50 border-slate-200 opacity-60 cursor-not-allowed'
+                       }`}
+                     >
+                        <div>
+                           <div className="flex justify-between items-start gap-2 mb-1">
+                             <span className="text-[10px] font-black text-[#0b5156] tracking-wider uppercase font-mono bg-white px-2 py-0.5 rounded-md border border-slate-200 shadow-xs">
+                               {p.sku}
+                             </span>
+                             <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${tieneStock ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                               Stock: {p.stock}
+                             </span>
+                           </div>
+                           <h4 className="text-xs font-black text-slate-800 uppercase leading-snug line-clamp-2" title={p.nombre}>
+                             {p.nombre}
+                           </h4>
+                        </div>
+
+                        <div className="flex justify-between items-end pt-2 border-t border-slate-100">
+                           <div>
+                              <p className="text-sm font-black text-[#0b5156] font-mono leading-none">
+                                ${precioActual.toFixed(2)}
+                              </p>
+                              {tasaBCV > 0 && (
+                                <p className="text-[9px] font-bold text-slate-400 font-mono mt-0.5">
+                                  Bs. {(precioActual * tasaBCV).toFixed(2)}
+                                </p>
+                              )}
+                           </div>
+                           {tieneStock && (
+                             <div className="w-7 h-7 bg-[#0b5156] rounded-xl flex items-center justify-center text-white shadow-sm opacity-90 group-hover:opacity-100 group-hover:scale-110 transition-all">
+                                <Plus size={15} />
+                             </div>
+                           )}
+                        </div>
+                     </div>
+                   );
+                 })
                ) : (
-                 <div className="col-span-full py-8 text-center text-slate-400 font-bold uppercase text-xs">
-                    No se encontraron productos con stock disponible.
+                 <div className="col-span-full py-12 text-center bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                    <Package size={32} className="mx-auto text-slate-300 mb-2" />
+                    <p className="text-xs font-black text-slate-500 uppercase tracking-wider mb-1">
+                      {searchTerm ? `No hay coincidencias para "${searchTerm}"` : 'No se encontraron productos en el inventario'}
+                    </p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">
+                      Intenta buscar por otro término o registra nuevos productos desde el módulo de Inventario.
+                    </p>
                  </div>
                )}
             </div>

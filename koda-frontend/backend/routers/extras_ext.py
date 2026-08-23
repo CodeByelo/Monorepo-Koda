@@ -131,8 +131,8 @@ def principal_dashboard(db: Session = Depends(get_db), current_user: Profile = D
 @router.get("/ventas/pos/contexto")
 def pos_contexto(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     productos = db.query(Producto).filter(
-        Producto.stock > 0, Producto.tenant_id == current_user.tenant_id
-    ).limit(50).all()
+        (Producto.tenant_id == current_user.tenant_id) | (Producto.tenant_id.is_(None))
+    ).order_by(Producto.nombre.asc()).limit(100).all()
     ventas_recientes = db.query(Venta).filter(
         Venta.estado == "ACTIVA", Venta.tenant_id == current_user.tenant_id
     ).order_by(Venta.fecha.desc()).limit(10).all()
