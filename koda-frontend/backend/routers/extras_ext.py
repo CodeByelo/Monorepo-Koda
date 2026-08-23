@@ -138,14 +138,14 @@ def pos_contexto(db: Session = Depends(get_db), current_user: Profile = Depends(
     ).order_by(Venta.fecha.desc()).limit(10).all()
     tasa = tasa_actual(db, current_user.tenant_id)
 
-    # Calcular ventas de hoy
-    hoy_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # Calcular ventas de hoy de forma compatible con PostgreSQL y SQLite
+    hoy_inicio = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     ventas_hoy = db.query(Venta).filter(
         Venta.estado == "ACTIVA",
         Venta.tenant_id == current_user.tenant_id,
-        func.strftime("%Y-%m-%d", Venta.fecha) == hoy_str
+        Venta.fecha >= hoy_inicio
     ).all()
-    total_hoy = sum(to_float(v.total) for v in ventas_hoy)
+    total_hoy = sum(to_float(v.total_usd or v.total or 0) for v in ventas_hoy)
     count_hoy = len(ventas_hoy)
     
     return {

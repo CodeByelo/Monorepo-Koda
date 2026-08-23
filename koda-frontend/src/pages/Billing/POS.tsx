@@ -56,8 +56,27 @@ const POS = () => {
   };
 
   const fetchContext = () => {
+    // 1. Obtener productos directamente desde /productos para total sincronización con el inventario
+    api.get<any[]>('/productos').then((data) => {
+      if (Array.isArray(data) && data.length > 0) {
+        setProductos(data.map((p) => ({
+          id: p.id,
+          sku: p.sku,
+          nombre: p.nombre,
+          precio: Number(p.precio_usd) || 0,
+          precio_detal: p.precio_detal != null ? Number(p.precio_detal) : Number(p.precio_usd) || 0,
+          precio_mayor: p.precio_mayor != null ? Number(p.precio_mayor) : null,
+          precio_gran_mayor: p.precio_gran_mayor != null ? Number(p.precio_gran_mayor) : null,
+          stock: Number(p.stock) || 0,
+        })));
+      }
+    }).catch(() => {});
+
+    // 2. Obtener métricas y contexto complementario
     api.get<any>('/ventas/pos/contexto').then((res) => {
-      setProductos(res?.productos || []);
+      if (res?.productos && res.productos.length > 0) {
+        setProductos(res.productos);
+      }
       setTotalHoy(res?.total_hoy || 0);
       setCountHoy(res?.count_hoy || 0);
       const val = Number(res?.tasa_bcv || 0);
