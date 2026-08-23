@@ -5057,8 +5057,7 @@ def descargar_ticket_pdf(
     fila_total("Subtotal:", f"${subtotal_val:.2f}")
     if total_descuento_usd > 0:
         fila_total("Descuento Tarifa:", f"-${total_descuento_usd:.2f}")
-    if iva_val > 0:
-        fila_total("IVA (16%):", f"${iva_val:.2f}")
+    fila_total("IVA (16%):", f"${iva_val:.2f}")
     if igtf_val > 0:
         fila_total("IGTF (3%):", f"${igtf_val:.2f}")
     
@@ -5070,8 +5069,8 @@ def descargar_ticket_pdf(
     c.line(4 * mm, y + 2, ANCHO - 4 * mm, y + 2)
     y -= 8
 
-    # --- Método de Pago ---
-    metodo = venta.metodo_pago or "Efectivo / Divisa"
+    # --- Método de Pago Registrado en la Factura ---
+    metodo = venta.metodo_pago or "Efectivo"
     c.setFont("Helvetica-Bold", 8)
     c.drawCentredString(ANCHO / 2, y, f"Método de Pago: {metodo.upper()}")
     y -= 10
