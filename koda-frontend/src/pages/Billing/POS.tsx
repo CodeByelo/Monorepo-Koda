@@ -291,26 +291,9 @@ const POS = () => {
         <div className="lg:col-span-2 space-y-6">
           
           <section className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                 
-                {/* 1. Buscar Producto */}
-                <div className="flex flex-col space-y-2">
-                   <div className="min-h-[22px] flex items-center">
-                      <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Buscar</label>
-                   </div>
-                   <div className="relative">
-                      <Search className="absolute left-3.5 top-3.5 text-slate-400" size={16} />
-                      <input 
-                        type="text" 
-                        value={searchTerm} 
-                        onChange={(e) => setSearchTerm(e.target.value)} 
-                        placeholder="BUSCAR PRODUCTO..." 
-                        className="w-full h-11 pl-10 pr-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors" 
-                      />
-                   </div>
-                </div>
-
-                {/* 2. Identificación Cliente */}
+                {/* 1. Identificación Cliente */}
                 <div className="flex flex-col space-y-2">
                    <div className="min-h-[22px] flex items-center justify-between">
                       <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Identificación Cliente</label>
@@ -342,7 +325,7 @@ const POS = () => {
                    </div>
                 </div>
 
-                {/* 3. Vendedor */}
+                {/* 2. Vendedor */}
                 <div className="flex flex-col space-y-2">
                    <div className="min-h-[22px] flex items-center">
                       <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Vendedor (opcional)</label>
@@ -361,7 +344,7 @@ const POS = () => {
                    </select>
                 </div>
 
-                {/* 4. Tarifa */}
+                {/* 3. Tarifa */}
                 <div className="flex flex-col space-y-2">
                    <div className="min-h-[22px] flex items-center">
                       <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Tarifa</label>
@@ -377,7 +360,7 @@ const POS = () => {
                    </select>
                 </div>
 
-                {/* 5. Tasa de Cambio de Transacción */}
+                {/* 4. Tasa de Cambio de Transacción */}
                 <div className="flex flex-col space-y-2">
                    <div className="min-h-[22px] flex items-center justify-between">
                       <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Tasa de Cambio</label>
@@ -421,21 +404,36 @@ const POS = () => {
           </section>
 
           <section className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
-            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+            <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
                <div className="flex items-center gap-3">
                  <h3 className="text-xl font-black uppercase tracking-tight text-slate-800 font-mono">Productos del Almacén</h3>
-                 <span className="bg-[#0b5156]/10 text-[#0b5156] text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">
+                 <span className="bg-[#0b5156]/10 text-[#0b5156] text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider font-mono">
                    {filteredProducts.length} disponibles
                  </span>
                </div>
-               {searchTerm && (
-                 <button 
-                   onClick={() => setSearchTerm('')} 
-                   className="text-xs font-bold text-slate-400 hover:text-red-500 uppercase tracking-wider transition-colors self-start sm:self-auto"
-                 >
-                   ✕ Limpiar búsqueda
-                 </button>
-               )}
+               
+               {/* BUSCADOR DENTRO DEL CUADRO DE PRODUCTOS */}
+               <div className="flex items-center gap-2 w-full md:w-80">
+                 <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                    <input 
+                      type="text" 
+                      value={searchTerm} 
+                      onChange={(e) => setSearchTerm(e.target.value)} 
+                      placeholder="BUSCAR NOMBRE / CÓDIGO / SKU..." 
+                      className="w-full h-10 pl-9 pr-4 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors" 
+                    />
+                 </div>
+                 {searchTerm && (
+                   <button 
+                     onClick={() => setSearchTerm('')} 
+                     className="px-2.5 py-2 text-xs font-bold text-slate-400 hover:text-red-500 bg-slate-100 rounded-xl transition-colors shrink-0"
+                     title="Limpiar búsqueda"
+                   >
+                     ✕
+                   </button>
+                 )}
+               </div>
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
