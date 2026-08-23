@@ -273,6 +273,14 @@ export default function TelegramLinker() {
               </div>
             </div>
 
+            {error && (
+              <div className="bg-red-50 border border-red-200 p-4 rounded-xl text-red-700 text-xs font-bold text-center max-w-md mx-auto mb-4 animate-in fade-in duration-200">
+                {error}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Pantalla de Carga */}
         {loading && (
           <div className="flex flex-col justify-center items-center py-16 space-y-6">
