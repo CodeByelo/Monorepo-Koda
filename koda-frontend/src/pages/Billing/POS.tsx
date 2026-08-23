@@ -466,22 +466,35 @@ const POS = () => {
                       <tr className="text-xs font-black text-slate-500 uppercase tracking-widest border-b border-slate-100 bg-slate-50/30">
                          <th className="py-4 px-8">N° TICKET</th>
                          <th className="py-4 px-6">CLIENTE</th>
-                         <th className="py-4 px-6 text-right">TOTAL USD</th>
+                         <th className="py-4 px-6 text-right">TOTAL ($ / Bs.)</th>
                          <th className="py-4 px-6 text-center">ESTADO</th>
                       </tr>
                    </thead>
                    <tbody className="divide-y divide-slate-50">
                       {recentTickets.length > 0 ? (
-                        recentTickets.map(t => (
-                          <tr key={t.id} className="group hover:bg-[#bdafa1]/5 transition-colors">
-                             <td className="py-5 px-8 text-sm font-black text-slate-800 font-mono">{t.id}</td>
-                             <td className="py-5 px-6 text-slate-500 text-sm font-bold uppercase">{t.client}</td>
-                             <td className="py-5 px-6 text-right font-black text-slate-800 font-mono">{t.total}</td>
-                             <td className="py-5 px-6 text-center">
-                                <span className={`${t.color} text-xs font-black px-2 py-0.5 rounded uppercase border`}>{t.status}</span>
-                             </td>
-                          </tr>
-                        ))
+                        recentTickets.map(t => {
+                          const numericTotal = typeof t.total === 'string' ? parseFloat(t.total.replace(/[^0-9.-]+/g, '')) : Number(t.total || 0);
+                          const totalBsTicket = tasaBCV > 0 && !isNaN(numericTotal) ? `Bs. ${(numericTotal * tasaBCV).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
+                          return (
+                            <tr key={t.id} className="group hover:bg-[#bdafa1]/5 transition-colors">
+                               <td className="py-5 px-8 text-sm font-black text-slate-800 font-mono">{t.id}</td>
+                               <td className="py-5 px-6 text-slate-500 text-sm font-bold uppercase">{t.client}</td>
+                               <td className="py-5 px-6 text-right">
+                                 <div className="flex flex-col items-end">
+                                   <span className="font-black text-slate-800 font-mono text-sm">{t.total}</span>
+                                   {totalBsTicket && (
+                                     <span className="text-[10px] font-bold text-[#0b5156] font-mono">{totalBsTicket}</span>
+                                   )}
+                                 </div>
+                               </td>
+                               <td className="py-5 px-6 text-center">
+                                  <span className={`text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-tighter border ${t.color}`}>
+                                     {t.status}
+                                  </span>
+                               </td>
+                            </tr>
+                          );
+                        })
                       ) : (
                         <tr>
                            <td colSpan={4} className="py-8 text-center text-slate-400 font-bold uppercase text-xs">

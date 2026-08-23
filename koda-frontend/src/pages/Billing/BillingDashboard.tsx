@@ -76,6 +76,8 @@ const BillingDashboard = () => {
       base: fmt(v.subtotal_usd || v.subtotal || 0),
       tax: fmt(v.iva_usd || v.iva || 0),
       total: fmt(v.total_usd || v.total || 0),
+      totalBs: `Bs. ${((Number(v.total_usd || v.total || 0)) * (Number(v.tasa_cambio_bs) || 0)).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      tasa: Number(v.tasa_cambio_bs) || 0,
       status: v.estado === 'ACTIVA' ? 'Activa' : v.estado,
       statusColor: v.estado === 'ACTIVA' ? 'bg-green-100 text-green-700' : 'bg-white text-slate-400',
     };
@@ -251,9 +253,9 @@ const BillingDashboard = () => {
                 <th className="py-4 px-6">Cliente / RIF</th>
                 <th className="py-4 px-6 text-right">Base Imp.</th>
                 <th className="py-4 px-6 text-right">Impuesto</th>
-                <th className="py-4 px-6 text-right">Total</th>
+                <th className="py-4 px-6 text-right">Total ($ / Bs.)</th>
                 <th className="py-4 px-6 text-center">Estado</th>
-                <th className="py-4 px-6 text-right">Accion</th>
+                <th className="py-4 px-6 text-right">Acción</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -279,7 +281,12 @@ const BillingDashboard = () => {
                   </td>
                   <td className="py-5 px-6 text-right font-bold text-slate-500">{inv.base}</td>
                   <td className="py-5 px-6 text-right font-bold text-slate-500">{inv.tax}</td>
-                  <td className="py-5 px-6 text-right font-black text-slate-800">{inv.total}</td>
+                  <td className="py-5 px-6 text-right">
+                    <div className="flex flex-col items-end">
+                      <span className="font-black text-slate-800 text-sm">{inv.total}</span>
+                      <span className="text-[10px] font-bold text-[#0b5156] font-mono">{inv.totalBs}</span>
+                    </div>
+                  </td>
                   <td className="py-5 px-6 text-center">
                     <span className={`${inv.statusColor} text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-tighter`}>{inv.status}</span>
                   </td>
