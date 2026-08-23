@@ -336,29 +336,61 @@ async def _delete_pending_venta(token: str) -> None:
 # =============================================================================
 async def _get_vendedor_for_user(conn, tenant_id: str, user_id: str) -> Optional[dict]:
     """
-    Verifica si el usuario vinculado a la sesión de Telegram tiene un perfil de
-    Vendedor activo asociado (vendedores.user_id -> profiles.id).
-
-    Esta tabla `vendedores` ya existe EN ESTE MISMO backend (ver
-    routers/vendedores_router.py — GET /vendedores/me usa exactamente este
-    vínculo), así que la verificación se hace con una consulta SQL local: NO
-    hace falta llamar a koda-frontend/backend para saber si alguien es
-    vendedor.
+    Verifica si el usuario/vendedor vinculado a la sesión de Telegram tiene un
+    registro de Vendedor activo asociado. Soporta user_id como UUID de Profile
+    o ID entero directo de Vendedor.
     """
+    # 1. Si user_id es un entero (ID directo del vendedor en la tabla vendedores)
+    if user_id and str(user_id).isdigit():
+        try:
+            row = await conn.fetchrow(
+                """
+                SELECT id, nombre, porcentaje_comision
+                FROM vendedores
+                WHERE id = $1
+                  AND (tenant_id = $2::uuid OR tenant_id IS NULL)
+                  AND activo = true
+                """,
+                int(user_id), uuid.UUID(tenant_id)
+            )
+            if row:
+                return dict(row)
+        except Exception as e:
+            logger.error(f"[TELEGRAM] Error buscando vendedor por ID entero: {e}")
+
+    # 2. Si user_id es un UUID (Profile del usuario logueado en el ERP)
+    try:
+        u_uuid = uuid.UUID(str(user_id))
+        row = await conn.fetchrow(
+            """
+            SELECT id, nombre, porcentaje_comision
+            FROM vendedores
+            WHERE user_id = $1
+              AND (tenant_id = $2::uuid OR tenant_id IS NULL)
+              AND activo = true
+            """,
+            u_uuid, uuid.UUID(tenant_id)
+        )
+        if row:
+            return dict(row)
+    except Exception as e:
+        logger.error(f"[TELEGRAM] Error verificando perfil de vendedor por UUID: {e}")
+
+    # 3. Fallback: Si el usuario es un Admin/Staff del tenant, vincular con el primer vendedor activo
     try:
         row = await conn.fetchrow(
             """
             SELECT id, nombre, porcentaje_comision
             FROM vendedores
-            WHERE user_id = $1::uuid
-              AND (tenant_id = $2::uuid OR tenant_id IS NULL)
+            WHERE (tenant_id = $1::uuid OR tenant_id IS NULL)
               AND activo = true
+            ORDER BY id ASC LIMIT 1
             """,
-            uuid.UUID(user_id), uuid.UUID(tenant_id)
+            uuid.UUID(tenant_id)
         )
         return dict(row) if row else None
     except Exception as e:
-        logger.error(f"[TELEGRAM] Error verificando perfil de vendedor: {e}")
+        logger.error(f"[TELEGRAM] Fallback vendedor: {e}")
         return None
 
 
@@ -754,14 +786,23 @@ async def _handle_callback_query(callback_query: TelegramCallbackQuery) -> dict:
         return {"status": "venta_failed", "detail": str(e)}
 
     numero_factura = result.get("numero_factura", result.get("invoice_number", "N/D"))
-    total = result.get("total", result.get("monto_total", "N/D"))
-    comision = result.get("comision", result.get("commission", "N/D"))
+    total_val = float(result.get("monto_total", result.get("total", 0)))
+    comision_val = float(result.get("comision_usd", result.get("comision", 0)))
+    tasa_val = float(result.get("tasa_bcv", 0))
+    metodo = result.get("metodo_pago", "Efectivo USD")
+    total_bs = total_val * tasa_val if tasa_val > 0 else 0
+
     msg = (
-        "✅ Venta registrada exitosamente.\n\n"
-        f"Factura: {numero_factura}\n"
-        f"Total: {total}\n"
-        f"Comisión: {comision}"
+        "✅ *Venta registrada exitosamente*\n\n"
+        f"📄 *Factura:* `{numero_factura}`\n"
+        f"💳 *Forma de Pago:* {metodo}\n"
+        f"💵 *Total Divisas:* ${total_val:.2f}\n"
     )
+    if total_bs > 0:
+        msg += f"🇻🇪 *Total Bolívares:* Bs. {total_bs:,.2f} (Tasa: {tasa_val:,.2f})\n"
+    
+    msg += f"💼 *Comisión Vendedor:* ${comision_val:.2f}"
+    
     await send_telegram_message(target_chat_id, msg)
     return {"status": "success", "invoice": numero_factura}
 
