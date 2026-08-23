@@ -180,15 +180,28 @@ def _logo_path(tenant_id) -> str:
 def get_empresa_logo_image(empresa, tenant_id):
     """
     Retorna un objeto compatible con ReportLab (ImageReader o ruta local)
-    soportando tanto URLs públicas de Supabase Storage en la nube como rutas locales.
-    Retorna None si no hay logo o si la descarga falla.
+    soportando URLs públicas, base64 Data URIs y rutas locales.
     """
     import io
+    import base64
     import requests
     from reportlab.lib.utils import ImageReader
 
     logo_url = getattr(empresa, "logo_url", None)
-    if logo_url and logo_url.startswith("http"):
+    if not logo_url:
+        return None
+
+    # 1. Si es Base64 Data URI
+    if logo_url.startswith("data:"):
+        try:
+            header, encoded = logo_url.split(",", 1)
+            img_bytes = base64.b64decode(encoded)
+            return ImageReader(io.BytesIO(img_bytes))
+        except Exception as e:
+            logger.warning(f"Error decodificando data URI de logo: {e}")
+
+    # 2. Si es URL HTTP / Supabase
+    if logo_url.startswith("http"):
         try:
             resp = requests.get(logo_url, timeout=3.5)
             if resp.status_code == 200 and len(resp.content) > 0:
@@ -196,7 +209,7 @@ def get_empresa_logo_image(empresa, tenant_id):
         except Exception:
             pass
 
-    # Fallback local
+    # 3. Fallback local
     local_path = _logo_path(tenant_id)
     if os.path.exists(local_path):
         try:
@@ -285,43 +298,42 @@ async def subir_logo(
     if len(contenido) == 0:
         raise HTTPException(status_code=400, detail="El archivo de logo está vacío.")
 
-    # Si Supabase Storage está disponible, guardar en bucket persistente en la nube
+    # Convertir a Data URI base64 persistente para garantizar que la imagen NUNCA se rompa
+    import base64
+    b64_str = base64.b64encode(contenido).decode('utf-8')
+    mime_type = file.content_type or "image/png"
+    data_uri = f"data:{mime_type};base64,{b64_str}"
+
+    # Intentar guardar en Supabase Storage (si está configurado el bucket)
+    public_url = None
     if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
         extension = os.path.splitext(file.filename or "")[1] or ".png"
         object_path = f"logos/{current_user.tenant_id}/logo{extension}"
-        upload_url = f"{SUPABASE_URL.rstrip('/')}/storage/v1/object/{SUPABASE_STORAGE_BUCKET_DOCS}/{object_path}"
-        headers = {
-            "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
-            "apikey": SUPABASE_SERVICE_ROLE_KEY,
-            "Content-Type": file.content_type or "image/png",
-            "x-upsert": "true",
-        }
+        
+        # Intentar en bucket 'productos' o 'documentos'
+        for bucket in ["productos", SUPABASE_STORAGE_BUCKET_DOCS]:
+            upload_url = f"{SUPABASE_URL.rstrip('/')}/storage/v1/object/{bucket}/{object_path}"
+            headers = {
+                "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+                "apikey": SUPABASE_SERVICE_ROLE_KEY,
+                "Content-Type": file.content_type or "image/png",
+                "x-upsert": "true",
+            }
+            try:
+                resp = requests.post(upload_url, headers=headers, data=contenido, timeout=8)
+                if resp.status_code in (200, 201):
+                    public_url = f"{SUPABASE_URL.rstrip('/')}/storage/v1/object/public/{bucket}/{object_path}"
+                    break
+            except Exception as exc:
+                logger.warning(f"Error subiendo logo al bucket {bucket}: {exc}")
 
-        try:
-            resp = requests.post(upload_url, headers=headers, data=contenido, timeout=15)
-            if resp.status_code in (200, 201):
-                public_url = f"{SUPABASE_URL.rstrip('/')}/storage/v1/object/public/{SUPABASE_STORAGE_BUCKET_DOCS}/{object_path}"
-                emp.logo_url = public_url
-                db.commit()
-                db.refresh(emp)
-                return {"ok": True, "message": "Logo registrado exitosamente", "logo_url": public_url}
-            else:
-                logger.error(f"Error al subir logo a Supabase Storage ({resp.status_code}): {resp.text}")
-        except requests.RequestException as exc:
-            logger.error(f"Fallo de conexión a Supabase Storage: {exc}")
-
-    # Fallback local (desarrollo o sin Supabase configurado)
-    os.makedirs("backend/static", exist_ok=True)
-    logo_path = _logo_path(current_user.tenant_id)
-    with open(logo_path, "wb") as buffer:
-        buffer.write(contenido)
-    
-    local_url = f"/static/logo_{current_user.tenant_id}.png"
-    emp.logo_url = local_url
+    # Si Supabase devolvió URL pública, usarla; de lo contrario usar Data URI persistente (inmune a reinicios)
+    logo_final = public_url if public_url else data_uri
+    emp.logo_url = logo_final
     db.commit()
     db.refresh(emp)
 
-    return {"ok": True, "message": "Logo registrado exitosamente", "logo_url": local_url}
+    return {"ok": True, "message": "Logo registrado exitosamente", "logo_url": logo_final}
 
 @router.post("/empresa/api-tokens")
 def crear_token(current_user=Depends(role_required(['Admin']))):

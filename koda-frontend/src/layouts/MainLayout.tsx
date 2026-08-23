@@ -117,10 +117,13 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                <div className="w-8 h-8 rounded-full bg-[#0b5156] flex items-center justify-center text-white font-black text-xs border border-slate-200 shadow-sm overflow-hidden bg-white" title={tenantName || userName || ''}>
                  {headerLogo ? (
                    <img 
-                     src={headerLogo.startsWith('http') ? headerLogo : `${BASE_URL.replace(/\/$/, '')}${headerLogo.startsWith('/') ? '' : '/'}${headerLogo}`} 
+                     src={headerLogo.startsWith('http') || headerLogo.startsWith('data:') ? headerLogo : `${BASE_URL.replace(/\/$/, '')}${headerLogo.startsWith('/') ? '' : '/'}${headerLogo}`} 
                      alt="Logo" 
                      className="w-full h-full object-contain p-0.5"
-                     onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                     onError={(e) => { 
+                       (e.target as HTMLElement).style.display = 'none'; 
+                       setHeaderLogo(null);
+                     }}
                    />
                  ) : (
                    <div className="w-full h-full bg-[#0b5156] flex items-center justify-center text-white font-black text-xs">

@@ -278,7 +278,7 @@ const AdminDashboard = ({ defaultTab = 'compania' }: AdminDashboardProps) => {
                       <div className="w-20 h-20 rounded-xl bg-white border border-slate-200 shadow-sm flex items-center justify-center overflow-hidden">
                         {perfil?.logo_url ? (
                           <img 
-                            src={perfil.logo_url.startsWith('http') ? perfil.logo_url : `${BASE_URL.replace(/\/$/, '')}${perfil.logo_url.startsWith('/') ? '' : '/'}${perfil.logo_url}`} 
+                            src={perfil.logo_url.startsWith('http') || perfil.logo_url.startsWith('data:') ? perfil.logo_url : `${BASE_URL.replace(/\/$/, '')}${perfil.logo_url.startsWith('/') ? '' : '/'}${perfil.logo_url}`} 
                             alt="Logo" 
                             className="w-full h-full object-contain p-1"
                             onError={(e) => {
