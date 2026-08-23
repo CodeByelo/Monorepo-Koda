@@ -5014,19 +5014,31 @@ def descargar_ticket_pdf(
 
     c.setFont("Helvetica", tam_tabla)
     total_descuento_usd = 0.0
+    subtotal_gravado_calc = 0.0
+    subtotal_exento_calc = 0.0
+
     for item in venta.detalles:
         prod_nombre = item.producto.nombre if item.producto else "Producto"
         precio = float(item.precio_usd_capturado)
         cantidad = float(item.cantidad)
         total_item = precio * cantidad
         
-        # Comprobar si se vendió con precio inferior al precio de lista detal/usd
+        # Indicador de Gravabilidad Legal (E) Exento o (G) Gravado 16%
+        es_exento = getattr(item.producto, "es_exento", False)
+        if es_exento:
+            subtotal_exento_calc += total_item
+            tag_iva = " (E)"
+        else:
+            subtotal_gravado_calc += total_item
+            tag_iva = " (G)"
+
+        # Comprobar si se vendió con descuento sobre tarifa
         if item.producto and item.producto.precio_usd:
             precio_base = float(item.producto.precio_usd)
             if precio_base > precio:
                 total_descuento_usd += (precio_base - precio) * cantidad
 
-        c.drawString(4 * mm, y, f"{prod_nombre[:20]}")
+        c.drawString(4 * mm, y, f"{prod_nombre[:18]}{tag_iva}")
         c.drawCentredString(ANCHO / 2 + 6 * mm, y, f"{cantidad:g}")
         c.drawRightString(ANCHO - 4 * mm, y, f"${total_item:.2f}")
         y -= (tam_tabla + 2)
@@ -5039,7 +5051,7 @@ def descargar_ticket_pdf(
     c.line(4 * mm, y + 2, ANCHO - 4 * mm, y + 2)
     y -= 8
 
-    # --- Totales y Cálculos ---
+    # --- Desglose Impositivo y Bimonetario Legal SENIAT ---
     subtotal_val = float(venta.subtotal_usd)
     iva_val = float(venta.iva_usd)
     igtf_val = float(venta.igtf_usd)
@@ -5054,25 +5066,33 @@ def descargar_ticket_pdf(
         c.drawRightString(ANCHO - 4 * mm, y, valor_str)
         y -= (tam + 3)
 
-    fila_total("Subtotal:", f"${subtotal_val:.2f}")
+    fila_total("Subtotal Bruto:", f"${subtotal_val:.2f}")
     if total_descuento_usd > 0:
-        fila_total("Descuento Tarifa:", f"-${total_descuento_usd:.2f}")
-    fila_total("IVA (16%):", f"${iva_val:.2f}")
-    if igtf_val > 0:
-        fila_total("IGTF (3%):", f"${igtf_val:.2f}")
+        fila_total("Descuento Comercial:", f"-${total_descuento_usd:.2f}")
     
-    fila_total("TOTAL (USD):", f"${total_val:.2f}", es_bold=True, tam=10)
-    fila_total("Tasa BCV Oficial:", f"Bs. {tasa_val:.2f}", tam=8)
-    fila_total("TOTAL EN BS:", f"Bs. {total_bs_val:.2f}", es_bold=True, tam=9)
+    if subtotal_exento_calc > 0:
+        fila_total("Monto Exento (E):", f"${subtotal_exento_calc:.2f}")
+    if subtotal_gravado_calc > 0:
+        fila_total("Base Imponible (G):", f"${subtotal_gravado_calc:.2f}")
+
+    fila_total("IVA (16%):", f"${iva_val:.2f}")
+    
+    # IGTF: Únicamente visible si la venta generó percepción legal IGTF
+    if igtf_val > 0:
+        fila_total("IGTF Percibido (3%):", f"${igtf_val:.2f}")
+    
+    fila_total("TOTAL A PAGAR (USD):", f"${total_val:.2f}", es_bold=True, tam=10)
+    fila_total("Tasa Oficial BCV:", f"Bs. {tasa_val:.2f}", tam=8)
+    fila_total("TOTAL EN BOLÍVARES (Bs.):", f"Bs. {total_bs_val:.2f}", es_bold=True, tam=9)
 
     y -= 4
     c.line(4 * mm, y + 2, ANCHO - 4 * mm, y + 2)
     y -= 8
 
-    # --- Método de Pago Registrado en la Factura ---
+    # --- Método de Pago Registrado ---
     metodo = venta.metodo_pago or "Efectivo"
     c.setFont("Helvetica-Bold", 8)
-    c.drawCentredString(ANCHO / 2, y, f"Método de Pago: {metodo.upper()}")
+    c.drawCentredString(ANCHO / 2, y, f"Forma de Pago: {metodo.upper()}")
     y -= 10
     c.line(4 * mm, y + 2, ANCHO - 4 * mm, y + 2)
     y -= 8
