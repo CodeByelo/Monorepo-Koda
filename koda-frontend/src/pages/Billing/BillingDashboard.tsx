@@ -72,6 +72,7 @@ const BillingDashboard = () => {
       client: v.cliente?.nombre || 'Cliente Final',
       rif: v.cliente?.rif || 'V-000000000',
       date: new Date(v.fecha).toLocaleDateString('es-VE'),
+      rawDate: v.fecha ? v.fecha.split('T')[0] : '',
       base: fmt(v.subtotal_usd || v.subtotal || 0),
       tax: fmt(v.iva_usd || v.iva || 0),
       total: fmt(v.total_usd || v.total || 0),
@@ -80,13 +81,29 @@ const BillingDashboard = () => {
     };
   }), [ventas]);
 
+  const [filterEstado, setFilterEstado] = useState<'TODOS' | 'ACTIVA' | 'ANULADA'>('TODOS');
+  const [filterFecha, setFilterFecha] = useState('');
+
   const filtered = useMemo(() => {
-    if (!searchTerm.trim()) return invoices;
-    const q = searchTerm.toLowerCase();
-    return invoices.filter((inv) =>
-      inv.id.toLowerCase().includes(q) || inv.client.toLowerCase().includes(q)
-    );
-  }, [invoices, searchTerm]);
+    return invoices.filter((inv) => {
+      // Filtro texto: Número factura/ticket, cliente o RIF
+      const matchText = !searchTerm.trim() || 
+        inv.id.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        inv.client.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        inv.rif.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        inv.control.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      // Filtro Estado
+      const matchEstado = filterEstado === 'TODOS' || 
+        (filterEstado === 'ACTIVA' && (inv.status === 'Activa' || inv.status === 'ACTIVA')) ||
+        (filterEstado === 'ANULADA' && (inv.status === 'Anulada' || inv.status === 'ANULADA'));
+
+      // Filtro Fecha (si se seleccionó)
+      const matchFecha = !filterFecha || (inv.rawDate && inv.rawDate.startsWith(filterFecha));
+
+      return matchText && matchEstado && matchFecha;
+    });
+  }, [invoices, searchTerm, filterEstado, filterFecha]);
 
   const kpis = [
     { t: 'Total Facturado', v: fmt(reporte?.total_acumulado_usd || 0), desc: 'Acumulado USD', c: 'text-[#0b5156]' },
@@ -98,55 +115,53 @@ const BillingDashboard = () => {
   const handleAnular = async (id: number) => {
     if (!confirm('¿Estás seguro de que deseas anular esta factura? Esta acción no se puede deshacer.')) return;
     try {
-      const updatedVenta = await api.post<VentaRow>(`/ventas/${id}/anular`);
-      setVentas(prev => prev.map(v => v.id === id ? { ...v, estado: updatedVenta.estado } : v));
-      alert('Factura anulada con éxito.');
-    } catch (error: any) {
-      alert(`Error al anular: ${error.message}`);
+      await api.post(`/ventas/${id}/anular`);
+      const updated = ventas.map(v => v.id === id ? { ...v, estado: 'ANULADA' } : v);
+      setVentas(updated);
+    } catch (error) {
+      console.error('Error anulando factura:', error);
+      alert('No se pudo anular la factura.');
     }
   };
 
-  const handleDownloadPdf = async (id: number) => {
-    try {
-      await api.download(`/ventas/${id}/pdf`, `Factura-${id}.pdf`);
-    } catch (error: any) {
-      alert(error.message || 'Error al descargar PDF');
-    }
+  const handleDownloadPdf = (id: number) => {
+    window.open(`/ventas/${id}/pdf`, '_blank');
   };
 
-  const handleDownloadTicket = async (id: number) => {
-    try {
-      await api.download(`/ventas/${id}/ticket`, `Ticket-${id}.pdf`);
-    } catch (error: any) {
-      alert(error.message || 'Error al descargar el ticket');
-    }
+  const handleDownloadTicket = (id: number) => {
+    window.open(`/ventas/${id}/ticket`, '_blank');
   };
 
   const handleGenerarNotaEntrega = async (id: number) => {
     try {
       const res: any = await api.post(`/ventas/${id}/generar-nota-entrega`, {});
-      alert(`Nota de entrega ${res.numero_nota} generada. Complétala en Ventas > Notas de Entrega.`);
+      alert(`Nota de entrega ${res.numero_nota} generada con éxito.`);
     } catch (error: any) {
-      alert(error.message || 'Error al generar la nota de entrega');
+      alert(error.message || 'Error generando nota de entrega.');
     }
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
-      <header className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
-        <div className="flex justify-between items-start mb-6">
-          <div className="space-y-2">
-            <h1 className="text-4xl font-black text-slate-800 tracking-tighter uppercase">Historial de Facturas</h1>
-            <p className="text-slate-500 text-sm font-bold uppercase tracking-tight max-w-2xl">
-              Registro maestro de todos los documentos comerciales emitidos conformes a la Providencia 00071.
+    <div className="space-y-6 animate-in fade-in duration-500 pb-20">
+      <header className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div className="space-y-1">
+            <span className="bg-[#0b5156] text-white text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-widest inline-block mb-2">
+              Auditoría & Ventas
+            </span>
+            <h1 className="text-3xl font-black text-[#0b5156] tracking-tighter uppercase leading-none">
+              Auditoría de Tickets y Facturas
+            </h1>
+            <p className="text-slate-500 text-xs font-bold uppercase tracking-tight">
+              Control fiscal centralizado, reimpresión de tickets térmicos y facturación legal.
             </p>
           </div>
-          <div className="flex gap-3">
-             <Link to="/pos" className="bg-white text-[#0b5156] px-6 py-2.5 rounded-xl text-xs font-black uppercase border border-[#0b5156]/20 flex items-center gap-2 tracking-widest shadow-sm hover:bg-green-50">
-               <Monitor size={14} /> Abrir POS
+          <div className="flex gap-2">
+             <Link to="/pos" className="bg-white text-slate-700 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider border border-slate-200 hover:bg-slate-50 transition-all flex items-center gap-2 shadow-sm">
+                <Monitor size={14} /> Terminal POS
              </Link>
-             <Link to="/nueva" className="bg-[#0b5156] text-white px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 tracking-widest shadow-lg shadow-green-900/20 hover:bg-[#083a3d]">
-               <Plus size={16} /> Emitir Factura
+             <Link to="/nueva-fiscal" className="bg-[#0b5156] text-white px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all flex items-center gap-2">
+                <Plus size={14} /> Nueva Factura
              </Link>
           </div>
         </div>
@@ -165,23 +180,62 @@ const BillingDashboard = () => {
       </section>
 
       <section className={`bg-white border border-slate-200 shadow-sm overflow-hidden transition-all duration-300 ${isExpanded ? 'flex flex-col h-full fixed inset-4 z-50 rounded-3xl shadow-2xl' : 'rounded-3xl'}`}>
-        <div className="p-6 border-b border-slate-100 flex flex-wrap gap-4 items-center bg-slate-50/50">
-          <div className="relative w-72">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-            <input 
-              type="text" 
-              placeholder="Buscar por N. Factura, Cliente o RIF..." 
-              className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-[#0b5156]/30"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
+        <div className="p-6 border-b border-slate-100 flex flex-wrap gap-4 items-center justify-between bg-slate-50/50">
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Buscador Texto */}
+            <div className="relative w-72">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+              <input 
+                type="text" 
+                placeholder="Buscar Ticket, Factura, Cliente o RIF..." 
+                className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-[#0b5156]/30 shadow-xs"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+
+            {/* Filtro Estado */}
+            <div className="flex items-center bg-white border border-slate-200 rounded-xl p-1 shadow-xs">
+              {(['TODOS', 'ACTIVA', 'ANULADA'] as const).map((st) => (
+                <button
+                  key={st}
+                  onClick={() => setFilterEstado(st)}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${
+                    filterEstado === st ? 'bg-[#0b5156] text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  {st}
+                </button>
+              ))}
+            </div>
+
+            {/* Filtro Fecha */}
+            <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-1.5 shadow-xs">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Fecha:</span>
+              <input 
+                type="date"
+                value={filterFecha}
+                onChange={(e) => setFilterFecha(e.target.value)}
+                className="text-xs font-bold text-slate-700 bg-transparent focus:outline-none"
+              />
+              {filterFecha && (
+                <button onClick={() => setFilterFecha('')} className="text-slate-400 hover:text-red-500 text-xs font-bold">✕</button>
+              )}
+            </div>
           </div>
-          <button 
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="p-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl hover:bg-slate-50 transition-colors shadow-sm ml-auto"
-          >
-            {isExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-          </button>
+
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-bold text-slate-500 uppercase font-mono">
+              {filtered.length} {filtered.length === 1 ? 'documento' : 'documentos'}
+            </span>
+            <button 
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="p-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl hover:bg-slate-50 transition-colors shadow-sm"
+              title={isExpanded ? "Reducir pantalla" : "Pantalla completa"}
+            >
+              {isExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            </button>
+          </div>
         </div>
 
         {isLoading ? (
