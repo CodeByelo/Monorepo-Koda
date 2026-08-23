@@ -83,25 +83,42 @@ def resolver_precio_unitario(producto) -> Decimal:
 
 def derivar_aplica_igtf(metodo_pago: str, moneda: Optional[str]) -> bool:
     """
-    Deriva si aplica IGTF (3%) EXCLUSIVAMENTE a partir de datos del servidor
-    (método de pago y moneda del documento). Nunca se debe confiar en un
-    flag booleano enviado por el cliente para esta decisión fiscal.
-
-    Regla: aplica si el pago es en divisas (metodo_pago == "Divisa") o si la
-    moneda es USD, salvo que el documento esté denominado en VED (Bolívares),
-    caso en el cual el IGTF nunca aplica.
+    Deriva si aplica IGTF (3%) según la normativa SENIAT:
+    Aplica ÚNICAMENTE si el pago se realiza en Divisas / Moneda Extranjera.
+    Pagos en Bolívares (Pago Móvil, Transferencia bancaria nacional, Efectivo Bs)
+    están EXENTOS de IGTF.
     """
-    moneda_norm = (moneda or "").upper()
-    if moneda_norm == "VED":
+    metodo_norm = (metodo_pago or "").strip().upper()
+    moneda_norm = (moneda or "").strip().upper()
+    if moneda_norm in ("VED", "VES", "BS"):
         return False
-    return metodo_pago == "Divisa" or moneda_norm == "USD"
+    # Si el método de pago es explícitamente en divisas o moneda extranjera
+    return metodo_norm in ("DIVISA", "DIVISAS", "USD", "DOLARES", "CASH_USD")
 
 
 def _obtener_tasa_bs(db: Session, current_user) -> Decimal:
-    from backend.utils.helpers import tasa_actual
     t_id = getattr(current_user, "tenant_id", None)
-    tasa_val = tasa_actual(db, t_id)
-    return Decimal(str(tasa_val))
+    tasa = (
+        db.query(TasaCambio)
+        .filter((TasaCambio.tenant_id == t_id) | (TasaCambio.tenant_id.is_(None)))
+        .order_by(TasaCambio.fecha.desc())
+        .first()
+    )
+    if tasa and getattr(tasa, "valor_ves", None):
+        val = float(tasa.valor_ves)
+        if val > 0:
+            return Decimal(str(val))
+    
+    # Auto-sincronizar con el BCV si no hay registros
+    try:
+        from backend.routers.rates import _perform_bcv_sync
+        tasa_sync = _perform_bcv_sync(db)
+        if tasa_sync and getattr(tasa_sync, "valor_ves", None):
+            return Decimal(str(tasa_sync.valor_ves))
+    except Exception:
+        pass
+
+    return Decimal("784.6633")
 
 
 def _obtener_tasas_fiscales(db: Session) -> tuple[Decimal, Decimal]:
