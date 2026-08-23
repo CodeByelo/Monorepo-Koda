@@ -125,10 +125,18 @@ const POS = () => {
           item.id === product.id ? { ...item, qty: item.qty + 1 } : item
         );
       }
-      // El precio inicial se autocompleta desde la tarifa activa (con fallback
-      // a precio_usd si ese tier no está configurado); queda editable por
-      // línea en el carrito, no es un candado sobre el precio negociado.
-      return [...prevCart, { id: product.id, name: product.nombre, price: resolveTierPrice(product, tarifa), qty: 1, sku: product.sku, stock: product.stock }];
+      return [
+        ...prevCart,
+        {
+          id: product.id,
+          name: product.nombre,
+          price: resolveTierPrice(product, tarifa),
+          qty: 1,
+          sku: product.sku,
+          stock: product.stock,
+          es_exento: Boolean(product.es_exento),
+        },
+      ];
     });
   };
 
@@ -139,8 +147,6 @@ const POS = () => {
     ));
   };
 
-  // Solo agrega el cliente nuevo al array en memoria y lo selecciona como
-  // activo; no debe tocar carrito/cantidades/totales de la venta en curso.
   const handleClienteCreated = (cliente: any) => {
     setClientes((prev) => [...prev, cliente]);
     setClient(cliente.id.toString());
@@ -165,13 +171,14 @@ const POS = () => {
       cliente_id: parseInt(client, 10),
       metodo_pago: metodoPago,
       aplica_igtf: metodoPago === 'Divisa',
-      moneda_documento: (metodoPago === 'Transferencia' || metodoPago === 'PagoMovil') ? 'VED' : 'USD',
+      moneda_documento: (metodoPago === 'Transferencia' || metodoPago === 'PagoMovil' || metodoPago === 'Efectivo') ? 'VED' : 'USD',
       vendedor_id: vendedorId ? parseInt(vendedorId, 10) : null,
       detalles: cart.map(item => ({
         producto_id: item.id,
         cantidad: item.qty,
         precio_unitario: item.price,
-        descripcion: item.name
+        descripcion: item.name,
+        es_exento: item.es_exento
       }))
     };
     api.post<any>('/v1/facturacion/emitir', payload).then((res) => {
@@ -184,10 +191,28 @@ const POS = () => {
     });
   };
 
-  const cartSubtotal = cart.reduce((acc, item) => acc + item.qty * item.price, 0);
-  const cartIVA = cartSubtotal * 0.16;
-  const cartIGTF = metodoPago === 'Divisa' ? (cartSubtotal + cartIVA) * 0.03 : 0;
-  const cartTotal = cartSubtotal + cartIVA + cartIGTF;
+  // ==========================================
+  // ETAPA A: CÁLCULO DEL CARRITO (PRODUCTOS)
+  // ==========================================
+  const subtotalGravado = cart
+    .filter(item => !item.es_exento)
+    .reduce((acc, item) => acc + (item.qty * item.price), 0);
+
+  const subtotalExento = cart
+    .filter(item => item.es_exento)
+    .reduce((acc, item) => acc + (item.qty * item.price), 0);
+
+  const subtotalProductos = subtotalGravado + subtotalExento;
+  const cartIVA = subtotalGravado * 0.16;
+  const subtotalBaseFactura = subtotalProductos + cartIVA;
+
+  // ==========================================
+  // ETAPA B: CÁLCULO DE CAJA (MEDIOS DE PAGO E IGTF)
+  // Medios Sujetos a IGTF 3%: 'Divisa' (USD efectivo / Zelle)
+  // Medios Exentos 0%: 'Efectivo' (Bs), 'PagoMovil', 'Transferencia'
+  // ==========================================
+  const cartIGTF = metodoPago === 'Divisa' ? (subtotalBaseFactura * 0.03) : 0;
+  const cartTotal = subtotalBaseFactura + cartIGTF;
   const cartTotalBs = cartTotal * (tasaBCV || 0);
 
   const filteredProducts = productos.filter(p => 
@@ -534,24 +559,34 @@ const POS = () => {
 
              <div className="pt-4 space-y-4">
                 <div className="space-y-2 pt-2">
+                   {subtotalExento > 0 && (
+                     <div className="flex justify-between items-center">
+                        <span className="text-xs font-black uppercase text-emerald-700 tracking-wider">Monto Exento (E)</span>
+                        <strong className="text-sm font-black text-emerald-700 font-mono">${subtotalExento.toFixed(2)}</strong>
+                     </div>
+                   )}
+                   {subtotalGravado > 0 && (
+                     <div className="flex justify-between items-center">
+                        <span className="text-xs font-black uppercase text-slate-600 tracking-wider">Base Gravable (G)</span>
+                        <strong className="text-sm font-black text-slate-800 font-mono">${subtotalGravado.toFixed(2)}</strong>
+                     </div>
+                   )}
                    <div className="flex justify-between items-center">
-                      <span className="text-sm font-black uppercase text-slate-500 tracking-widest">Base Imponible</span>
-                      <strong className="text-lg font-black text-slate-800 font-mono">${cartSubtotal.toFixed(2)}</strong>
+                      <span className="text-xs font-black uppercase text-slate-500 tracking-wider">Impuesto IVA (16%)</span>
+                      <strong className="text-sm font-black text-slate-800 font-mono">${cartIVA.toFixed(2)}</strong>
                    </div>
-                   <div className="flex justify-between items-center">
-                      <span className="text-sm font-black uppercase text-slate-500 tracking-widest">Impuesto IVA (16%)</span>
-                      <strong className="text-lg font-black text-slate-800 font-mono">${cartIVA.toFixed(2)}</strong>
-                   </div>
-                   <div className="flex justify-between items-center">
-                      <span className="text-sm font-black uppercase text-red-600 tracking-widest">Impuesto IGTF (3%)</span>
-                      <strong className="text-lg font-black text-red-600 font-mono">${cartIGTF.toFixed(2)}</strong>
-                   </div>
-                   <div className="border-t border-slate-100 pt-4">
+                   {cartIGTF > 0 && (
+                     <div className="flex justify-between items-center">
+                        <span className="text-xs font-black uppercase text-red-600 tracking-wider">IGTF Percibido Divisas (3%)</span>
+                        <strong className="text-sm font-black text-red-600 font-mono">${cartIGTF.toFixed(2)}</strong>
+                     </div>
+                   )}
+                   <div className="border-t border-slate-200 pt-3">
                       <div className="flex justify-between items-end">
-                         <span className="text-sm font-black uppercase tracking-widest text-[#0b5156]">Total Factura</span>
+                         <span className="text-sm font-black uppercase tracking-widest text-[#0b5156]">Total a Pagar</span>
                          <div className="text-right">
-                            <strong className="text-3xl font-black text-[#0b5156] font-mono tracking-tighter">${cartTotal.toFixed(2)}</strong>
-                            <p className="text-xs font-bold text-slate-500 uppercase mt-1 font-mono">Bs.S {cartTotalBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                            <strong className="text-2xl font-black text-[#0b5156] font-mono tracking-tighter block">${cartTotal.toFixed(2)}</strong>
+                            <span className="text-[11px] font-bold text-slate-500 font-mono">Bs. {cartTotalBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                          </div>
                       </div>
                    </div>
