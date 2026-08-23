@@ -5980,6 +5980,138 @@ def generar_nota_entrega_desde_venta(
     }
 
 
+@ventas_ext_router.get("/{id}/nota-entrega/pdf")
+def descargar_nota_entrega_pdf(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Genera y descarga la Nota de Entrega en formato PDF oficial."""
+    import io
+    from fastapi.responses import StreamingResponse
+    from backend.models.operations import Venta
+    from backend.models.erp_extended import NotaEntrega, Empresa
+    from backend.routers.entidades import _get_or_create_empresa, get_empresa_logo_image
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas
+    from reportlab.platypus import Table, TableStyle
+
+    venta = db.query(Venta).filter(
+        Venta.id == id,
+        Venta.tenant_id == current_user.tenant_id,
+    ).first()
+    if not venta:
+        raise HTTPException(status_code=404, detail="Venta no encontrada")
+
+    nota = db.query(NotaEntrega).filter(
+        NotaEntrega.tenant_id == current_user.tenant_id,
+        NotaEntrega.venta_id == id,
+    ).first()
+
+    numero_nota_str = nota.numero_nota if nota else f"NE-{datetime.now(timezone.utc).year}-{str(id).zfill(4)}"
+    empresa = _get_or_create_empresa(db, current_user)
+
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    ancho, alto = letter
+
+    # Logo
+    logo_reader = get_empresa_logo_image(empresa, current_user.tenant_id)
+    if logo_reader:
+        try:
+            c.drawImage(logo_reader, 50, alto - 90, width=120, height=50, preserveAspectRatio=True, mask='auto')
+        except Exception:
+            pass
+
+    # Cabecera Empresa
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(180, alto - 50, empresa.razon_social or empresa.nombre_comercial or "MI EMPRESA")
+    c.setFont("Helvetica", 9)
+    c.drawString(180, alto - 64, f"R.I.F.: {empresa.rif or 'N/A'}")
+    c.drawString(180, alto - 76, f"Dirección: {empresa.direccion or 'N/A'}")
+    c.drawString(180, alto - 88, f"Teléfono: {empresa.telefono or 'N/A'}")
+
+    # Título Documento
+    c.setFont("Helvetica-Bold", 16)
+    c.setFillColor(colors.HexColor("#0b5156"))
+    c.drawString(380, alto - 50, "NOTA DE ENTREGA")
+    c.setFillColor(colors.black)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(380, alto - 68, f"N° DOCUMENTO: {numero_nota_str}")
+    c.drawString(380, alto - 82, f"REF. FACTURA: {venta.numero_factura}")
+    c.setFont("Helvetica", 10)
+    c.drawString(380, alto - 96, f"FECHA: {venta.fecha.strftime('%d/%m/%Y')}")
+
+    # Línea divisoria
+    c.setLineWidth(1)
+    c.setStrokeColor(colors.HexColor("#e2e8f0"))
+    c.line(50, alto - 110, ancho - 50, alto - 110)
+
+    # Datos del Cliente / Despacho
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(50, alto - 130, "DATOS DE DESPACHO Y RECEPTOR:")
+    c.setFont("Helvetica", 10)
+    cliente_nombre = venta.cliente.nombre if venta.cliente else "CLIENTE GENERAL"
+    cliente_rif = venta.cliente.rif if venta.cliente else "N/A"
+    cliente_dir = venta.cliente.direccion if getattr(venta.cliente, 'direccion', None) else (empresa.direccion or "En tienda / Almacén Principal")
+    c.drawString(50, alto - 148, f"Cliente: {cliente_nombre}")
+    c.drawString(50, alto - 162, f"R.I.F. / C.I.: {cliente_rif}")
+    c.drawString(50, alto - 176, f"Destino de Entrega: {cliente_dir}")
+
+    # Tabla de Productos
+    c.line(50, alto - 195, ancho - 50, alto - 195)
+    data_tabla = [["ÍTEM", "CANT.", "DESCRIPCIÓN DEL PRODUCTO", "ESTADO ENTREGA"]]
+    
+    for idx, item in enumerate(venta.detalles, 1):
+        prod_nombre = item.producto.nombre if item.producto else "Producto"
+        cantidad = float(item.cantidad)
+        data_tabla.append([
+            str(idx),
+            f"{cantidad:.0f}",
+            prod_nombre.upper(),
+            "PENDIENTE / DESPACHADO"
+        ])
+
+    t = Table(data_tabla, colWidths=[40, 50, 300, 120])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#0b5156")),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,0), 9),
+        ('BOTTOMPADDING', (0,0), (-1,0), 6),
+        ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#f8fafc")),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cbd5e1")),
+        ('FONTNAME', (0,1), (-1,-1), 'Helvetica'),
+        ('FONTSIZE', (0,1), (-1,-1), 9),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+    ]))
+
+    tabla_alto = len(data_tabla) * 20
+    pos_y_tabla = alto - 215 - tabla_alto
+    t.wrapOn(c, ancho - 100, alto)
+    t.drawOn(c, 50, pos_y_tabla)
+
+    # Firmas
+    c.setLineWidth(0.8)
+    c.line(70, 90, 230, 90)
+    c.line(350, 90, 510, 90)
+    c.setFont("Helvetica-Bold", 8)
+    c.drawCentredString(150, 75, "ENTREGADO POR / ALMACÉN")
+    c.drawCentredString(430, 75, "RECIBIDO CONFORME (CLIENTE)")
+
+    c.showPage()
+    c.save()
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={numero_nota_str}.pdf"}
+    )
+
+
 # --- INVENTARIO EXTENDIDO ---
 inventario_ext_router = APIRouter(prefix="/inventario", tags=["Inventario"], dependencies=[Depends(get_current_user)])
 

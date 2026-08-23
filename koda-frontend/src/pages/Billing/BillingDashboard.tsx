@@ -145,10 +145,12 @@ const BillingDashboard = () => {
 
   const handleGenerarNotaEntrega = async (id: number) => {
     try {
-      const res: any = await api.post(`/ventas/${id}/generar-nota-entrega`, {});
-      alert(`Nota de entrega ${res.numero_nota} generada con éxito.`);
+      // 1. Asegurar que la nota de entrega esté registrada en base de datos
+      await api.post(`/ventas/${id}/generar-nota-entrega`, {}).catch(() => {});
+      // 2. Descargar inmediatamente el archivo PDF generado
+      await api.download(`/ventas/${id}/nota-entrega/pdf`, `NotaEntrega-${id}.pdf`);
     } catch (error: any) {
-      alert(error?.response?.data?.detail || error?.message || 'Error generando nota de entrega.');
+      alert(error?.message || 'Error descargando la nota de entrega.');
     }
   };
 
