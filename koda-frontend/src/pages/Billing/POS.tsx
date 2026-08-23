@@ -317,105 +317,104 @@ const POS = () => {
             </div>
           </div>
         ))}
+      {/* TOP: Contenedor Superior Alargado de Parámetros (Ancho Completo) */}
+      <section className="bg-white p-7 rounded-[2.5rem] border border-slate-200 shadow-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            
+            {/* 1. Identificación Cliente */}
+            <div className="flex flex-col space-y-2">
+               <div className="min-h-[22px] flex items-center justify-between">
+                  <label className="text-xs font-black text-slate-500 uppercase tracking-widest leading-none">Identificación Cliente</label>
+               </div>
+               <div className="flex items-center gap-2">
+                  <select
+                    value={client}
+                    onChange={(e) => setClient(e.target.value)}
+                    className="flex-1 min-w-0 h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors truncate"
+                  >
+                     {clientes.map((c) => (
+                       <option key={c.id} value={c.id.toString()}>
+                         {c.nombre} ({c.rif})
+                       </option>
+                     ))}
+                     {clientes.length === 0 && (
+                       <option value="">No hay clientes cargados</option>
+                     )}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setIsQuickCreateOpen(true)}
+                    className="h-12 px-4 bg-[#0b5156]/10 hover:bg-[#0b5156] text-[#0b5156] hover:text-white border border-[#0b5156]/20 hover:border-[#0b5156] rounded-2xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shrink-0 transition-all active:scale-95 shadow-xs"
+                    title="Crear cliente rápido"
+                  >
+                    <UserPlus size={15} />
+                    <span className="hidden sm:inline">+ Cliente</span>
+                  </button>
+               </div>
+            </div>
+
+            {/* 2. Vendedor */}
+            <div className="flex flex-col space-y-2">
+               <div className="min-h-[22px] flex items-center">
+                  <label className="text-xs font-black text-slate-500 uppercase tracking-widest leading-none">Vendedor (opcional)</label>
+               </div>
+               <select
+                 value={vendedorId}
+                 onChange={(e) => setVendedorId(e.target.value)}
+                 className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors"
+               >
+                  <option value="">Sin vendedor asignado</option>
+                  {vendedores.map((v) => (
+                    <option key={v.id} value={v.id.toString()}>
+                      {v.nombre} ({v.codigo})
+                    </option>
+                  ))}
+               </select>
+            </div>
+
+            {/* 3. Tarifa */}
+            <div className="flex flex-col space-y-2">
+               <div className="min-h-[22px] flex items-center">
+                  <label className="text-xs font-black text-slate-500 uppercase tracking-widest leading-none">Tarifa</label>
+               </div>
+               <select
+                 value={tarifa}
+                 onChange={(e) => setTarifa(e.target.value as Tarifa)}
+                 className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors"
+               >
+                  <option value="Mayor">Mayor</option>
+                  <option value="Detal">Detal</option>
+                  <option value="GranMayor">Gran Mayor</option>
+               </select>
+            </div>
+
+            {/* 4. Formato de Moneda del Documento */}
+            <div className="flex flex-col space-y-2">
+               <div className="min-h-[22px] flex items-center justify-between">
+                  <label className="text-xs font-black text-slate-500 uppercase tracking-widest leading-none">Moneda Documento</label>
+                  <span className="text-[9px] font-black text-[#0b5156] uppercase font-mono">
+                    {formatoDocumento === 'BIMONETARIO' ? 'USD + BS' : formatoDocumento === 'SOLO_USD' ? 'SOLO $' : 'SOLO BS'}
+                  </span>
+               </div>
+               <select
+                 value={formatoDocumento}
+                 onChange={(e) => setFormatoDocumento(e.target.value as any)}
+                 className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors"
+               >
+                  <option value="BIMONETARIO">🌐 Dólares + Bolívares</option>
+                  <option value="SOLO_USD">💵 Solo Divisas (USD $)</option>
+                  <option value="SOLO_VES">🇻🇪 Solo Bolívares (Bs.)</option>
+               </select>
+            </div>
+        </div>
       </section>
 
-      {/* Grid Layout */}
+      {/* Grid Layout: Catálogo de Productos a la Izquierda y Ticket Actual a la Derecha */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
         
-        {/* Left Column: Form & Catalog */}
+        {/* Left Column: Catálogo y Auditoría */}
         <div className="lg:col-span-2 space-y-6">
           
-          <section className="bg-white p-7 rounded-[2rem] border border-slate-200 shadow-sm">
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
-                
-                {/* 1. Identificación Cliente */}
-                <div className="flex flex-col space-y-2">
-                   <div className="min-h-[24px] flex items-center justify-between">
-                      <label className="text-xs font-black text-slate-500 uppercase tracking-widest leading-none">Identificación Cliente</label>
-                   </div>
-                   <div className="flex items-center gap-2">
-                      <select
-                        value={client}
-                        onChange={(e) => setClient(e.target.value)}
-                        className="flex-1 min-w-0 h-12 px-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors truncate"
-                      >
-                         {clientes.map((c) => (
-                           <option key={c.id} value={c.id.toString()}>
-                             {c.nombre} ({c.rif})
-                           </option>
-                         ))}
-                         {clientes.length === 0 && (
-                           <option value="">No hay clientes cargados</option>
-                         )}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={() => setIsQuickCreateOpen(true)}
-                        className="h-12 px-3.5 bg-[#0b5156]/10 hover:bg-[#0b5156] text-[#0b5156] hover:text-white border border-[#0b5156]/20 hover:border-[#0b5156] rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shrink-0 transition-all active:scale-95 shadow-xs"
-                        title="Crear cliente rápido"
-                      >
-                        <UserPlus size={15} />
-                        <span className="hidden sm:inline">+ Cliente</span>
-                      </button>
-                   </div>
-                </div>
-
-                {/* 2. Vendedor */}
-                <div className="flex flex-col space-y-2">
-                   <div className="min-h-[24px] flex items-center">
-                      <label className="text-xs font-black text-slate-500 uppercase tracking-widest leading-none">Vendedor (opcional)</label>
-                   </div>
-                   <select
-                     value={vendedorId}
-                     onChange={(e) => setVendedorId(e.target.value)}
-                     className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors"
-                   >
-                      <option value="">Sin vendedor asignado</option>
-                      {vendedores.map((v) => (
-                        <option key={v.id} value={v.id.toString()}>
-                          {v.nombre} ({v.codigo})
-                        </option>
-                      ))}
-                   </select>
-                </div>
-
-                {/* 3. Tarifa */}
-                <div className="flex flex-col space-y-2">
-                   <div className="min-h-[24px] flex items-center">
-                      <label className="text-xs font-black text-slate-500 uppercase tracking-widest leading-none">Tarifa</label>
-                   </div>
-                   <select
-                     value={tarifa}
-                     onChange={(e) => setTarifa(e.target.value as Tarifa)}
-                     className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors"
-                   >
-                      <option value="Mayor">Mayor</option>
-                      <option value="Detal">Detal</option>
-                      <option value="GranMayor">Gran Mayor</option>
-                   </select>
-                </div>
-
-                {/* 4. Formato de Moneda del Documento */}
-                <div className="flex flex-col space-y-2">
-                   <div className="min-h-[24px] flex items-center justify-between">
-                      <label className="text-xs font-black text-slate-500 uppercase tracking-widest leading-none">Moneda Documento</label>
-                      <span className="text-[9px] font-black text-[#0b5156] uppercase font-mono">
-                        {formatoDocumento === 'BIMONETARIO' ? 'USD + BS' : formatoDocumento === 'SOLO_USD' ? 'SOLO $' : 'SOLO BS'}
-                      </span>
-                   </div>
-                   <select
-                     value={formatoDocumento}
-                     onChange={(e) => setFormatoDocumento(e.target.value as any)}
-                     className="w-full h-12 px-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors"
-                   >
-                      <option value="BIMONETARIO">🌐 Dólares + Bolívares</option>
-                      <option value="SOLO_USD">💵 Solo Divisas (USD $)</option>
-                      <option value="SOLO_VES">🇻🇪 Solo Bolívares (Bs.)</option>
-                   </select>
-                </div>
-            </div>
-          </section>
-
           <section className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
             <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
                <div className="flex items-center gap-3">
