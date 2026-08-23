@@ -180,6 +180,7 @@ def emitir_factura_fiscal(
             moneda_documento=moneda,
             dias_credito=0,
             vendedor_id=body.vendedor_id,
+            tasa_personalizada=body.tasa_cambio_bs,
         )
 
         now = resultado.venta.fecha

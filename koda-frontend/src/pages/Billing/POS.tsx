@@ -47,6 +47,8 @@ const POS = () => {
   const [vendedorId, setVendedorId] = useState('');
   const [tarifa, setTarifa] = useState<Tarifa>('Detal');
   const [metodoPago, setMetodoPago] = useState<'Efectivo' | 'Divisa' | 'Transferencia' | 'PagoMovil'>('Divisa');
+  const [tipoTasa, setTipoTasa] = useState<'BCV' | 'PERSONALIZADA'>('BCV');
+  const [tasaPersonalizada, setTasaPersonalizada] = useState<string>('');
   const [toast, setToast] = useState<{message: string, type: 'error' | 'success'} | null>(null);
   const [isQuickCreateOpen, setIsQuickCreateOpen] = useState(false);
 
@@ -54,6 +56,10 @@ const POS = () => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   };
+
+  const tasaEfectiva = tipoTasa === 'PERSONALIZADA' && parseFloat(tasaPersonalizada) > 0
+    ? parseFloat(tasaPersonalizada)
+    : (tasaBCV || 0);
 
   const fetchContext = () => {
     // 1. Obtener productos directamente desde /productos para total sincronización con el inventario
@@ -68,6 +74,7 @@ const POS = () => {
           precio_mayor: p.precio_mayor != null ? Number(p.precio_mayor) : null,
           precio_gran_mayor: p.precio_gran_mayor != null ? Number(p.precio_gran_mayor) : null,
           stock: Number(p.stock) || 0,
+          es_exento: Boolean(p.es_exento),
         })));
       }
     }).catch(() => {});
@@ -75,7 +82,10 @@ const POS = () => {
     // 2. Obtener tasa oficial activa en tiempo real desde /tasa/actual
     api.get<any>('/tasa/actual').then((tData) => {
       const tVal = Number(tData?.valor_ves || tData?.tasa || 0);
-      if (tVal > 0) setTasaBCV(tVal);
+      if (tVal > 0) {
+        setTasaBCV(tVal);
+        setTasaPersonalizada(String(tVal));
+      }
     }).catch(() => {});
 
     // 3. Obtener métricas y tickets recientes
@@ -162,8 +172,8 @@ const POS = () => {
       showToast("Debe seleccionar un cliente para emitir la factura.");
       return;
     }
-    if (!tasaBCV || tasaBCV <= 0) {
-      showToast("No hay tasa BCV vigente. La facturación está bloqueada por seguridad fiscal.");
+    if (!tasaEfectiva || tasaEfectiva <= 0) {
+      showToast("No hay tasa de cambio válida. Ingrese una tasa válida para continuar.");
       return;
     }
 
@@ -172,6 +182,7 @@ const POS = () => {
       metodo_pago: metodoPago,
       aplica_igtf: metodoPago === 'Divisa',
       moneda_documento: (metodoPago === 'Transferencia' || metodoPago === 'PagoMovil' || metodoPago === 'Efectivo') ? 'VED' : 'USD',
+      tasa_cambio_bs: tasaEfectiva,
       vendedor_id: vendedorId ? parseInt(vendedorId, 10) : null,
       detalles: cart.map(item => ({
         producto_id: item.id,
@@ -271,96 +282,139 @@ const POS = () => {
             </div>
           </div>
         ))}
-      </section>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+      {/* Grid Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+        
+        {/* Left Column: Form & Catalog */}
         <div className="lg:col-span-2 space-y-6">
-          <section className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
-            <h3 className="text-xl font-black uppercase tracking-tight text-slate-800 font-mono">Búsqueda de Rubros</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-start">
-               {/* 1. Código / SKU / Nombre */}
-               <div className="flex flex-col space-y-2">
-                  <div className="min-h-[22px] flex items-center">
-                     <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Código / SKU / Nombre</label>
-                  </div>
-                  <div className="relative">
-                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
-                     <input 
-                       type="text" 
-                       value={searchTerm} 
-                       onChange={(e) => setSearchTerm(e.target.value)} 
-                       placeholder="BUSCAR PRODUCTO..." 
-                       className="w-full h-11 pl-10 pr-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors" 
-                     />
-                  </div>
-               </div>
+          
+          <section className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+                
+                {/* 1. Buscar Producto */}
+                <div className="flex flex-col space-y-2">
+                   <div className="min-h-[22px] flex items-center">
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Buscar</label>
+                   </div>
+                   <div className="relative">
+                      <Search className="absolute left-3.5 top-3.5 text-slate-400" size={16} />
+                      <input 
+                        type="text" 
+                        value={searchTerm} 
+                        onChange={(e) => setSearchTerm(e.target.value)} 
+                        placeholder="BUSCAR PRODUCTO..." 
+                        className="w-full h-11 pl-10 pr-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors" 
+                      />
+                   </div>
+                </div>
 
-               {/* 2. Identificación Cliente */}
-               <div className="flex flex-col space-y-2">
-                  <div className="min-h-[22px] flex items-center justify-between">
-                     <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Identificación Cliente</label>
-                  </div>
-                  <div className="flex items-center gap-2">
-                     <select
-                       value={client}
-                       onChange={(e) => setClient(e.target.value)}
-                       className="flex-1 min-w-0 h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors truncate"
-                     >
-                        {clientes.map((c) => (
-                          <option key={c.id} value={c.id.toString()}>
-                            {c.nombre} ({c.rif})
-                          </option>
-                        ))}
-                        {clientes.length === 0 && (
-                          <option value="">No hay clientes cargados</option>
-                        )}
-                     </select>
-                     <button
-                       type="button"
-                       onClick={() => setIsQuickCreateOpen(true)}
-                       className="h-11 px-3 bg-[#0b5156]/10 hover:bg-[#0b5156] text-[#0b5156] hover:text-white border border-[#0b5156]/20 hover:border-[#0b5156] rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shrink-0 transition-all active:scale-95 shadow-xs"
-                       title="Crear cliente rápido"
-                     >
-                       <UserPlus size={14} />
-                       <span className="hidden sm:inline">+ Cliente</span>
-                     </button>
-                  </div>
-               </div>
+                {/* 2. Identificación Cliente */}
+                <div className="flex flex-col space-y-2">
+                   <div className="min-h-[22px] flex items-center justify-between">
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Identificación Cliente</label>
+                   </div>
+                   <div className="flex items-center gap-2">
+                      <select
+                        value={client}
+                        onChange={(e) => setClient(e.target.value)}
+                        className="flex-1 min-w-0 h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors truncate"
+                      >
+                         {clientes.map((c) => (
+                           <option key={c.id} value={c.id.toString()}>
+                             {c.nombre} ({c.rif})
+                           </option>
+                         ))}
+                         {clientes.length === 0 && (
+                           <option value="">No hay clientes cargados</option>
+                         )}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => setIsQuickCreateOpen(true)}
+                        className="h-11 px-3 bg-[#0b5156]/10 hover:bg-[#0b5156] text-[#0b5156] hover:text-white border border-[#0b5156]/20 hover:border-[#0b5156] rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shrink-0 transition-all active:scale-95 shadow-xs"
+                        title="Crear cliente rápido"
+                      >
+                        <UserPlus size={14} />
+                        <span className="hidden sm:inline">+ Cliente</span>
+                      </button>
+                   </div>
+                </div>
 
-               {/* 3. Vendedor */}
-               <div className="flex flex-col space-y-2">
-                  <div className="min-h-[22px] flex items-center">
-                     <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Vendedor (opcional)</label>
-                  </div>
-                  <select
-                    value={vendedorId}
-                    onChange={(e) => setVendedorId(e.target.value)}
-                    className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors"
-                  >
-                     <option value="">Sin vendedor asignado</option>
-                     {vendedores.map((v) => (
-                       <option key={v.id} value={v.id.toString()}>
-                         {v.nombre} ({v.codigo})
-                       </option>
-                     ))}
-                  </select>
-               </div>
+                {/* 3. Vendedor */}
+                <div className="flex flex-col space-y-2">
+                   <div className="min-h-[22px] flex items-center">
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Vendedor (opcional)</label>
+                   </div>
+                   <select
+                     value={vendedorId}
+                     onChange={(e) => setVendedorId(e.target.value)}
+                     className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors"
+                   >
+                      <option value="">Sin vendedor asignado</option>
+                      {vendedores.map((v) => (
+                        <option key={v.id} value={v.id.toString()}>
+                          {v.nombre} ({v.codigo})
+                        </option>
+                      ))}
+                   </select>
+                </div>
 
-               {/* 4. Tarifa */}
-               <div className="flex flex-col space-y-2">
-                  <div className="min-h-[22px] flex items-center">
-                     <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Tarifa</label>
-                  </div>
-                  <select
-                    value={tarifa}
-                    onChange={(e) => setTarifa(e.target.value as Tarifa)}
-                    className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors"
-                  >
-                     <option value="Mayor">Mayor</option>
-                     <option value="Detal">Detal</option>
-                     <option value="GranMayor">Gran Mayor</option>
-                  </select>
-               </div>
+                {/* 4. Tarifa */}
+                <div className="flex flex-col space-y-2">
+                   <div className="min-h-[22px] flex items-center">
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Tarifa</label>
+                   </div>
+                   <select
+                     value={tarifa}
+                     onChange={(e) => setTarifa(e.target.value as Tarifa)}
+                     className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors"
+                   >
+                      <option value="Mayor">Mayor</option>
+                      <option value="Detal">Detal</option>
+                      <option value="GranMayor">Gran Mayor</option>
+                   </select>
+                </div>
+
+                {/* 5. Tasa de Cambio de Transacción */}
+                <div className="flex flex-col space-y-2">
+                   <div className="min-h-[22px] flex items-center justify-between">
+                      <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Tasa de Cambio</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (tipoTasa === 'BCV') {
+                            setTipoTasa('PERSONALIZADA');
+                          } else {
+                            setTipoTasa('BCV');
+                            setTasaPersonalizada(String(tasaBCV || ''));
+                          }
+                        }}
+                        className="text-[10px] font-black text-[#0b5156] hover:underline uppercase"
+                        title="Alternar entre tasa BCV y personalizada"
+                      >
+                        {tipoTasa === 'BCV' ? 'Manual ✎' : 'Auto BCV'}
+                      </button>
+                   </div>
+                   {tipoTasa === 'BCV' ? (
+                     <div className="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-[#0b5156] flex items-center justify-between font-mono">
+                        <span>BCV Oficial</span>
+                        <strong>Bs. {tasaBCV ? tasaBCV.toFixed(2) : '0.00'}</strong>
+                     </div>
+                   ) : (
+                     <div className="relative">
+                        <span className="absolute left-3 top-3 text-xs font-bold text-slate-400 font-mono">Bs.</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={tasaPersonalizada}
+                          onChange={(e) => setTasaPersonalizada(e.target.value)}
+                          placeholder="779.95"
+                          className="w-full h-11 pl-9 pr-3 bg-white border border-[#0b5156] rounded-xl text-xs font-black text-[#0b5156] font-mono focus:outline-none shadow-xs"
+                          title="Tasa de cambio personalizada para esta venta"
+                        />
+                     </div>
+                   )}
+                </div>
             </div>
           </section>
 

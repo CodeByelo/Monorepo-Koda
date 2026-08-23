@@ -4799,26 +4799,45 @@ def descargar_factura_pdf(
     c.setFont("Helvetica", 10)
     cliente_nombre = venta.cliente.nombre if venta.cliente else "CLIENTE GENERAL"
     cliente_rif = venta.cliente.rif if venta.cliente else "N/A"
+    es_pago_bolivares_puro = (venta.metodo_pago in ["Efectivo", "Transferencia", "PagoMovil"]) and float(venta.igtf_usd) <= 0
+    tasa_val = float(venta.tasa_cambio_bs) if float(venta.tasa_cambio_bs) > 0 else 1.0
+
     c.drawString(50, alto - 148, f"Razón Social: {cliente_nombre}")
     c.drawString(50, alto - 162, f"R.I.F. / C.I.: {cliente_rif}")
     c.drawString(50, alto - 176, f"Método de Pago: {venta.metodo_pago}")
-    c.drawString(50, alto - 190, f"Tasa de Cambio: Bs. {float(venta.tasa_cambio_bs):.2f}")
+    if not es_pago_bolivares_puro:
+        c.drawString(50, alto - 190, f"Tasa de Cambio: Bs. {tasa_val:.2f}")
     
     # Tabla de Detalles
     c.line(50, alto - 210, ancho - 50, alto - 210)
     
-    data_tabla = [["CANT.", "DESCRIPCIÓN PRODUCTO", "PRECIO (USD)", "TOTAL (USD)"]]
+    if es_pago_bolivares_puro:
+        data_tabla = [["CANT.", "DESCRIPCIÓN PRODUCTO", "PRECIO (Bs.)", "TOTAL (Bs.)"]]
+    else:
+        data_tabla = [["CANT.", "DESCRIPCIÓN PRODUCTO", "PRECIO (USD)", "TOTAL (USD)"]]
+
     for item in venta.detalles:
         prod_nombre = item.producto.nombre if item.producto else "Producto"
-        precio = float(item.precio_usd_capturado)
+        precio_usd = float(item.precio_usd_capturado)
         cantidad = float(item.cantidad)
-        sub_total_linea = precio * cantidad
-        data_tabla.append([
-            f"{cantidad:.0f}",
-            prod_nombre.upper(),
-            f"${precio:.2f}",
-            f"${sub_total_linea:.2f}"
-        ])
+        
+        if es_pago_bolivares_puro:
+            precio_bs = precio_usd * tasa_val
+            sub_total_linea_bs = precio_bs * cantidad
+            data_tabla.append([
+                f"{cantidad:.0f}",
+                prod_nombre.upper(),
+                f"Bs. {precio_bs:,.2f}",
+                f"Bs. {sub_total_linea_bs:,.2f}"
+            ])
+        else:
+            sub_total_linea = precio_usd * cantidad
+            data_tabla.append([
+                f"{cantidad:.0f}",
+                prod_nombre.upper(),
+                f"${precio_usd:.2f}",
+                f"${sub_total_linea:.2f}"
+            ])
         
     t = Table(data_tabla, colWidths=[50, 260, 100, 100])
     t.setStyle(TableStyle([
@@ -4847,35 +4866,51 @@ def descargar_factura_pdf(
     c.setLineWidth(1)
     c.line(50, pos_y_totales, ancho - 50, pos_y_totales)
     
-    subtotal = float(venta.subtotal_usd)
-    iva = float(venta.iva_usd)
-    igtf = float(venta.igtf_usd)
+    subtotal_usd = float(venta.subtotal_usd)
+    iva_usd = float(venta.iva_usd)
+    igtf_usd = float(venta.igtf_usd)
     total_usd = float(venta.total_usd)
-    total_bs = total_usd * float(venta.tasa_cambio_bs)
+    total_bs = total_usd * tasa_val
     
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(350, pos_y_totales - 20, "SUBTOTAL (USD):")
-    c.drawRightString(ancho - 50, pos_y_totales - 20, f"${subtotal:.2f}")
-    
-    c.drawString(350, pos_y_totales - 35, "I.V.A. (16% USD):")
-    c.drawRightString(ancho - 50, pos_y_totales - 35, f"${iva:.2f}")
-    
-    if igtf > 0:
-        c.drawString(350, pos_y_totales - 50, "I.G.T.F. (3% USD):")
-        c.drawRightString(ancho - 50, pos_y_totales - 50, f"${igtf:.2f}")
-        offset_y = 65
-    else:
-        offset_y = 50
+    if es_pago_bolivares_puro:
+        subtotal_bs = subtotal_usd * tasa_val
+        iva_bs = iva_usd * tasa_val
         
-    c.setFont("Helvetica-Bold", 11)
-    c.setFillColor(colors.HexColor("#0b5156"))
-    c.drawString(350, pos_y_totales - offset_y, "TOTAL GENERAL (USD):")
-    c.drawRightString(ancho - 50, pos_y_totales - offset_y, f"${total_usd:.2f}")
-    
-    c.setFont("Helvetica-Bold", 10)
-    c.setFillColor(colors.HexColor("#1e293b"))
-    c.drawString(350, pos_y_totales - offset_y - 18, "TOTAL GENERAL (Bs.):")
-    c.drawRightString(ancho - 50, pos_y_totales - offset_y - 18, f"Bs. {total_bs:.2f}")
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(350, pos_y_totales - 20, "SUBTOTAL (Bs.):")
+        c.drawRightString(ancho - 50, pos_y_totales - 20, f"Bs. {subtotal_bs:,.2f}")
+        
+        c.drawString(350, pos_y_totales - 35, "I.V.A. (16% Bs.):")
+        c.drawRightString(ancho - 50, pos_y_totales - 35, f"Bs. {iva_bs:,.2f}")
+        
+        c.setFont("Helvetica-Bold", 12)
+        c.setFillColor(colors.HexColor("#0b5156"))
+        c.drawString(350, pos_y_totales - 55, "TOTAL GENERAL (Bs.):")
+        c.drawRightString(ancho - 50, pos_y_totales - 55, f"Bs. {total_bs:,.2f}")
+    else:
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(350, pos_y_totales - 20, "SUBTOTAL (USD):")
+        c.drawRightString(ancho - 50, pos_y_totales - 20, f"${subtotal_usd:.2f}")
+        
+        c.drawString(350, pos_y_totales - 35, "I.V.A. (16% USD):")
+        c.drawRightString(ancho - 50, pos_y_totales - 35, f"${iva_usd:.2f}")
+        
+        if igtf_usd > 0:
+            c.drawString(350, pos_y_totales - 50, "I.G.T.F. PERCIBIDO (3%):")
+            c.drawRightString(ancho - 50, pos_y_totales - 50, f"${igtf_usd:.2f}")
+            offset_y = 65
+        else:
+            offset_y = 50
+            
+        c.setFont("Helvetica-Bold", 11)
+        c.setFillColor(colors.HexColor("#0b5156"))
+        c.drawString(350, pos_y_totales - offset_y, "TOTAL GENERAL (USD):")
+        c.drawRightString(ancho - 50, pos_y_totales - offset_y, f"${total_usd:.2f}")
+        
+        c.setFont("Helvetica-Bold", 10)
+        c.setFillColor(colors.HexColor("#1e293b"))
+        c.drawString(350, pos_y_totales - offset_y - 18, "TOTAL EQUIVALENTE (Bs.):")
+        c.drawRightString(ancho - 50, pos_y_totales - offset_y - 18, f"Bs. {total_bs:,.2f}")
     
     # Pie de Página Legal
     c.setFillColor(colors.black)
@@ -5001,13 +5036,16 @@ def descargar_ticket_pdf(
     dibujar("cliente", f"Cliente: {cliente_nombre}{cliente_rif}")
     c.line(4 * mm, y_cli - 4, ANCHO - 4 * mm, y_cli - 4)
 
-    # --- Tabla de productos: Producto | Cantidad | Total (Ref) ---
+    es_pago_bolivares_puro = (venta.metodo_pago in ["Efectivo", "Transferencia", "PagoMovil"]) and float(venta.igtf_usd) <= 0
+    tasa_val = float(venta.tasa_cambio_bs) if float(venta.tasa_cambio_bs) > 0 else 1.0
+
+    # --- Tabla de productos: Producto | Cantidad | Total ---
     y = y_cli - 14
     tam_tabla = cfg["tabla_productos_inicio"].get("font_size", 8)
     c.setFont("Helvetica-Bold", tam_tabla)
     c.drawString(4 * mm, y, "Producto")
     c.drawCentredString(ANCHO / 2 + 6 * mm, y, "Cant.")
-    c.drawRightString(ANCHO - 4 * mm, y, "Total ($)")
+    c.drawRightString(ANCHO - 4 * mm, y, "Total (Bs.)" if es_pago_bolivares_puro else "Total ($)")
     y -= 4
     c.line(4 * mm, y, ANCHO - 4 * mm, y)
     y -= (tam_tabla + 3)
@@ -5019,32 +5057,41 @@ def descargar_ticket_pdf(
 
     for item in venta.detalles:
         prod_nombre = item.producto.nombre if item.producto else "Producto"
-        precio = float(item.precio_usd_capturado)
+        precio_usd = float(item.precio_usd_capturado)
         cantidad = float(item.cantidad)
-        total_item = precio * cantidad
+        total_item_usd = precio_usd * cantidad
         
         # Indicador de Gravabilidad Legal (E) Exento o (G) Gravado 16%
         es_exento = getattr(item.producto, "es_exento", False)
         if es_exento:
-            subtotal_exento_calc += total_item
+            subtotal_exento_calc += total_item_usd
             tag_iva = " (E)"
         else:
-            subtotal_gravado_calc += total_item
+            subtotal_gravado_calc += total_item_usd
             tag_iva = " (G)"
 
         # Comprobar si se vendió con descuento sobre tarifa
         if item.producto and item.producto.precio_usd:
             precio_base = float(item.producto.precio_usd)
-            if precio_base > precio:
-                total_descuento_usd += (precio_base - precio) * cantidad
+            if precio_base > precio_usd:
+                total_descuento_usd += (precio_base - precio_usd) * cantidad
 
         c.drawString(4 * mm, y, f"{prod_nombre[:18]}{tag_iva}")
         c.drawCentredString(ANCHO / 2 + 6 * mm, y, f"{cantidad:g}")
-        c.drawRightString(ANCHO - 4 * mm, y, f"${total_item:.2f}")
+        
+        if es_pago_bolivares_puro:
+            total_item_bs = total_item_usd * tasa_val
+            c.drawRightString(ANCHO - 4 * mm, y, f"Bs.{total_item_bs:,.2f}")
+        else:
+            c.drawRightString(ANCHO - 4 * mm, y, f"${total_item_usd:.2f}")
+
         y -= (tam_tabla + 2)
         # Detalle de precio unitario
         c.setFont("Helvetica", max(6, tam_tabla - 2))
-        c.drawString(4 * mm, y, f"  Ref. unitaria: ${precio:.2f}")
+        if es_pago_bolivares_puro:
+            c.drawString(4 * mm, y, f"  P. Unit: Bs. {precio_usd * tasa_val:,.2f}")
+        else:
+            c.drawString(4 * mm, y, f"  Ref. unitaria: ${precio_usd:.2f}")
         c.setFont("Helvetica", tam_tabla)
         y -= (tam_tabla + 3)
 
@@ -5056,7 +5103,6 @@ def descargar_ticket_pdf(
     iva_val = float(venta.iva_usd)
     igtf_val = float(venta.igtf_usd)
     total_val = float(venta.total_usd)
-    tasa_val = float(venta.tasa_cambio_bs)
     total_bs_val = total_val * tasa_val
 
     def fila_total(etiqueta, valor_str, es_bold=False, tam=8):
@@ -5066,24 +5112,32 @@ def descargar_ticket_pdf(
         c.drawRightString(ANCHO - 4 * mm, y, valor_str)
         y -= (tam + 3)
 
-    fila_total("Subtotal Bruto:", f"${subtotal_val:.2f}")
-    if total_descuento_usd > 0:
-        fila_total("Descuento Comercial:", f"-${total_descuento_usd:.2f}")
-    
-    if subtotal_exento_calc > 0:
-        fila_total("Monto Exento (E):", f"${subtotal_exento_calc:.2f}")
-    if subtotal_gravado_calc > 0:
-        fila_total("Base Imponible (G):", f"${subtotal_gravado_calc:.2f}")
+    if es_pago_bolivares_puro:
+        fila_total("Subtotal (Bs.):", f"Bs. {subtotal_val * tasa_val:,.2f}")
+        if subtotal_exento_calc > 0:
+            fila_total("Monto Exento (E):", f"Bs. {subtotal_exento_calc * tasa_val:,.2f}")
+        if subtotal_gravado_calc > 0:
+            fila_total("Base Imponible (G):", f"Bs. {subtotal_gravado_calc * tasa_val:,.2f}")
+        fila_total("IVA (16% Bs.):", f"Bs. {iva_val * tasa_val:,.2f}")
+        fila_total("TOTAL A PAGAR (Bs.):", f"Bs. {total_bs_val:,.2f}", es_bold=True, tam=10)
+    else:
+        fila_total("Subtotal Bruto:", f"${subtotal_val:.2f}")
+        if total_descuento_usd > 0:
+            fila_total("Descuento Comercial:", f"-${total_descuento_usd:.2f}")
+        
+        if subtotal_exento_calc > 0:
+            fila_total("Monto Exento (E):", f"${subtotal_exento_calc:.2f}")
+        if subtotal_gravado_calc > 0:
+            fila_total("Base Imponible (G):", f"${subtotal_gravado_calc:.2f}")
 
-    fila_total("IVA (16%):", f"${iva_val:.2f}")
-    
-    # IGTF: Únicamente visible si la venta generó percepción legal IGTF
-    if igtf_val > 0:
-        fila_total("IGTF Percibido (3%):", f"${igtf_val:.2f}")
-    
-    fila_total("TOTAL A PAGAR (USD):", f"${total_val:.2f}", es_bold=True, tam=10)
-    fila_total("Tasa Oficial BCV:", f"Bs. {tasa_val:.2f}", tam=8)
-    fila_total("TOTAL EN BOLÍVARES (Bs.):", f"Bs. {total_bs_val:.2f}", es_bold=True, tam=9)
+        fila_total("IVA (16%):", f"${iva_val:.2f}")
+        
+        if igtf_val > 0:
+            fila_total("IGTF Percibido (3%):", f"${igtf_val:.2f}")
+        
+        fila_total("TOTAL A PAGAR (USD):", f"${total_val:.2f}", es_bold=True, tam=10)
+        fila_total("Tasa de Cambio:", f"Bs. {tasa_val:,.2f}", tam=8)
+        fila_total("TOTAL EN BOLÍVARES:", f"Bs. {total_bs_val:,.2f}", es_bold=True, tam=9)
 
     y -= 4
     c.line(4 * mm, y + 2, ANCHO - 4 * mm, y + 2)

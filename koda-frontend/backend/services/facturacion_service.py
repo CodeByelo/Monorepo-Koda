@@ -134,13 +134,19 @@ def procesar_emision_factura(
     moneda_documento: Optional[str],
     dias_credito: int = 0,
     vendedor_id: Optional[int] = None,
+    tasa_personalizada: Optional[Decimal] = None,
 ) -> ResultadoFactura:
     if not lineas:
         raise ValueError("La factura debe tener al menos un detalle.")
 
     tenant_id = current_user.tenant_id
 
-    tasa_bs = _obtener_tasa_bs(db, current_user)
+    # Si se especificó una tasa personalizada positiva, usarla; sino obtener la oficial del día
+    if tasa_personalizada is not None and tasa_personalizada > 0:
+        tasa_bs = Decimal(str(tasa_personalizada))
+    else:
+        tasa_bs = _obtener_tasa_bs(db, current_user)
+
     tasa_iva, tasa_igtf = _obtener_tasas_fiscales(db)
 
     # --- Clasificación gravado/exento (sin redondear por línea, para no
