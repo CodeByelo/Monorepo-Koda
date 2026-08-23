@@ -282,6 +282,8 @@ const POS = () => {
             </div>
           </div>
         ))}
+      </section>
+
       {/* Grid Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
         
