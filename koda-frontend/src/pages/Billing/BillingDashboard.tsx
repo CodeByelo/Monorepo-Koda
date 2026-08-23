@@ -126,12 +126,20 @@ const BillingDashboard = () => {
     }
   };
 
-  const handleDownloadPdf = (id: number) => {
-    window.open(`/ventas/${id}/pdf`, '_blank');
+  const handleDownloadPdf = async (id: number) => {
+    try {
+      await api.download(`/ventas/${id}/pdf`, `Factura-${id}.pdf`);
+    } catch (error: any) {
+      alert(error?.message || 'Error descargando la factura en PDF.');
+    }
   };
 
-  const handleDownloadTicket = (id: number) => {
-    window.open(`/ventas/${id}/ticket`, '_blank');
+  const handleDownloadTicket = async (id: number) => {
+    try {
+      await api.download(`/ventas/${id}/ticket`, `Ticket-${id}.pdf`);
+    } catch (error: any) {
+      alert(error?.message || 'Error descargando el ticket.');
+    }
   };
 
   const handleGenerarNotaEntrega = async (id: number) => {
@@ -139,7 +147,7 @@ const BillingDashboard = () => {
       const res: any = await api.post(`/ventas/${id}/generar-nota-entrega`, {});
       alert(`Nota de entrega ${res.numero_nota} generada con éxito.`);
     } catch (error: any) {
-      alert(error.message || 'Error generando nota de entrega.');
+      alert(error?.response?.data?.detail || error?.message || 'Error generando nota de entrega.');
     }
   };
 

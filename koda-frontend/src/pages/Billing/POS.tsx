@@ -107,12 +107,11 @@ const POS = () => {
       const clientList = data || [];
       setClientes(clientList);
       if (clientList.length > 0) {
-        const cf = clientList.find(c => c.rif === 'G-00000000-0' || c.nombre.toLowerCase().includes('consumidor'));
-        if (cf) {
-          setClient(cf.id.toString());
-        } else {
-          setClient(clientList[0].id.toString());
-        }
+        setClient((prev) => {
+          if (prev) return prev;
+          const cf = clientList.find(c => c.rif === 'G-00000000-0' || c.nombre.toLowerCase().includes('consumidor'));
+          return cf ? cf.id.toString() : clientList[0].id.toString();
+        });
       }
     }).catch(() => setClientes([]));
 
