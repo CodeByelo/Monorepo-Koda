@@ -317,6 +317,8 @@ const POS = () => {
             </div>
           </div>
         ))}
+      </section>
+
       {/* TOP: Contenedor Superior Alargado de Parámetros (Ancho Completo) */}
       <section className="bg-white p-7 rounded-[2.5rem] border border-slate-200 shadow-sm">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
