@@ -51,69 +51,16 @@ from backend.routers import logistica as logistica_router
 from backend.utils.seed_extended import seed_extended_data
 from sqlalchemy import text
 
-# Asegurar que todos los modelos están registrados en Base antes de create_all
-try:
-    Base.metadata.create_all(bind=engine, checkfirst=True)
-except Exception as create_err:
-    pass
-
-# Intentar migrar la base de datos agregando columnas de forma segura
-try:
-    with engine.begin() as connection:
-        sql_nominas = "ALTER TABLE nominas ADD COLUMN total_inces_usd NUMERIC(15, 2) DEFAULT 0.00" if engine.name == "sqlite" else "ALTER TABLE public.nominas ADD COLUMN IF NOT EXISTS total_inces_usd NUMERIC(15, 2) DEFAULT 0.00 NOT NULL"
-        connection.execute(text(sql_nominas))
-except Exception:
-    pass
-
-try:
-    with engine.begin() as connection:
-        sql_profiles = "ALTER TABLE profiles ADD COLUMN telegram_chat_id VARCHAR(50)" if engine.name == "sqlite" else "ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS telegram_chat_id VARCHAR(50)"
-        connection.execute(text(sql_profiles))
-        if engine.name != "sqlite":
-            connection.execute(text("ALTER TABLE public.productos ADD COLUMN IF NOT EXISTS imagen_url TEXT;"))
-            connection.execute(text("ALTER TABLE public.empresa ADD COLUMN IF NOT EXISTS logo_url VARCHAR(500);"))
-            connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS vendedor_id INTEGER;"))
-            connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS retencion_iva_usd NUMERIC(15,2) DEFAULT 0.00;"))
-            connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS igtf_usd NUMERIC(15,2) DEFAULT 0.00;"))
-            connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS creado_por UUID;"))
-            connection.execute(text("ALTER TABLE public.notas_entrega ADD COLUMN IF NOT EXISTS venta_id INTEGER REFERENCES public.ventas(id);"))
-            connection.execute(text("""
-                CREATE TABLE IF NOT EXISTS public.plantillas_documento (
-                    id SERIAL PRIMARY KEY,
-                    tenant_id UUID,
-                    tipo_documento VARCHAR(30) NOT NULL DEFAULT 'ticket',
-                    config JSON NOT NULL,
-                    actualizado_por UUID,
-                    updated_at TIMESTAMP,
-                    CONSTRAINT _tenant_plantilla_tipo_uc UNIQUE (tenant_id, tipo_documento)
-                );
-            """))
-            # Migración para que correlativos_fiscales sea único por (tenant_id, tipo_documento) y no global
-            connection.execute(text("DROP INDEX IF EXISTS public.ix_public_correlativos_fiscales_tipo_documento;"))
-            connection.execute(text("DROP INDEX IF EXISTS public.ix_correlativos_fiscales_tipo_documento;"))
-            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_correlativos_fiscales_tipo_documento ON public.correlativos_fiscales (tipo_documento);"))
-            connection.execute(text("ALTER TABLE public.correlativos_fiscales DROP CONSTRAINT IF EXISTS _tenant_correlativos_tipo_doc_uc;"))
-            connection.execute(text("ALTER TABLE public.correlativos_fiscales ADD CONSTRAINT _tenant_correlativos_tipo_doc_uc UNIQUE (tenant_id, tipo_documento);"))
-        else:
-            for col_sql in [
-                "ALTER TABLE productos ADD COLUMN imagen_url TEXT",
-                "ALTER TABLE ventas ADD COLUMN vendedor_id INTEGER",
-                "ALTER TABLE ventas ADD COLUMN retencion_iva_usd NUMERIC(15,2) DEFAULT 0.00",
-                "ALTER TABLE ventas ADD COLUMN igtf_usd NUMERIC(15,2) DEFAULT 0.00",
-                "ALTER TABLE ventas ADD COLUMN creado_por VARCHAR(36)",
-            ]:
-                try:
-                    connection.execute(text(col_sql))
-                except Exception:
-                    pass
-except Exception as e:
-    print(f"[SYSTEM] Error in auto-migration for ventas columns: {e}")
-
 from backend.core.database import SessionLocal
 from backend.models.core import TasaCambio
 from backend.models.fiscal import ReglaFiscal, INPCIndice
 from decimal import Decimal
 
+app = FastAPI(
+    title="KODA ERP - API Bimonetario (Bs/$)",
+    description="Motor de Backend modular y escalable para el ERP Bimonetario de KODA. Soporta transacciones muti-moneda en tiempo real.",
+    version="1.0.0"
+)
 
 def _seed_database():
     db = SessionLocal()
@@ -209,15 +156,86 @@ def _seed_database():
         db.close()
 
 
+# Configuración de inicialización segura de BD en evento de startup
+@app.on_event("startup")
+async def startup_db_init():
+    """Ejecuta migraciones ligeras y seed en segundo plano / startup de FastAPI
+    para no bloquear la vinculación de puertos de Uvicorn en Render."""
+    import asyncio
+    from starlette.concurrency import run_in_threadpool
 
-_seed_database()
-seed_extended_data()
+    def _init_db_sync():
+        try:
+            Base.metadata.create_all(bind=engine, checkfirst=True)
+        except Exception as create_err:
+            print(f"[SYSTEM] Base.metadata.create_all advertencia: {create_err}")
 
-app = FastAPI(
-    title="KODA ERP - API Bimonetario (Bs/$)",
-    description="Motor de Backend modular y escalable para el ERP Bimonetario de KODA. Soporta transacciones muti-moneda en tiempo real.",
-    version="1.0.0"
-)
+        # Migraciones DDL seguras
+        try:
+            with engine.begin() as connection:
+                sql_nominas = "ALTER TABLE nominas ADD COLUMN total_inces_usd NUMERIC(15, 2) DEFAULT 0.00" if engine.name == "sqlite" else "ALTER TABLE public.nominas ADD COLUMN IF NOT EXISTS total_inces_usd NUMERIC(15, 2) DEFAULT 0.00 NOT NULL"
+                connection.execute(text(sql_nominas))
+        except Exception:
+            pass
+
+        try:
+            with engine.begin() as connection:
+                sql_profiles = "ALTER TABLE profiles ADD COLUMN telegram_chat_id VARCHAR(50)" if engine.name == "sqlite" else "ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS telegram_chat_id VARCHAR(50)"
+                connection.execute(text(sql_profiles))
+                if engine.name != "sqlite":
+                    connection.execute(text("ALTER TABLE public.productos ADD COLUMN IF NOT EXISTS imagen_url TEXT;"))
+                    connection.execute(text("ALTER TABLE public.empresa ADD COLUMN IF NOT EXISTS logo_url VARCHAR(500);"))
+                    connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS vendedor_id INTEGER;"))
+                    connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS retencion_iva_usd NUMERIC(15,2) DEFAULT 0.00;"))
+                    connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS igtf_usd NUMERIC(15,2) DEFAULT 0.00;"))
+                    connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS creado_por UUID;"))
+                    connection.execute(text("ALTER TABLE public.kardex_movimientos ADD COLUMN IF NOT EXISTS almacen_id INTEGER REFERENCES public.almacenes(id);"))
+                    connection.execute(text("ALTER TABLE public.notas_entrega ADD COLUMN IF NOT EXISTS venta_id INTEGER REFERENCES public.ventas(id);"))
+                    connection.execute(text("""
+                        CREATE TABLE IF NOT EXISTS public.plantillas_documento (
+                            id SERIAL PRIMARY KEY,
+                            tenant_id UUID,
+                            tipo_documento VARCHAR(30) NOT NULL DEFAULT 'ticket',
+                            config JSON NOT NULL,
+                            actualizado_por UUID,
+                            updated_at TIMESTAMP,
+                            CONSTRAINT _tenant_plantilla_tipo_uc UNIQUE (tenant_id, tipo_documento)
+                        );
+                    """))
+                    connection.execute(text("DROP INDEX IF EXISTS public.ix_public_correlativos_fiscales_tipo_documento;"))
+                    connection.execute(text("DROP INDEX IF EXISTS public.ix_correlativos_fiscales_tipo_documento;"))
+                    connection.execute(text("CREATE INDEX IF NOT EXISTS ix_correlativos_fiscales_tipo_documento ON public.correlativos_fiscales (tipo_documento);"))
+                    connection.execute(text("ALTER TABLE public.correlativos_fiscales DROP CONSTRAINT IF EXISTS _tenant_correlativos_tipo_doc_uc;"))
+                    connection.execute(text("ALTER TABLE public.correlativos_fiscales ADD CONSTRAINT _tenant_correlativos_tipo_doc_uc UNIQUE (tenant_id, tipo_documento);"))
+                else:
+                    for col_sql in [
+                        "ALTER TABLE productos ADD COLUMN imagen_url TEXT",
+                        "ALTER TABLE ventas ADD COLUMN vendedor_id INTEGER",
+                        "ALTER TABLE ventas ADD COLUMN retencion_iva_usd NUMERIC(15,2) DEFAULT 0.00",
+                        "ALTER TABLE ventas ADD COLUMN igtf_usd NUMERIC(15,2) DEFAULT 0.00",
+                        "ALTER TABLE ventas ADD COLUMN creado_por VARCHAR(36)",
+                    ]:
+                        try:
+                            connection.execute(text(col_sql))
+                        except Exception:
+                            pass
+        except Exception as e:
+            print(f"[SYSTEM] Error in auto-migration for database columns: {e}")
+
+        # Ejecutar Seeding seguro
+        try:
+            _seed_database()
+            seed_extended_data()
+        except Exception as seed_err:
+            print(f"[SYSTEM] Error en seeding de datos: {seed_err}")
+
+    try:
+        await asyncio.wait_for(run_in_threadpool(_init_db_sync), timeout=15.0)
+        print("\033[92m[SYSTEM] Base de datos sincronizada y verificada exitosamente.\033[0m")
+    except asyncio.TimeoutError:
+        print("\033[93m[SYSTEM] BD Init superó el tiempo límite de 15s. Continuando arranque del servidor...\033[0m")
+    except Exception as e:
+        print(f"\033[91m[SYSTEM] Error en arranque de base de datos: {e}\033[0m")
 
 from fastapi.staticfiles import StaticFiles
 import os
