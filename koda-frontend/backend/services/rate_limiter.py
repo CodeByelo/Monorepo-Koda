@@ -56,8 +56,16 @@ def check_rate_limit(request: Request) -> None:
     client_ip: str = get_real_ip_str(request)
     path: str = request.url.path
 
-    # Exclusión de rutas de salud o recursos estáticos del sistema
-    if path == "/" or path.startswith("/health") or path == "/favicon.ico":
+    # Exclusión de rutas de salud, recursos estáticos y llamadas internas del Bot/Webhooks
+    if (
+        path == "/" or 
+        path.startswith("/health") or 
+        path == "/favicon.ico" or 
+        path.startswith("/bot/") or 
+        path.startswith("/webhook/") or 
+        request.headers.get("X-Bot-Api-Key") or 
+        request.headers.get("X-Telegram-Link-Key")
+    ):
         return
 
     if _is_auth_route(path):
