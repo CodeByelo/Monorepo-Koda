@@ -325,19 +325,19 @@ const POS = () => {
         {/* Left Column: Form & Catalog */}
         <div className="lg:col-span-2 space-y-6">
           
-          <section className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          <section className="bg-white p-7 rounded-[2rem] border border-slate-200 shadow-sm">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
                 
                 {/* 1. Identificación Cliente */}
                 <div className="flex flex-col space-y-2">
-                   <div className="min-h-[22px] flex items-center justify-between">
-                      <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Identificación Cliente</label>
+                   <div className="min-h-[24px] flex items-center justify-between">
+                      <label className="text-xs font-black text-slate-500 uppercase tracking-widest leading-none">Identificación Cliente</label>
                    </div>
                    <div className="flex items-center gap-2">
                       <select
                         value={client}
                         onChange={(e) => setClient(e.target.value)}
-                        className="flex-1 min-w-0 h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors truncate"
+                        className="flex-1 min-w-0 h-12 px-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors truncate"
                       >
                          {clientes.map((c) => (
                            <option key={c.id} value={c.id.toString()}>
@@ -351,10 +351,10 @@ const POS = () => {
                       <button
                         type="button"
                         onClick={() => setIsQuickCreateOpen(true)}
-                        className="h-11 px-3 bg-[#0b5156]/10 hover:bg-[#0b5156] text-[#0b5156] hover:text-white border border-[#0b5156]/20 hover:border-[#0b5156] rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shrink-0 transition-all active:scale-95 shadow-xs"
+                        className="h-12 px-3.5 bg-[#0b5156]/10 hover:bg-[#0b5156] text-[#0b5156] hover:text-white border border-[#0b5156]/20 hover:border-[#0b5156] rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shrink-0 transition-all active:scale-95 shadow-xs"
                         title="Crear cliente rápido"
                       >
-                        <UserPlus size={14} />
+                        <UserPlus size={15} />
                         <span className="hidden sm:inline">+ Cliente</span>
                       </button>
                    </div>
@@ -362,13 +362,13 @@ const POS = () => {
 
                 {/* 2. Vendedor */}
                 <div className="flex flex-col space-y-2">
-                   <div className="min-h-[22px] flex items-center">
-                      <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Vendedor (opcional)</label>
+                   <div className="min-h-[24px] flex items-center">
+                      <label className="text-xs font-black text-slate-500 uppercase tracking-widest leading-none">Vendedor (opcional)</label>
                    </div>
                    <select
                      value={vendedorId}
                      onChange={(e) => setVendedorId(e.target.value)}
-                     className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors"
+                     className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors"
                    >
                       <option value="">Sin vendedor asignado</option>
                       {vendedores.map((v) => (
@@ -381,13 +381,13 @@ const POS = () => {
 
                 {/* 3. Tarifa */}
                 <div className="flex flex-col space-y-2">
-                   <div className="min-h-[22px] flex items-center">
-                      <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Tarifa</label>
+                   <div className="min-h-[24px] flex items-center">
+                      <label className="text-xs font-black text-slate-500 uppercase tracking-widest leading-none">Tarifa</label>
                    </div>
                    <select
                      value={tarifa}
                      onChange={(e) => setTarifa(e.target.value as Tarifa)}
-                     className="w-full h-11 px-4 bg-slate-50 border border-slate-200 rounded-xl text-sm font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors"
+                     className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors"
                    >
                       <option value="Mayor">Mayor</option>
                       <option value="Detal">Detal</option>
@@ -397,8 +397,8 @@ const POS = () => {
 
                 {/* 4. Formato de Moneda del Documento */}
                 <div className="flex flex-col space-y-2">
-                   <div className="min-h-[22px] flex items-center justify-between">
-                      <label className="text-sm font-black text-slate-500 uppercase tracking-widest leading-none">Moneda Documento</label>
+                   <div className="min-h-[24px] flex items-center justify-between">
+                      <label className="text-xs font-black text-slate-500 uppercase tracking-widest leading-none">Moneda Documento</label>
                       <span className="text-[9px] font-black text-[#0b5156] uppercase font-mono">
                         {formatoDocumento === 'BIMONETARIO' ? 'USD + BS' : formatoDocumento === 'SOLO_USD' ? 'SOLO $' : 'SOLO BS'}
                       </span>
@@ -406,9 +406,9 @@ const POS = () => {
                    <select
                      value={formatoDocumento}
                      onChange={(e) => setFormatoDocumento(e.target.value as any)}
-                     className="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors"
+                     className="w-full h-12 px-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors"
                    >
-                      <option value="BIMONETARIO">🌐 Dólares + Bolívares (Por Defecto)</option>
+                      <option value="BIMONETARIO">🌐 Dólares + Bolívares</option>
                       <option value="SOLO_USD">💵 Solo Divisas (USD $)</option>
                       <option value="SOLO_VES">🇻🇪 Solo Bolívares (Bs.)</option>
                    </select>
@@ -609,7 +609,7 @@ const POS = () => {
           </section>
         </div>
 
-        <aside className="space-y-6">
+        <aside className="space-y-6 lg:pt-1">
           <section className="bg-white p-8 rounded-3xl border border-[#0b5156]/20 shadow-sm space-y-6">
              <div className="space-y-1">
                 <h3 className="text-lg font-black uppercase tracking-tight text-[#0b5156] font-mono">Ticket Actual</h3>
