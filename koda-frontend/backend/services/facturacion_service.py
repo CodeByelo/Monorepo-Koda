@@ -98,22 +98,10 @@ def derivar_aplica_igtf(metodo_pago: str, moneda: Optional[str]) -> bool:
 
 
 def _obtener_tasa_bs(db: Session, current_user) -> Decimal:
-    from backend.routers.rates import _perform_bcv_sync
-    tasa_activa = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
-    
-    # Si no hay tasa o tiene más de 12 horas, sincronizar en vivo con el BCV
-    if not tasa_activa:
-        try:
-            tasa_activa = _perform_bcv_sync(db)
-        except Exception:
-            tasa_activa = TasaCambio(
-                valor_ves=Decimal("757.54"),
-                fuente="BCV (Oficial Respaldo)",
-                tenant_id=getattr(current_user, "tenant_id", None),
-            )
-            db.add(tasa_activa)
-            db.flush()
-    return Decimal(str(tasa_activa.valor_ves))
+    from backend.utils.helpers import tasa_actual
+    t_id = getattr(current_user, "tenant_id", None)
+    tasa_val = tasa_actual(db, t_id)
+    return Decimal(str(tasa_val))
 
 
 def _obtener_tasas_fiscales(db: Session) -> tuple[Decimal, Decimal]:

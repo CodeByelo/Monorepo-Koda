@@ -663,26 +663,46 @@ async def _handle_stock_command(command_text: str, chat_id: int, session_row) ->
 
 def _texto_confirmacion(pending: dict) -> str:
     cantidad = pending.get("cantidad", 1)
-    subtotal = cantidad * pending.get("precio_usd", 0)
+    precio = pending.get("precio_usd", 0)
+    subtotal = cantidad * precio
+    metodo = pending.get("metodo_pago", "DIVISA")
+    metodo_label = {
+        "DIVISA": "💵 Divisa (USD)",
+        "PAGOMOVIL": "📱 Pago Móvil (Bs.)",
+        "TRANSFERENCIA": "🏦 Transferencia",
+        "EFECTIVO": "💵 Efectivo (Bs.)"
+    }.get(metodo, metodo)
+
     return (
-        "🧾 Confirmar venta\n\n"
-        f"Producto: {pending.get('nombre')}\n"
-        f"Precio unitario: ${pending.get('precio_usd', 0):.2f}\n"
-        f"Cantidad: {cantidad}\n"
-        f"Subtotal: ${subtotal:.2f}\n\n"
-        "Ajusta la cantidad si hace falta y confirma."
+        "🧾 *Confirmar Venta*\n\n"
+        f"📦 *Producto:* {pending.get('nombre')}\n"
+        f"💲 *Precio unitario:* ${precio:.2f}\n"
+        f"🔢 *Cantidad:* {cantidad}\n"
+        f"💰 *Subtotal:* ${subtotal:.2f}\n"
+        f"💳 *Forma de Pago:* {metodo_label}\n\n"
+        "Selecciona el método de pago, ajusta cantidad y confirma:"
     )
 
 
-def _botones_confirmacion(token: str) -> dict:
+def _botones_confirmacion(token: str, pending: Optional[dict] = None) -> dict:
+    metodo = (pending or {}).get("metodo_pago", "DIVISA")
+    
     return {
         "inline_keyboard": [
             [
-                {"text": "➖", "callback_data": f"qty_menos:{token}"},
-                {"text": "➕", "callback_data": f"qty_mas:{token}"},
+                {"text": f"{'🔘' if metodo == 'DIVISA' else '⚪'} 💵 Divisa ($)", "callback_data": f"pay:DIVISA:{token}"},
+                {"text": f"{'🔘' if metodo == 'PAGOMOVIL' else '⚪'} 📱 Pago Móvil", "callback_data": f"pay:PAGOMOVIL:{token}"},
             ],
             [
-                {"text": "✅ Confirmar", "callback_data": f"confirmar_venta:{token}"},
+                {"text": f"{'🔘' if metodo == 'TRANSFERENCIA' else '⚪'} 🏦 Transferencia", "callback_data": f"pay:TRANSFERENCIA:{token}"},
+                {"text": f"{'🔘' if metodo == 'EFECTIVO' else '⚪'} 💵 Efectivo (Bs)", "callback_data": f"pay:EFECTIVO:{token}"},
+            ],
+            [
+                {"text": "➖ Menos", "callback_data": f"qty_menos:{token}"},
+                {"text": "➕ Más", "callback_data": f"qty_mas:{token}"},
+            ],
+            [
+                {"text": "✅ Confirmar Venta", "callback_data": f"confirmar_venta:{token}"},
                 {"text": "❌ Cancelar", "callback_data": f"cancelar_venta:{token}"},
             ],
         ]
@@ -690,7 +710,7 @@ def _botones_confirmacion(token: str) -> dict:
 
 
 async def _handle_callback_query(callback_query: TelegramCallbackQuery) -> dict:
-    """Procesa la respuesta del usuario a los botones inline Confirmar/Cancelar/Selección/Cantidad."""
+    """Procesa la respuesta del usuario a los botones inline Confirmar/Cancelar/Selección/Cantidad/Pago."""
     data = callback_query.data or ""
     chat_id = callback_query.message.chat.id if callback_query.message else None
 
@@ -700,7 +720,15 @@ async def _handle_callback_query(callback_query: TelegramCallbackQuery) -> dict:
 
     parts = data.split(":")
     action = parts[0]
-    token = parts[1] if len(parts) > 1 else None
+    
+    # Manejo de pay:METODO:TOKEN
+    if action == "pay":
+        selected_method = parts[1] if len(parts) > 1 else "DIVISA"
+        token = parts[2] if len(parts) > 2 else None
+    else:
+        token = parts[1] if len(parts) > 1 else None
+        selected_method = None
+
     idx = None
     if action == "elegir_producto" and len(parts) > 2:
         try:
@@ -708,7 +736,8 @@ async def _handle_callback_query(callback_query: TelegramCallbackQuery) -> dict:
         except ValueError:
             idx = None
 
-    if not token or action not in ("confirmar_venta", "cancelar_venta", "elegir_producto", "qty_mas", "qty_menos"):
+    allowed_actions = ("confirmar_venta", "cancelar_venta", "elegir_producto", "qty_mas", "qty_menos", "pay")
+    if not token or action not in allowed_actions:
         await answer_telegram_callback(callback_query.id)
         return {"status": "ignored", "detail": "unknown action or malformed callback data"}
 
@@ -718,12 +747,26 @@ async def _handle_callback_query(callback_query: TelegramCallbackQuery) -> dict:
         if chat_id:
             await send_telegram_message(
                 chat_id,
-                "⏱️ Esta confirmación expiró o ya fue procesada. Vuelve a iniciar con /venta o /comprar."
+                "⏱️ Esta confirmación expiró o ya fue procesada. Vuelve a iniciar con /comprar."
             )
         return {"status": "expired_or_missing"}
 
     target_chat_id = pending.get("chat_id", chat_id)
     message_id = callback_query.message.message_id if callback_query.message else None
+
+    # --- Cambio interactivo de Método de Pago ---
+    if action == "pay" and selected_method:
+        await answer_telegram_callback(callback_query.id)
+        pending["metodo_pago"] = selected_method
+        await _save_pending_venta(token, pending)
+        if message_id:
+            await edit_telegram_message(
+                target_chat_id, 
+                message_id, 
+                _texto_confirmacion(pending), 
+                reply_markup=_botones_confirmacion(token, pending)
+            )
+        return {"status": "payment_method_updated", "method": selected_method}
 
     # --- Selección de producto desde /comprar (no borra el token: sigue en curso) ---
     if action == "elegir_producto":
@@ -741,11 +784,17 @@ async def _handle_callback_query(callback_query: TelegramCallbackQuery) -> dict:
             "nombre": elegido["nombre"],
             "precio_usd": elegido["precio_usd"],
             "cantidad": 1,
+            "metodo_pago": "DIVISA",
             "rif_cliente": None,
         })
         await _save_pending_venta(token, pending)
         if message_id:
-            await edit_telegram_message(target_chat_id, message_id, _texto_confirmacion(pending), reply_markup=_botones_confirmacion(token))
+            await edit_telegram_message(
+                target_chat_id, 
+                message_id, 
+                _texto_confirmacion(pending), 
+                reply_markup=_botones_confirmacion(token, pending)
+            )
         return {"status": "product_selected"}
 
     # --- Ajuste de cantidad (+/-) — sigue en curso, no borra el token ---
@@ -756,7 +805,12 @@ async def _handle_callback_query(callback_query: TelegramCallbackQuery) -> dict:
         pending["cantidad"] = nueva_cantidad
         await _save_pending_venta(token, pending)
         if message_id:
-            await edit_telegram_message(target_chat_id, message_id, _texto_confirmacion(pending), reply_markup=_botones_confirmacion(token))
+            await edit_telegram_message(
+                target_chat_id, 
+                message_id, 
+                _texto_confirmacion(pending), 
+                reply_markup=_botones_confirmacion(token, pending)
+            )
         return {"status": "quantity_updated", "cantidad": nueva_cantidad}
 
     # --- Confirmar / cancelar: aquí sí se borra el token (operación final) ---
@@ -774,11 +828,7 @@ async def _handle_callback_query(callback_query: TelegramCallbackQuery) -> dict:
             vendedor_id=pending["vendedor_id"],
             cliente_rif=pending.get("rif_cliente"),
             lineas=[{"sku": pending["sku"], "cantidad": pending["cantidad"]}],
-            # metodo_pago/moneda_documento no se capturan en el comando /venta
-            # (solo <sku> <cantidad> [rif_cliente] por especificación); se usan
-            # valores por defecto razonables. Ver reporte para el detalle de
-            # esta decisión de diseño.
-            metodo_pago="EFECTIVO",
+            metodo_pago=pending.get("metodo_pago", "DIVISA"),
             moneda_documento="USD",
         )
     except BotApiError as e:
