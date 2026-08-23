@@ -4726,7 +4726,7 @@ def descargar_factura_pdf(
     import os
     from fastapi.responses import StreamingResponse
     from backend.models.operations import Venta
-    from backend.routers.entidades import _get_or_create_empresa, _logo_path
+    from backend.routers.entidades import _get_or_create_empresa, _logo_path, get_empresa_logo_image
 
     # Tenant-scoped lookup: filtro explícito por tenant_id, siguiendo la
     # convención del resto de este router (ver /cotizaciones más abajo).
@@ -4755,16 +4755,13 @@ def descargar_factura_pdf(
     ancho, alto = letter
 
     # Emisor (datos reales del tenant, con fallback si aún no hay Empresa configurada)
-    logo_path = _logo_path(current_user.tenant_id)
+    logo_img = get_empresa_logo_image(empresa, current_user.tenant_id)
     texto_x = 50
-    if os.path.exists(logo_path):
+    if logo_img:
         try:
-            # El logo se guarda por tenant (backend/static/logo_{tenant_id}.png);
-            # si en el futuro se sirve desde otro almacenamiento (S3, etc.)
-            # este drawImage deberá apuntar a esa nueva ruta/URL resuelta a archivo local.
             logo_w, logo_h = 60, 45
             c.drawImage(
-                logo_path,
+                logo_img,
                 50, alto - 50 - logo_h + 10,
                 width=logo_w, height=logo_h,
                 preserveAspectRatio=True, mask='auto'
@@ -4912,7 +4909,7 @@ def descargar_ticket_pdf(
     from fastapi.responses import StreamingResponse
     from backend.models.operations import Venta
     from backend.models.erp_extended import PlantillaDocumento
-    from backend.routers.entidades import _get_or_create_empresa, _logo_path, DEFAULT_TICKET_TEMPLATE
+    from backend.routers.entidades import _get_or_create_empresa, _logo_path, get_empresa_logo_image, DEFAULT_TICKET_TEMPLATE
 
     venta = db.query(Venta).filter(
         Venta.id == id,
@@ -4968,54 +4965,156 @@ def descargar_ticket_pdf(
     # --- Logo (si existe) ---
     logo_cfg = cfg.get("logo", {})
     if logo_cfg.get("visible", True):
-        logo_path = _logo_path(current_user.tenant_id)
-        if os.path.exists(logo_path):
+        logo_img = get_empresa_logo_image(empresa, current_user.tenant_id)
+        if logo_img:
             try:
-                logo_w, logo_h = 24 * mm, 16 * mm
-                x_pt = (ANCHO - logo_w) / 2 if logo_cfg.get("align", "center") == "center" else logo_cfg.get("x", 4) * mm
+                logo_w, logo_h = 26 * mm, 18 * mm
+                x_pt = (ANCHO - logo_w) / 2
                 y_pt = ALTO - logo_cfg.get("y", 6) * mm - logo_h
-                c.drawImage(logo_path, x_pt, y_pt, width=logo_w, height=logo_h, preserveAspectRatio=True, mask='auto')
+                c.drawImage(logo_img, x_pt, y_pt, width=logo_w, height=logo_h, preserveAspectRatio=True, mask='auto')
             except Exception:
                 pass  # Logo corrupto no debe tumbar la generación del ticket.
 
-    # --- Cabecera ---
-    dibujar("empresa_nombre", empresa.razon_social)
+    # --- Cabecera Centrada ---
+    # Razón Social / Nombre Comercial
+    dibujar("empresa_nombre", empresa.nombre_comercial or empresa.razon_social)
+    # Dirección (ej. Chacaito / Caracas)
+    if empresa.direccion:
+        dibujar("empresa_direccion", empresa.direccion)
+    # RIF de la Empresa
     dibujar("empresa_rif", f"RIF: {empresa.rif}")
+    # Teléfono
     if empresa.telefono:
         dibujar("empresa_telefono", f"Tel: {empresa.telefono}")
-    dibujar("factura_numero", f"Factura: {venta.numero_factura}")
-    dibujar("factura_fecha", f"Fecha: {venta.fecha.strftime('%d/%m/%Y %H:%M')}")
-    cliente_nombre = venta.cliente.nombre if venta.cliente else "CLIENTE GENERAL"
-    dibujar("cliente", f"Cliente: {cliente_nombre}")
 
-    # --- Tabla de productos: arranca en el Y configurado, fluye hacia abajo ---
-    y = ALTO - cfg["tabla_productos_inicio"].get("y", 49) * mm
+    # Número de factura y fecha en formato Dia/Mes/Año Hora:Minuto
+    fecha_fmt = venta.fecha.strftime('%d/%m/%Y %H:%M') if venta.fecha else ""
+    dibujar("factura_numero", f"Factura Nº: {venta.numero_factura}")
+    dibujar("factura_fecha", f"Fecha: {fecha_fmt}")
+
+    # Separador Cliente
+    y_cli = ALTO - cfg.get("cliente", {}).get("y", 51) * mm
+    c.setLineWidth(0.5)
+    c.line(4 * mm, y_cli + 10, ANCHO - 4 * mm, y_cli + 10)
+    cliente_nombre = venta.cliente.nombre if venta.cliente else "CLIENTE GENERAL"
+    cliente_rif = f" ({venta.cliente.rif})" if venta.cliente and venta.cliente.rif else ""
+    dibujar("cliente", f"Cliente: {cliente_nombre}{cliente_rif}")
+    c.line(4 * mm, y_cli - 4, ANCHO - 4 * mm, y_cli - 4)
+
+    # --- Tabla de productos: Producto | Cantidad | Total (Ref) ---
+    y = y_cli - 14
     tam_tabla = cfg["tabla_productos_inicio"].get("font_size", 8)
-    c.setFont("Helvetica", tam_tabla)
-    c.line(4 * mm, y + 4, ANCHO - 4 * mm, y + 4)
+    c.setFont("Helvetica-Bold", tam_tabla)
+    c.drawString(4 * mm, y, "Producto")
+    c.drawCentredString(ANCHO / 2 + 6 * mm, y, "Cant.")
+    c.drawRightString(ANCHO - 4 * mm, y, "Total ($)")
+    y -= 4
+    c.line(4 * mm, y, ANCHO - 4 * mm, y)
     y -= (tam_tabla + 3)
+
+    c.setFont("Helvetica", tam_tabla)
+    total_descuento_usd = 0.0
     for item in venta.detalles:
         prod_nombre = item.producto.nombre if item.producto else "Producto"
         precio = float(item.precio_usd_capturado)
         cantidad = float(item.cantidad)
-        c.drawString(4 * mm, y, f"{cantidad:g}x {prod_nombre[:24]}")
+        total_item = precio * cantidad
+        
+        # Comprobar si se vendió con precio inferior al precio de lista detal/usd
+        if item.producto and item.producto.precio_usd:
+            precio_base = float(item.producto.precio_usd)
+            if precio_base > precio:
+                total_descuento_usd += (precio_base - precio) * cantidad
+
+        c.drawString(4 * mm, y, f"{prod_nombre[:20]}")
+        c.drawCentredString(ANCHO / 2 + 6 * mm, y, f"{cantidad:g}")
+        c.drawRightString(ANCHO - 4 * mm, y, f"${total_item:.2f}")
+        y -= (tam_tabla + 2)
+        # Detalle de precio unitario
+        c.setFont("Helvetica", max(6, tam_tabla - 2))
+        c.drawString(4 * mm, y, f"  Ref. unitaria: ${precio:.2f}")
+        c.setFont("Helvetica", tam_tabla)
         y -= (tam_tabla + 3)
-        c.drawString(4 * mm, y, f"   ${precio:.2f} c/u = ${precio * cantidad:.2f}")
-        y -= (tam_tabla + 3)
-    c.line(4 * mm, y + 4, ANCHO - 4 * mm, y + 4)
+
+    c.line(4 * mm, y + 2, ANCHO - 4 * mm, y + 2)
+    y -= 8
+
+    # --- Totales y Cálculos ---
+    subtotal_val = float(venta.subtotal_usd)
+    iva_val = float(venta.iva_usd)
+    igtf_val = float(venta.igtf_usd)
+    total_val = float(venta.total_usd)
+    tasa_val = float(venta.tasa_cambio_bs)
+    total_bs_val = total_val * tasa_val
+
+    def fila_total(etiqueta, valor_str, es_bold=False, tam=8):
+        nonlocal y
+        c.setFont("Helvetica-Bold" if es_bold else "Helvetica", tam)
+        c.drawString(4 * mm, y, etiqueta)
+        c.drawRightString(ANCHO - 4 * mm, y, valor_str)
+        y -= (tam + 3)
+
+    fila_total("Subtotal:", f"${subtotal_val:.2f}")
+    if total_descuento_usd > 0:
+        fila_total("Descuento Tarifa:", f"-${total_descuento_usd:.2f}")
+    if iva_val > 0:
+        fila_total("IVA (16%):", f"${iva_val:.2f}")
+    if igtf_val > 0:
+        fila_total("IGTF (3%):", f"${igtf_val:.2f}")
+    
+    fila_total("TOTAL (USD):", f"${total_val:.2f}", es_bold=True, tam=10)
+    fila_total("Tasa BCV Oficial:", f"Bs. {tasa_val:.2f}", tam=8)
+    fila_total("TOTAL EN BS:", f"Bs. {total_bs_val:.2f}", es_bold=True, tam=9)
+
+    y -= 4
+    c.line(4 * mm, y + 2, ANCHO - 4 * mm, y + 2)
+    y -= 8
+
+    # --- Método de Pago ---
+    metodo = venta.metodo_pago or "Efectivo / Divisa"
+    c.setFont("Helvetica-Bold", 8)
+    c.drawCentredString(ANCHO / 2, y, f"Método de Pago: {metodo.upper()}")
+    y -= 10
+    c.line(4 * mm, y + 2, ANCHO - 4 * mm, y + 2)
+    y -= 8
+
+    # --- Mensaje de Garantía Personalizado por la Empresa ---
+    mensaje_garantia = getattr(empresa, "mensaje_garantia", None) or cfg.get("garantia_texto", {}).get("texto")
+    if mensaje_garantia:
+        c.setFont("Helvetica", 7)
+        # Dividir en líneas si es largo
+        palabras = mensaje_garantia.split()
+        linea_actual = []
+        for p in palabras:
+            linea_actual.append(p)
+            if len(" ".join(linea_actual)) > 42:
+                c.drawCentredString(ANCHO / 2, y, " ".join(linea_actual))
+                y -= 9
+                linea_actual = []
+        if linea_actual:
+            c.drawCentredString(ANCHO / 2, y, " ".join(linea_actual))
+            y -= 9
+        y -= 4
+        c.line(4 * mm, y + 2, ANCHO - 4 * mm, y + 2)
+        y -= 8
+
+    # --- Agradecimiento y Redes Sociales (Instagram / Teléfono) ---
+    c.setFont("Helvetica-Bold", 9)
+    c.drawCentredString(ANCHO / 2, y, "¡Gracias por su compra!")
     y -= 10
 
-    # --- Totales y pie: fluyen desde donde terminó la tabla ---
-    y = dibujar("subtotal", f"Subtotal: ${float(venta.subtotal_usd):.2f}", y) - (cfg["subtotal"].get("font_size", 9) + 3)
-    y = dibujar("iva", f"IVA: ${float(venta.iva_usd):.2f}", y) - (cfg["iva"].get("font_size", 9) + 3)
-    if float(venta.igtf_usd) > 0:
-        y = dibujar("igtf", f"IGTF: ${float(venta.igtf_usd):.2f}", y) - (cfg["igtf"].get("font_size", 9) + 3)
-    y = dibujar("total", f"TOTAL: ${float(venta.total_usd):.2f}", y) - (cfg["total"].get("font_size", 11) + 4)
-    y = dibujar("tasa_bcv", f"Tasa BCV: {float(venta.tasa_cambio_bs):.2f}", y) - (cfg["tasa_bcv"].get("font_size", 8) + 3)
-    y = dibujar("total_bs", f"Total Bs: {float(venta.total_usd) * float(venta.tasa_cambio_bs):.2f}", y) - (cfg["total_bs"].get("font_size", 9) + 6)
-    if cfg["garantia_texto"].get("visible") and cfg["garantia_texto"].get("texto"):
-        y = dibujar("garantia_texto", cfg["garantia_texto"]["texto"], y) - (cfg["garantia_texto"].get("font_size", 7) + 4)
-    dibujar("agradecimiento", cfg["agradecimiento"].get("texto", "¡Gracias por su compra!"), y)
+    if empresa.telefono:
+        c.setFont("Helvetica", 8)
+        c.drawCentredString(ANCHO / 2, y, f"Contacto: {empresa.telefono}")
+        y -= 9
+
+    if getattr(empresa, "instagram", None):
+        c.setFont("Helvetica-Bold", 8)
+        c.drawCentredString(ANCHO / 2, y, f"IG: @{empresa.instagram.lstrip('@')}")
+        y -= 9
+
+    y -= 6
+    c.line(4 * mm, y, ANCHO - 4 * mm, y)
 
     c.showPage()
     c.save()

@@ -46,6 +46,19 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const isIframe = window !== window.parent;
 
+  const [headerLogo, setHeaderLogo] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Cargar logo de la empresa para el avatar del header
+    api.get('/entidades/empresa/perfil')
+      .then(res => {
+        if (res.data?.logo_url) {
+          setHeaderLogo(res.data.logo_url);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const displayName = userName
     ? userName.split('@')[0].charAt(0).toUpperCase() + userName.split('@')[0].slice(1)
     : 'Usuario';
@@ -99,8 +112,19 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                   <p className="text-xs font-black text-slate-800">{displayName}</p>
                   <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">{displayRole}</p>
                </div>
-               <div className="w-8 h-8 rounded-full bg-[#0b5156] flex items-center justify-center text-white font-black text-xs border border-white shadow-sm" title={userName || ''}>
-                 {initials}
+               <div className="w-8 h-8 rounded-full bg-[#0b5156] flex items-center justify-center text-white font-black text-xs border border-slate-200 shadow-sm overflow-hidden bg-white" title={tenantName || userName || ''}>
+                 {headerLogo ? (
+                   <img 
+                     src={headerLogo.startsWith('http') ? headerLogo : `${BASE_URL.replace(/\/$/, '')}${headerLogo.startsWith('/') ? '' : '/'}${headerLogo}`} 
+                     alt="Logo" 
+                     className="w-full h-full object-contain p-0.5"
+                     onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                   />
+                 ) : (
+                   <div className="w-full h-full bg-[#0b5156] flex items-center justify-center text-white font-black text-xs">
+                     {initials}
+                   </div>
+                 )}
                </div>
             </div>
             {displayRole.toLowerCase() === 'desarrollador' && (

@@ -30,6 +30,8 @@ class EmpresaPerfilUpdate(BaseModel):
     telefono: Optional[str] = None
     direccion: Optional[str] = None
     tipo_contribuyente: Optional[str] = None
+    instagram: Optional[str] = None
+    mensaje_garantia: Optional[str] = None
 
 class SucursalCreate(BaseModel):
     codigo: str
@@ -59,36 +61,41 @@ def _get_or_create_empresa(db: Session, current_user: Profile) -> Empresa:
     return emp
 
 
+
 # Catálogo cerrado de campos configurables del ticket — el frontend (Fase 3)
 # debe restringirse a estos IDs; cualquier otro se rechaza para no permitir
 # que un config corrupto/arbitrario rompa el render del PDF.
 CAMPOS_TICKET_VALIDOS = {
-    "logo", "empresa_nombre", "empresa_rif", "empresa_telefono",
+    "logo", "empresa_nombre", "empresa_rif", "empresa_direccion", "empresa_telefono",
     "factura_numero", "factura_fecha", "cliente", "tabla_productos_inicio",
-    "subtotal", "iva", "igtf", "total", "tasa_bcv", "total_bs",
-    "garantia_texto", "agradecimiento",
+    "subtotal", "descuentos", "iva", "igtf", "total", "metodo_pago", "tasa_bcv", "total_bs",
+    "garantia_texto", "agradecimiento", "instagram",
 }
 
 # Diseño por defecto: reproduce el layout actual del ticket (el que ya está
 # en producción) expresado como coordenadas, para que un tenant sin
 # configuración propia vea exactamente lo mismo que ve hoy.
 DEFAULT_TICKET_TEMPLATE = {
-    "logo":               {"x": 40, "y": 6,  "font_size": 0,  "bold": False, "align": "center", "visible": True},
-    "empresa_nombre":     {"x": 40, "y": 16, "font_size": 10, "bold": True,  "align": "center", "visible": True},
-    "empresa_rif":        {"x": 40, "y": 21, "font_size": 8,  "bold": False, "align": "center", "visible": True},
-    "empresa_telefono":   {"x": 40, "y": 25, "font_size": 8,  "bold": False, "align": "center", "visible": True},
-    "factura_numero":     {"x": 4,  "y": 32, "font_size": 8,  "bold": False, "align": "left",   "visible": True},
-    "factura_fecha":      {"x": 4,  "y": 37, "font_size": 8,  "bold": False, "align": "left",   "visible": True},
-    "cliente":            {"x": 4,  "y": 42, "font_size": 8,  "bold": False, "align": "left",   "visible": True},
-    "tabla_productos_inicio": {"x": 4, "y": 49, "font_size": 8, "bold": False, "align": "left", "visible": True},
-    "subtotal":           {"x": 4,  "y": 0,  "font_size": 9,  "bold": False, "align": "left",   "visible": True},
-    "iva":                {"x": 4,  "y": 0,  "font_size": 9,  "bold": False, "align": "left",   "visible": True},
-    "igtf":               {"x": 4,  "y": 0,  "font_size": 9,  "bold": False, "align": "left",   "visible": True},
-    "total":              {"x": 4,  "y": 0,  "font_size": 11, "bold": True,  "align": "left",   "visible": True},
-    "tasa_bcv":           {"x": 4,  "y": 0,  "font_size": 8,  "bold": False, "align": "left",   "visible": True},
-    "total_bs":           {"x": 4,  "y": 0,  "font_size": 9,  "bold": True,  "align": "left",   "visible": True},
-    "garantia_texto":     {"x": 40, "y": 0,  "font_size": 7,  "bold": False, "align": "center", "visible": False, "texto": ""},
-    "agradecimiento":     {"x": 40, "y": 0,  "font_size": 8,  "bold": False, "align": "center", "visible": True, "texto": "¡Gracias por su compra!"},
+    "logo":                   {"x": 40, "y": 6,  "font_size": 0,  "bold": False, "align": "center", "visible": True},
+    "empresa_nombre":         {"x": 40, "y": 26, "font_size": 10, "bold": True,  "align": "center", "visible": True},
+    "empresa_direccion":      {"x": 40, "y": 30, "font_size": 8,  "bold": False, "align": "center", "visible": True},
+    "empresa_rif":            {"x": 40, "y": 34, "font_size": 8,  "bold": False, "align": "center", "visible": True},
+    "empresa_telefono":       {"x": 40, "y": 38, "font_size": 8,  "bold": False, "align": "center", "visible": True},
+    "factura_numero":         {"x": 40, "y": 42, "font_size": 8,  "bold": True,  "align": "center", "visible": True},
+    "factura_fecha":          {"x": 40, "y": 46, "font_size": 8,  "bold": False, "align": "center", "visible": True},
+    "cliente":                {"x": 40, "y": 51, "font_size": 8,  "bold": False, "align": "center", "visible": True},
+    "tabla_productos_inicio": {"x": 4,  "y": 58, "font_size": 8,  "bold": False, "align": "left",   "visible": True},
+    "subtotal":               {"x": 4,  "y": 0,  "font_size": 8,  "bold": False, "align": "left",   "visible": True},
+    "descuentos":             {"x": 4,  "y": 0,  "font_size": 8,  "bold": False, "align": "left",   "visible": True},
+    "iva":                    {"x": 4,  "y": 0,  "font_size": 8,  "bold": False, "align": "left",   "visible": True},
+    "igtf":                   {"x": 4,  "y": 0,  "font_size": 8,  "bold": False, "align": "left",   "visible": True},
+    "total":                  {"x": 4,  "y": 0,  "font_size": 10, "bold": True,  "align": "left",   "visible": True},
+    "metodo_pago":            {"x": 40, "y": 0,  "font_size": 8,  "bold": False, "align": "center", "visible": True},
+    "tasa_bcv":               {"x": 4,  "y": 0,  "font_size": 8,  "bold": False, "align": "left",   "visible": True},
+    "total_bs":               {"x": 4,  "y": 0,  "font_size": 9,  "bold": True,  "align": "left",   "visible": True},
+    "garantia_texto":         {"x": 40, "y": 0,  "font_size": 7,  "bold": False, "align": "center", "visible": True, "texto": ""},
+    "agradecimiento":         {"x": 40, "y": 0,  "font_size": 8,  "bold": True,  "align": "center", "visible": True, "texto": "¡Gracias por su compra!"},
+    "instagram":              {"x": 40, "y": 0,  "font_size": 8,  "bold": False, "align": "center", "visible": True},
 }
 # Nota: los campos con "y": 0 se calculan dinámicamente en el momento de
 # generar el PDF (fluyen después de la tabla de productos, cuya altura
@@ -170,6 +177,35 @@ def _logo_path(tenant_id) -> str:
     """Ruta local fallback de almacenamiento para desarrollo sin Supabase."""
     return f"backend/static/logo_{tenant_id}.png"
 
+def get_empresa_logo_image(empresa, tenant_id):
+    """
+    Retorna un objeto compatible con ReportLab (ImageReader o ruta local)
+    soportando tanto URLs públicas de Supabase Storage en la nube como rutas locales.
+    Retorna None si no hay logo o si la descarga falla.
+    """
+    import io
+    import requests
+    from reportlab.lib.utils import ImageReader
+
+    logo_url = getattr(empresa, "logo_url", None)
+    if logo_url and logo_url.startswith("http"):
+        try:
+            resp = requests.get(logo_url, timeout=3.5)
+            if resp.status_code == 200 and len(resp.content) > 0:
+                return ImageReader(io.BytesIO(resp.content))
+        except Exception:
+            pass
+
+    # Fallback local
+    local_path = _logo_path(tenant_id)
+    if os.path.exists(local_path):
+        try:
+            return ImageReader(local_path)
+        except Exception:
+            pass
+
+    return None
+
 @router.get("/empresa/perfil", dependencies=[Depends(role_required(['Admin']))])
 def obtener_perfil(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     emp = _get_or_create_empresa(db, current_user)
@@ -189,6 +225,8 @@ def obtener_perfil(db: Session = Depends(get_db), current_user: Profile = Depend
         "direccion": emp.direccion,
         "tipo_contribuyente": emp.tipo_contribuyente,
         "logo_url": logo_url,
+        "instagram": emp.instagram,
+        "mensaje_garantia": emp.mensaje_garantia,
     }
 
 @router.put("/empresa/perfil", dependencies=[Depends(role_required(['Admin']))])

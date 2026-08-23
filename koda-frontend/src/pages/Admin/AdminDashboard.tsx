@@ -254,7 +254,11 @@ const AdminDashboard = ({ defaultTab = 'compania' }: AdminDashboardProps) => {
                           <img 
                             src={perfil.logo_url.startsWith('http') ? perfil.logo_url : `${BASE_URL.replace(/\/$/, '')}${perfil.logo_url.startsWith('/') ? '' : '/'}${perfil.logo_url}`} 
                             alt="Logo" 
-                            className="w-full h-full object-contain" 
+                            className="w-full h-full object-contain p-1"
+                            onError={(e) => {
+                              (e.target as HTMLElement).style.display = 'none';
+                              (e.target as HTMLElement).parentElement?.classList.add('flex', 'items-center', 'justify-center');
+                            }} 
                           />
                         ) : (
                           <Building2 size={32} className="text-[#0b5156]" />
@@ -279,9 +283,26 @@ const AdminDashboard = ({ defaultTab = 'compania' }: AdminDashboardProps) => {
                       </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Nombre Comercial Público</label>
-                      <input type="text" value={perfil?.nombre_comercial || ''} onChange={(e) => setPerfil({...perfil, nombre_comercial: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-black text-[#0b5156] focus:outline-none focus:border-[#0b5156] transition-colors shadow-sm" />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">R.I.F. de la Empresa</label>
+                        <input type="text" placeholder="J-12345678-9" value={perfil?.rif || ''} onChange={(e) => setPerfil({...perfil, rif: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-black text-[#0b5156] focus:outline-none focus:border-[#0b5156] transition-colors shadow-sm" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Nombre Comercial Público / Razón Social</label>
+                        <input type="text" value={perfil?.nombre_comercial || ''} onChange={(e) => setPerfil({...perfil, nombre_comercial: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-black text-[#0b5156] focus:outline-none focus:border-[#0b5156] transition-colors shadow-sm" />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Dirección / Sede (ej. Chacaíto, Caracas)</label>
+                        <input type="text" placeholder="Chacaíto, Caracas" value={perfil?.direccion || ''} onChange={(e) => setPerfil({...perfil, direccion: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-700 focus:outline-none focus:border-[#0b5156] transition-colors shadow-sm" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Teléfono de Contacto</label>
+                        <input type="text" placeholder="+58 424-1234567" value={perfil?.telefono || ''} onChange={(e) => setPerfil({...perfil, telefono: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-700 focus:outline-none focus:border-[#0b5156] transition-colors shadow-sm" />
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
@@ -290,9 +311,17 @@ const AdminDashboard = ({ defaultTab = 'compania' }: AdminDashboardProps) => {
                         <input type="email" value={perfil?.email || ''} onChange={(e) => setPerfil({...perfil, email: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-700 focus:outline-none focus:border-[#0b5156] transition-colors shadow-sm" />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Teléfono</label>
-                        <input type="text" value={perfil?.telefono || ''} onChange={(e) => setPerfil({...perfil, telefono: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold text-slate-700 focus:outline-none focus:border-[#0b5156] transition-colors shadow-sm" />
+                        <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Instagram Corporativo (ej. koda.erp)</label>
+                        <div className="relative">
+                          <span className="absolute left-4 top-3.5 text-xs font-bold text-slate-400">@</span>
+                          <input type="text" placeholder="miempresa" value={perfil?.instagram ? perfil.instagram.replace(/^@/, '') : ''} onChange={(e) => setPerfil({...perfil, instagram: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl pl-8 pr-4 py-3 text-sm font-bold text-slate-700 focus:outline-none focus:border-[#0b5156] transition-colors shadow-sm" />
+                        </div>
                       </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Mensaje de Garantía / Políticas en Tickets y Facturas</label>
+                      <textarea rows={3} placeholder="Garantía de 15 días continuos. No se realizan devoluciones de dinero..." value={perfil?.mensaje_garantia || ''} onChange={(e) => setPerfil({...perfil, mensaje_garantia: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-xs font-medium text-slate-700 focus:outline-none focus:border-[#0b5156] transition-colors shadow-sm" />
                     </div>
                   </div>
                 </section>
