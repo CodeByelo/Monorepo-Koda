@@ -839,19 +839,42 @@ async def _handle_callback_query(callback_query: TelegramCallbackQuery) -> dict:
     total_val = float(result.get("monto_total", result.get("total", 0)))
     comision_val = float(result.get("comision_usd", result.get("comision", 0)))
     tasa_val = float(result.get("tasa_bcv", 0))
-    metodo = result.get("metodo_pago", "Efectivo USD")
+    metodo = result.get("metodo_pago", pending.get("metodo_pago", "DIVISA"))
+    metodo_display = {
+        "DIVISA": "💵 Divisa (USD)",
+        "PAGOMOVIL": "📱 Pago Móvil",
+        "TRANSFERENCIA": "🏦 Transferencia",
+        "EFECTIVO": "💵 Efectivo (Bs)"
+    }.get(metodo.upper(), metodo)
+
+    # Si por alguna razón la tasa devuelta es 0 o menor a 50, consultar tasas_cambio del tenant
+    if tasa_val < 50:
+        try:
+            row_t = await conn.fetchrow(
+                """
+                SELECT valor_ves FROM public.tasas_cambio
+                WHERE tenant_id = $1 OR tenant_id IS NULL
+                ORDER BY fecha DESC LIMIT 1
+                """,
+                uuid.UUID(str(pending["tenant_id"]))
+            )
+            if row_t and row_t["valor_ves"]:
+                tasa_val = float(row_t["valor_ves"])
+        except Exception:
+            pass
+        if tasa_val < 50:
+            tasa_val = 784.6633
+
     total_bs = total_val * tasa_val if tasa_val > 0 else 0
 
     msg = (
         "✅ *Venta registrada exitosamente*\n\n"
         f"📄 *Factura:* `{numero_factura}`\n"
-        f"💳 *Forma de Pago:* {metodo}\n"
+        f"💳 *Forma de Pago:* {metodo_display}\n"
         f"💵 *Total Divisas:* ${total_val:.2f}\n"
+        f"🇻🇪 *Total Bolívares:* Bs. {total_bs:,.2f} (Tasa: {tasa_val:,.2f})\n"
+        f"💼 *Comisión Vendedor:* ${comision_val:.2f}"
     )
-    if total_bs > 0:
-        msg += f"🇻🇪 *Total Bolívares:* Bs. {total_bs:,.2f} (Tasa: {tasa_val:,.2f})\n"
-    
-    msg += f"💼 *Comisión Vendedor:* ${comision_val:.2f}"
     
     await send_telegram_message(target_chat_id, msg)
     return {"status": "success", "invoice": numero_factura}
