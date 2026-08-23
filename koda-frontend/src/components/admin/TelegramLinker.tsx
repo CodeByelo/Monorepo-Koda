@@ -35,17 +35,23 @@ export default function TelegramLinker() {
 
   // Selector de usuario/vendedor para Administradores
   const [usuarios, setUsuarios] = useState<any[]>([]);
-  const [selectedUserId, setSelectedUserId] = useState<string>('');
+  const [vendedores, setVendedores] = useState<any[]>([]);
+  const [selectedTarget, setSelectedTarget] = useState<string>('');
   const [selectedUserName, setSelectedUserName] = useState<string>('');
 
   // Cuenta regresiva del token (10 minutos)
   const [timeLeft, setTimeLeft] = useState<number>(600);
 
   useEffect(() => {
-    // Cargar usuarios para permitir a German seleccionar vendedores
+    // 1. Cargar usuarios del sistema (staff / admin)
     api.get<any[]>('/admin/usuarios').then((data) => {
       setUsuarios(data || []);
     }).catch(() => setUsuarios([]));
+
+    // 2. Cargar vendedores del equipo comercial
+    api.get<any[]>('/vendedores').then((data) => {
+      setVendedores(data || []);
+    }).catch(() => setVendedores([]));
   }, []);
 
   useEffect(() => {
@@ -147,12 +153,14 @@ export default function TelegramLinker() {
     setError(null);
     try {
       const payload: any = {};
-      if (selectedUserId) {
-        payload.user_id = selectedUserId;
-        const target = usuarios.find(u => String(u.id) === String(selectedUserId));
-        setSelectedUserName(target?.nombre || target?.username || target?.email || 'Vendedor');
+      if (selectedTarget) {
+        payload.user_id = selectedTarget;
+        const u = usuarios.find(x => String(x.id) === String(selectedTarget));
+        const v = vendedores.find(x => String(x.id) === String(selectedTarget) || String(x.codigo) === String(selectedTarget));
+        const targetName = u ? (u.nombre || u.username || u.email) : (v ? `${v.nombre} (${v.codigo})` : 'Usuario');
+        setSelectedUserName(targetName);
       } else {
-        setSelectedUserName('Mi Cuenta (Administrador)');
+        setSelectedUserName('Mi Cuenta (German / Administrador)');
       }
       const data = await api.post<any>('/webhook/telegram/generate-token', payload);
       setLinkingCode(data.code);
@@ -252,16 +260,31 @@ export default function TelegramLinker() {
 
               <div className="flex flex-col sm:flex-row gap-3 pt-2">
                 <select
-                  value={selectedUserId}
-                  onChange={(e) => setSelectedUserId(e.target.value)}
+                  value={selectedTarget}
+                  onChange={(e) => setSelectedTarget(e.target.value)}
                   className="flex-1 px-4 py-3 bg-white border border-slate-200 rounded-xl text-xs font-black text-slate-800 uppercase focus:outline-none focus:border-[#0b5156]"
                 >
                   <option value="">Mi Cuenta (German / Administrador)</option>
-                  {usuarios.map((u) => (
-                    <option key={u.id} value={u.id.toString()}>
-                      {u.nombre || u.username || u.email} ({u.rol || 'Vendedor'})
-                    </option>
-                  ))}
+                  
+                  {vendedores.length > 0 && (
+                    <optgroup label="Equipo Comercial / Vendedores">
+                      {vendedores.map((v) => (
+                        <option key={`v-${v.id}`} value={v.id.toString()}>
+                          👤 {v.nombre} (Vendedor - {v.codigo})
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+
+                  {usuarios.length > 0 && (
+                    <optgroup label="Usuarios del Sistema">
+                      {usuarios.filter(u => u.rol !== 'Desarrollador').map((u) => (
+                        <option key={`u-${u.id}`} value={u.id.toString()}>
+                          🔑 {u.nombre || u.username || u.email} ({u.rol || 'Usuario'})
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
 
                 <button
