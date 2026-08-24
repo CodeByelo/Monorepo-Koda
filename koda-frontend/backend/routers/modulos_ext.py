@@ -1861,50 +1861,66 @@ class AprobarOrdenRequest(BaseModel):
 
 @pagos_router.post("/ordenes/aprobar")
 def aprobar_orden(body: AprobarOrdenRequest, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    orden_id_str = body.orden_id
-    if not orden_id_str:
-         raise HTTPException(status_code=400, detail="Falta el orden_id")
     try:
-         c_id = int(orden_id_str.replace("OP-", ""))
-    except ValueError:
-         raise HTTPException(status_code=400, detail="Formato de orden_id inválido")
+        orden_id_str = body.orden_id
+        if not orden_id_str:
+             raise HTTPException(status_code=400, detail="Falta el orden_id")
+        try:
+             c_id = int(orden_id_str.replace("OP-", ""))
+        except ValueError:
+             raise HTTPException(status_code=400, detail="Formato de orden_id inválido")
 
-    cxp = db.query(CuentaPorPagar).filter(
-        CuentaPorPagar.id == c_id,
-        CuentaPorPagar.tenant_id == current_user.tenant_id
-    ).first()
-    if not cxp:
-         raise HTTPException(status_code=404, detail="Cuenta por pagar no encontrada")
+        cxp = db.query(CuentaPorPagar).filter(
+            CuentaPorPagar.id == c_id,
+            CuentaPorPagar.tenant_id == current_user.tenant_id
+        ).first()
+        if not cxp:
+             raise HTTPException(status_code=404, detail="Cuenta por pagar no encontrada")
 
-    if cxp.estado == "PAGADA":
-         raise HTTPException(status_code=400, detail="Esta cuenta ya fue pagada")
+        if cxp.estado == "PAGADA":
+             raise HTTPException(status_code=400, detail="Esta cuenta ya fue pagada")
 
-    banco = db.query(CuentaBancaria).filter(
-        CuentaBancaria.id == body.banco_id,
-        CuentaBancaria.tenant_id == current_user.tenant_id
-    ).first()
-    if not banco:
-         raise HTTPException(status_code=400, detail="La cuenta bancaria seleccionada no existe")
+        banco = db.query(CuentaBancaria).filter(
+            CuentaBancaria.id == body.banco_id,
+            CuentaBancaria.tenant_id == current_user.tenant_id
+        ).first()
+        if not banco:
+             raise HTTPException(status_code=400, detail="La cuenta bancaria seleccionada no existe")
 
-    monto_restante = cxp.monto_total_usd - cxp.monto_pagado_usd
-    cxp.monto_pagado_usd = cxp.monto_total_usd
-    cxp.estado = "PAGADA"
+        monto_restante = cxp.monto_total_usd - cxp.monto_pagado_usd
+        cxp.monto_pagado_usd = cxp.monto_total_usd
+        cxp.estado = "PAGADA"
 
-    banco.saldo_actual_usd -= monto_restante
+        banco.saldo_actual_usd -= monto_restante
 
-    mov = MovimientoBancario(
-        cuenta_id=banco.id,
-        concepto=f"Pago Orden {orden_id_str} | Prov: {cxp.proveedor.nombre if cxp.proveedor else 'N/A'} ({body.metodo})",
-        monto_usd=monto_restante,
-        tasa_cambio_bs=cxp.tasa_cambio_bs,
-        tipo="EGRESO",
-        referencia=body.referencia,
-        estado="ACTIVO",
-        tenant_id=current_user.tenant_id
-    )
-    db.add(mov)
-    db.commit()
-    return {"ok": True, "message": "Pago registrado y procesado exitosamente"}
+        mov = MovimientoBancario(
+            cuenta_id=banco.id,
+            concepto=f"Pago Orden {orden_id_str} | Prov: {cxp.proveedor.nombre if cxp.proveedor else 'N/A'} ({body.metodo})",
+            monto_usd=monto_restante,
+            tasa_cambio_bs=cxp.tasa_cambio_bs,
+            tipo="EGRESO",
+            referencia=body.referencia,
+            estado="ACTIVO",
+            tenant_id=current_user.tenant_id
+        )
+        db.add(mov)
+
+        # Generar Asiento Contable Automático de Pago a Proveedor
+        ContabilidadService.generar_asiento_pago_proveedor(
+            monto=monto_restante,
+            tasa_cambio_bs=cxp.tasa_cambio_bs,
+            referencia=body.referencia or orden_id_str,
+            concepto=f"Pago Orden {orden_id_str} - Proveedor {cxp.proveedor.nombre if cxp.proveedor else 'N/A'}",
+            fecha=datetime.now(timezone.utc),
+            db=db,
+            tenant_id=current_user.tenant_id,
+        )
+
+        db.commit()
+        return {"ok": True, "message": "Pago registrado y procesado exitosamente"}
+    except HTTPException:
+        db.rollback()
+        raise
 
 
 class CuentaPorPagarManualRequest(BaseModel):
@@ -2037,45 +2053,62 @@ def validar_lotes(db: Session = Depends(get_db), current_user = Depends(get_curr
 
 @pagos_router.post("/lotes/procesar")
 def procesar_lotes(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    ref = body.get("referencia", "LOTE-GEN")
-    
-    cxps = db.query(CuentaPorPagar).filter(
-        CuentaPorPagar.estado != "PAGADA",
-        CuentaPorPagar.tenant_id == current_user.tenant_id
-    ).all()
-    if not cxps:
-        return {"ok": True, "message": "No hay deudas pendientes"}
+    try:
+        ref = body.get("referencia", "LOTE-GEN")
+        
+        cxps = db.query(CuentaPorPagar).filter(
+            CuentaPorPagar.estado != "PAGADA",
+            CuentaPorPagar.tenant_id == current_user.tenant_id
+        ).all()
+        if not cxps:
+            return {"ok": True, "message": "No hay deudas pendientes"}
 
-    banco = db.query(CuentaBancaria).filter(
-        CuentaBancaria.activa == True,
-        CuentaBancaria.tenant_id == current_user.tenant_id
-    ).first()
-    if not banco:
-        raise HTTPException(status_code=400, detail="No hay una cuenta bancaria activa")
+        banco = db.query(CuentaBancaria).filter(
+            CuentaBancaria.activa == True,
+            CuentaBancaria.tenant_id == current_user.tenant_id
+        ).first()
+        if not banco:
+            raise HTTPException(status_code=400, detail="No hay una cuenta bancaria activa")
 
-    total_debitar_usd = 0.0
-    for c in cxps:
-        saldo_usd = float(c.monto_total_usd - c.monto_pagado_usd)
-        c.monto_pagado_usd = c.monto_total_usd
-        c.estado = "PAGADA"
-        total_debitar_usd += saldo_usd
+        total_debitar_usd = Decimal("0.00")
+        for c in cxps:
+            saldo_usd = c.monto_total_usd - c.monto_pagado_usd
+            c.monto_pagado_usd = c.monto_total_usd
+            c.estado = "PAGADA"
+            total_debitar_usd += saldo_usd
 
-    banco.saldo_actual_usd -= Decimal(str(total_debitar_usd))
+        banco.saldo_actual_usd -= total_debitar_usd
 
-    mov = MovimientoBancario(
-        cuenta_id=banco.id,
-        concepto=f"Procesamiento Lote Pagos Ref: {ref}",
-        monto_usd=Decimal(str(total_debitar_usd)),
-        tasa_cambio_bs=Decimal("36.52"),
-        tipo="EGRESO",
-        referencia=ref,
-        estado="ACTIVO",
-        tenant_id=current_user.tenant_id
-    )
-    db.add(mov)
-    db.commit()
+        tasa_bcv = Decimal(str(tasa_actual(db, current_user.tenant_id)))
 
-    return {"ok": True, "message": f"Lote de pagos procesado. {len(cxps)} facturas liquidadas."}
+        mov = MovimientoBancario(
+            cuenta_id=banco.id,
+            concepto=f"Procesamiento Lote Pagos Ref: {ref}",
+            monto_usd=total_debitar_usd,
+            tasa_cambio_bs=tasa_bcv,
+            tipo="EGRESO",
+            referencia=ref,
+            estado="ACTIVO",
+            tenant_id=current_user.tenant_id
+        )
+        db.add(mov)
+
+        # Generar Asiento Contable Automático de Pago por Lote a Proveedores
+        ContabilidadService.generar_asiento_pago_proveedor(
+            monto=total_debitar_usd,
+            tasa_cambio_bs=tasa_bcv,
+            referencia=ref,
+            concepto=f"Pago por Lote - {len(cxps)} facturas - Ref: {ref}",
+            fecha=datetime.now(timezone.utc),
+            db=db,
+            tenant_id=current_user.tenant_id,
+        )
+
+        db.commit()
+        return {"ok": True, "message": f"Lote de pagos procesado. {len(cxps)} facturas liquidadas."}
+    except HTTPException:
+        db.rollback()
+        raise
 
 
 # --- TESORERÍA ---

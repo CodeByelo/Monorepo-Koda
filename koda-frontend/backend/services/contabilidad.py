@@ -318,3 +318,80 @@ class ContabilidadService:
         )
         db.add(asiento)
         return asiento
+
+    @staticmethod
+    def generar_asiento_pago_proveedor(
+        monto: Decimal,
+        tasa_cambio_bs: Decimal,
+        referencia: str,
+        concepto: str,
+        fecha,
+        db: Session,
+        tenant_id: str = None
+    ):
+        """
+        Crea un asiento contable automático para el pago de una o varias
+        Cuentas por Pagar a proveedores. Afecta:
+          - DEBE: 2.1.01 Cuentas por Pagar Comerciales (monto pagado)
+          - HABER: 1.1.01 Caja y Bancos (monto pagado)
+        """
+        fecha_asiento = fecha or datetime.now(timezone.utc)
+        periodo_asiento = fecha_asiento.strftime("%Y-%m")
+
+        cierre_query = db.query(CierrePeriodo).filter(CierrePeriodo.periodo == periodo_asiento)
+        if tenant_id:
+            cierre_query = cierre_query.filter(CierrePeriodo.tenant_id == tenant_id)
+        cierre = cierre_query.first()
+        if cierre:
+            raise HTTPException(
+                status_code=403,
+                detail=f"No se pueden registrar asientos en el período {periodo_asiento} porque está CERRADO."
+            )
+
+        cta_cxp_query = db.query(CuentaContable).filter(CuentaContable.codigo == "2.1.01")
+        if tenant_id:
+            cta_cxp_query = cta_cxp_query.filter(CuentaContable.tenant_id == tenant_id)
+        cta_cxp = cta_cxp_query.first()
+        if not cta_cxp:
+            raise HTTPException(status_code=400, detail="Cuenta contable 2.1.01 (Cuentas por Pagar Comerciales) no encontrada.")
+
+        cta_banco_query = db.query(CuentaContable).filter(CuentaContable.codigo == "1.1.01")
+        if tenant_id:
+            cta_banco_query = cta_banco_query.filter(CuentaContable.tenant_id == tenant_id)
+        cta_banco = cta_banco_query.first()
+        if not cta_banco:
+            raise HTTPException(status_code=400, detail="Cuenta contable 1.1.01 (Caja y Bancos) no encontrada.")
+
+        monto_dec = Decimal(str(monto)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if monto_dec <= Decimal("0.00"):
+            return None
+
+        asiento = AsientoContable(
+            fecha=fecha_asiento,
+            concepto=concepto,
+            referencia=referencia,
+            total_debe_usd=monto_dec,
+            total_haber_usd=monto_dec,
+            tasa_cambio_bs=Decimal(str(tasa_cambio_bs or 1.0)),
+            estado="ACTIVO",
+            detalles=[
+                AsientoDetalle(
+                    cuenta_codigo="2.1.01",
+                    cuenta_nombre=cta_cxp.nombre,
+                    debe_usd=monto_dec,
+                    haber_usd=Decimal("0.00"),
+                    tenant_id=tenant_id
+                ),
+                AsientoDetalle(
+                    cuenta_codigo="1.1.01",
+                    cuenta_nombre=cta_banco.nombre,
+                    debe_usd=Decimal("0.00"),
+                    haber_usd=monto_dec,
+                    tenant_id=tenant_id
+                )
+            ],
+            tenant_id=tenant_id
+        )
+        db.add(asiento)
+        return asiento
+
