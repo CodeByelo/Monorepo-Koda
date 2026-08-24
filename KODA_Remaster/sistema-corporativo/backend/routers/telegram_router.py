@@ -376,19 +376,23 @@ async def _get_vendedor_for_user(conn, tenant_id: str, user_id: str) -> Optional
     except Exception as e:
         logger.error(f"[TELEGRAM] Error verificando perfil de vendedor por UUID: {e}")
 
-    # 3. Fallback: Si el usuario es un Admin/Staff del tenant, vincular con el primer vendedor activo
+    # 3. Fallback SEGURO: solo si hay EXACTAMENTE un vendedor activo en el
+    # tenant, no hay ambigüedad posible sobre a quién asignarle la venta.
+    # Si hay 2 o más, NO se adivina — se exige vinculación explícita para
+    # no atribuir mal la comisión a la persona equivocada.
     try:
-        row = await conn.fetchrow(
+        rows = await conn.fetch(
             """
             SELECT id, nombre, porcentaje_comision
             FROM vendedores
             WHERE (tenant_id = $1::uuid OR tenant_id IS NULL)
               AND activo = true
-            ORDER BY id ASC LIMIT 1
             """,
             uuid.UUID(tenant_id)
         )
-        return dict(row) if row else None
+        if len(rows) == 1:
+            return dict(rows[0])
+        return None
     except Exception as e:
         logger.error(f"[TELEGRAM] Fallback vendedor: {e}")
         return None
@@ -512,9 +516,8 @@ async def _handle_venta_command(command_text: str, chat_id: int, session_row, co
     if not vendedor:
         await send_telegram_message(
             chat_id,
-            "❌ Tu cuenta no tiene un perfil de Vendedor activo asociado. "
-            "El comando /venta solo está disponible para vendedores registrados. "
-            "Contacta a un administrador si crees que esto es un error."
+            "❌ Tu cuenta no tiene un perfil de vendedor vinculado. "
+            "Pide a un administrador que te vincule en Vendedores antes de usar /venta."
         )
         return {"status": "not_a_vendedor"}
 
@@ -573,8 +576,8 @@ async def _handle_comprar_command(command_text: str, chat_id: int, session_row, 
     if not vendedor:
         await send_telegram_message(
             chat_id,
-            "❌ Tu cuenta no tiene un perfil de Vendedor activo asociado. "
-            "El comando /comprar solo está disponible para vendedores registrados."
+            "❌ Tu cuenta no tiene un perfil de vendedor vinculado. "
+            "Pide a un administrador que te vincule en Vendedores antes de usar /comprar."
         )
         return {"status": "not_a_vendedor"}
 

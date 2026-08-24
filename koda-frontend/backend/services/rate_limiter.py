@@ -57,14 +57,18 @@ def check_rate_limit(request: Request) -> None:
     path: str = request.url.path
 
     # Exclusión de rutas de salud, recursos estáticos y llamadas internas del Bot/Webhooks
+    from backend.core.security import BOT_INTERNAL_API_KEY
+    import hmac
+
     if (
-        path == "/" or 
-        path.startswith("/health") or 
-        path == "/favicon.ico" or 
-        path.startswith("/bot/") or 
-        path.startswith("/webhook/") or 
-        request.headers.get("X-Bot-Api-Key") or 
-        request.headers.get("X-Telegram-Link-Key")
+        path == "/" or
+        path.startswith("/health") or
+        path == "/favicon.ico" or
+        (
+            path.startswith("/bot/") and
+            hmac.compare_digest(request.headers.get("X-Bot-Api-Key", ""), BOT_INTERNAL_API_KEY)
+        ) or
+        path.startswith("/webhook/")
     ):
         return
 
