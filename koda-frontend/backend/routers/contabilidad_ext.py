@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from backend.core.database import get_db
 from backend.models.accounting import AsientoContable, AsientoDetalle, CierrePeriodo
 from backend.models.erp_extended import CuentaContable
-from backend.utils.helpers import ventas_periodo, to_float, verificar_periodo_abierto
+from backend.utils.helpers import ventas_periodo, to_float, verificar_periodo_abierto, tasa_actual
 from backend.core.security import get_current_user
 
 router = APIRouter(prefix="/contabilidad", tags=["Contabilidad"])
@@ -151,12 +151,15 @@ EVENTOS_DEFAULT = [
     {"evento": "COBRO_CLIENTE",    "modulo": "COBROS",   "titulo": "Cobro a Cliente (Efectivo)",     "desc": "Entrada de efectivo por cobro de factura.", "readonly_debe": False, "readonly_haber": False},
 ]
 
-def _seed_matriz(db: Session):
+def _seed_matriz(db: Session, tenant_id):
     from backend.models.erp_extended import MatrizIntegracion
     for ev in EVENTOS_DEFAULT:
-        existing = db.query(MatrizIntegracion).filter(MatrizIntegracion.evento == ev["evento"]).first()
+        existing = db.query(MatrizIntegracion).filter(
+            MatrizIntegracion.tenant_id == tenant_id,
+            MatrizIntegracion.evento == ev["evento"]
+        ).first()
         if not existing:
-            db.add(MatrizIntegracion(evento=ev["evento"], activo=True))
+            db.add(MatrizIntegracion(tenant_id=tenant_id, evento=ev["evento"], activo=True))
     db.commit()
 
 class MatrizLineaUpdate(BaseModel):
@@ -172,8 +175,10 @@ class MatrizSave(BaseModel):
 @router.get("/matriz-integracion")
 def get_matriz_integracion(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     from backend.models.erp_extended import MatrizIntegracion
-    _seed_matriz(db)
-    registros = db.query(MatrizIntegracion).all()
+    _seed_matriz(db, current_user.tenant_id)
+    registros = db.query(MatrizIntegracion).filter(
+        MatrizIntegracion.tenant_id == current_user.tenant_id
+    ).all()
     reg_map = {r.evento: r for r in registros}
 
     cuentas = db.query(CuentaContable).filter(
@@ -203,9 +208,12 @@ def get_matriz_integracion(db: Session = Depends(get_db), current_user = Depends
 @router.post("/matriz-integracion")
 def save_matriz_integracion(body: MatrizSave, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     from backend.models.erp_extended import MatrizIntegracion
-    _seed_matriz(db)
+    _seed_matriz(db, current_user.tenant_id)
     for linea in body.lineas:
-        reg = db.query(MatrizIntegracion).filter(MatrizIntegracion.evento == linea.evento).first()
+        reg = db.query(MatrizIntegracion).filter(
+            MatrizIntegracion.tenant_id == current_user.tenant_id,
+            MatrizIntegracion.evento == linea.evento
+        ).first()
         if reg:
             reg.cuenta_debe_codigo = linea.cuenta_debe_codigo
             reg.cuenta_haber_codigo = linea.cuenta_haber_codigo
@@ -213,6 +221,7 @@ def save_matriz_integracion(body: MatrizSave, db: Session = Depends(get_db), cur
             reg.usuario_modificacion = body.usuario
         else:
             db.add(MatrizIntegracion(
+                tenant_id=current_user.tenant_id,
                 evento=linea.evento,
                 cuenta_debe_codigo=linea.cuenta_debe_codigo,
                 cuenta_haber_codigo=linea.cuenta_haber_codigo,
@@ -227,7 +236,7 @@ def save_matriz_integracion(body: MatrizSave, db: Session = Depends(get_db), cur
 def sincronizar_matriz(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     """Sincroniza la tabla de eventos con los eventos predefinidos del sistema."""
     from backend.models.erp_extended import MatrizIntegracion
-    _seed_matriz(db)
+    _seed_matriz(db, current_user.tenant_id)
     return {"ok": True, "message": f"Sincronización completada. {len(EVENTOS_DEFAULT)} eventos verificados."}
 
 
@@ -562,12 +571,20 @@ def crear_asiento(body: AsientoCreate, db: Session = Depends(get_db), current_us
     total_haber = sum(float(l.haber) for l in body.lineas)
     if round(total_debe, 2) != round(total_haber, 2):
         raise HTTPException(400, detail="El asiento debe cuadrar: Debe = Haber")
+
+    tasa_val = tasa_actual(db, current_user.tenant_id)
+    if not tasa_val or tasa_val <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Configura primero una tasa de cambio BCV antes de crear asientos manuales."
+        )
+
     asiento = AsientoContable(
         concepto=body.concepto,
         referencia=body.referencia,
         total_debe=total_debe,
         total_haber=total_haber,
-        tasa_cambio_bs=Decimal("36.52"), # Default rate
+        tasa_cambio_bs=Decimal(str(tasa_val)),
         tenant_id=current_user.tenant_id  # Aislar por empresa
     )
     db.add(asiento)
