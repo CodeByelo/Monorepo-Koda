@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from backend.core.database import get_db
 from backend.models.accounting import AsientoContable, AsientoDetalle
 from backend.schemas.accounting import AsientoContableResponse, PaginatedAsientoContableResponse
-from backend.utils.helpers import verificar_periodo_abierto
+from backend.utils.helpers import verificar_periodo_abierto, tasa_actual
 from backend.core.security import get_current_user
 
 router = APIRouter()
@@ -166,12 +166,20 @@ def crear_asiento(body: AsientoCreate, db: Session = Depends(get_db), current_us
     total_haber = sum(float(l.haber) for l in body.lineas)
     if round(total_debe, 2) != round(total_haber, 2):
         raise HTTPException(400, detail="El asiento debe cuadrar: Debe = Haber")
+
+    tasa_val = tasa_actual(db, current_user.tenant_id)
+    if not tasa_val or tasa_val <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Configura primero una tasa de cambio BCV antes de crear asientos manuales."
+        )
+
     asiento = AsientoContable(
         concepto=body.concepto,
         referencia=body.referencia,
         total_debe=total_debe,
         total_haber=total_haber,
-        tasa_cambio_bs=Decimal("36.52"), # Default rate
+        tasa_cambio_bs=Decimal(str(tasa_val)),
         tenant_id=current_user.tenant_id  # Aislar por empresa
     )
     db.add(asiento)

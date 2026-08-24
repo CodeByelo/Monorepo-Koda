@@ -71,10 +71,14 @@ class CuentaContable(Base):
 
 class MatrizIntegracion(Base):
     __tablename__ = "matriz_integracion"
-    __table_args__ = {'schema': 'public'}
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'evento', name='_tenant_evento_matriz_uc'),
+        {'schema': 'public'},
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    evento = Column(String(100), unique=True, nullable=False)  # e.g. VENTA_CONTADO, IVA_DEBITO, etc.
+    tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    evento = Column(String(100), nullable=False)
     cuenta_debe_codigo = Column(String(50), nullable=True)
     cuenta_haber_codigo = Column(String(50), nullable=True)
     activo = Column(Boolean, default=True, nullable=False)
