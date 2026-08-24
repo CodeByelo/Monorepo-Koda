@@ -40,14 +40,13 @@ def test_crear_asiento_usa_tasa_actual_no_hardcoded(setup_db):
         tenant_id=tenant_id
     )
     db.add(tenant)
+    db.flush()  # asegura que el tenant exista antes de insertar filas que referencian su FK
     db.add(user)
     
     # Crear tasa real específica para este tenant
     tasa_real_valor = Decimal("785.40")
     tasa = TasaCambio(
         tenant_id=tenant_id,
-        moneda_origen="USD",
-        moneda_destino="VES",
         valor_ves=tasa_real_valor,
         fuente="BCV_OFICIAL",
         fecha=datetime.now(timezone.utc)
@@ -141,6 +140,7 @@ def test_matriz_integracion_aislamiento_multi_tenant(setup_db):
         tenant_id=tenant_b
     )
     db.add_all([tenant_obj_a, tenant_obj_b])
+    db.flush()  # asegura que ambos tenants existan antes de insertar sus perfiles
     db.add_all([user_a, user_b])
     db.commit()
 
