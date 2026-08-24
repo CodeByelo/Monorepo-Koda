@@ -172,6 +172,101 @@ class ContabilidadService:
         return asiento
 
     @staticmethod
+    def generar_asiento_compra(compra, db: Session, tenant_id: str = None):
+        """
+        Crea un asiento contable automático para el registro de una compra a proveedor.
+        Afecta:
+          - DEBE: 1.1.03 Inventario de Mercancía (si compra.categoria == "BIENES_INVENTARIO")
+                  o 5.1.03 Otras Asignaciones (Gasto) (cualquier otra categoría) — por el subtotal
+          - DEBE: 1.1.04 IVA Crédito Fiscal (monto de IVA)
+          - HABER: 2.1.01 Cuentas por Pagar Comerciales (total de la compra)
+        """
+        periodo_asiento = (compra.fecha or datetime.now(timezone.utc)).strftime("%Y-%m")
+
+        cierre_query = db.query(CierrePeriodo).filter(CierrePeriodo.periodo == periodo_asiento)
+        if tenant_id:
+            cierre_query = cierre_query.filter(CierrePeriodo.tenant_id == tenant_id)
+        cierre = cierre_query.first()
+        if cierre:
+            raise HTTPException(status_code=403, detail=f"No se pueden registrar asientos en el período {periodo_asiento} porque está CERRADO.")
+
+        total_debe = Decimal("0.00")
+        total_haber = Decimal("0.00")
+        detalles = []
+
+        subtotal = Decimal(str(compra.subtotal_usd or 0))
+        iva = Decimal(str(compra.iva_usd or 0))
+        total_compra = Decimal(str(compra.total_usd or 0))
+
+        # Determinar cuenta de débito según categoría
+        if (compra.categoria or "BIENES_INVENTARIO") == "BIENES_INVENTARIO":
+            cuenta_debe_codigo = "1.1.03"
+            cuenta_debe_nombre = "Inventario de Mercancía"
+        else:
+            cuenta_debe_codigo = "5.1.03"
+            cuenta_debe_nombre = "Otras Asignaciones (Gasto)"
+
+        # Debe: Inventario o Gastos (Subtotal)
+        if subtotal > 0:
+            detalles.append(AsientoDetalle(
+                cuenta_codigo=cuenta_debe_codigo,
+                cuenta_nombre=cuenta_debe_nombre,
+                debe_usd=subtotal,
+                haber_usd=Decimal("0.00"),
+                tenant_id=tenant_id
+            ))
+            total_debe += subtotal
+
+        # Debe: IVA Crédito Fiscal
+        if iva > 0:
+            detalles.append(AsientoDetalle(
+                cuenta_codigo="1.1.04",
+                cuenta_nombre="IVA Crédito Fiscal",
+                debe_usd=iva,
+                haber_usd=Decimal("0.00"),
+                tenant_id=tenant_id
+            ))
+            total_debe += iva
+
+        # Haber: Cuentas por Pagar Comerciales (Total)
+        if total_compra > 0:
+            detalles.append(AsientoDetalle(
+                cuenta_codigo="2.1.01",
+                cuenta_nombre="Cuentas por Pagar Comerciales",
+                debe_usd=Decimal("0.00"),
+                haber_usd=total_compra,
+                tenant_id=tenant_id
+            ))
+            total_haber += total_compra
+
+        # Ajuste por redondeo menor (<= 0.02)
+        diff = total_debe - total_haber
+        if abs(diff) > 0 and abs(diff) <= Decimal("0.02"):
+            for det in detalles:
+                if det.cuenta_codigo == cuenta_debe_codigo:
+                    det.debe_usd -= diff
+                    total_debe -= diff
+                    break
+
+        proveedor_nombre = compra.proveedor.nombre if (getattr(compra, "proveedor", None) and getattr(compra.proveedor, "nombre", None)) else ""
+        concepto_prov = f" - Proveedor {proveedor_nombre}" if proveedor_nombre else ""
+        concepto = f"Registro de Compra - Factura {compra.numero_factura}{concepto_prov}"
+
+        asiento = AsientoContable(
+            fecha=compra.fecha or datetime.now(timezone.utc),
+            concepto=concepto,
+            referencia=f"COMPRA-{compra.numero_factura}",
+            total_debe_usd=total_debe,
+            total_haber_usd=total_haber,
+            tasa_cambio_bs=Decimal(str(compra.tasa_cambio_bs or 1.0)),
+            estado="ACTIVO",
+            detalles=detalles,
+            tenant_id=tenant_id
+        )
+        db.add(asiento)
+        return asiento
+
+    @staticmethod
     def generar_asiento_pago(pago, db: Session, tenant_id: str = None):
         """
         Crea un asiento contable automático para el registro de un pago recibido.

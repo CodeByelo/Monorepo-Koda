@@ -25,6 +25,7 @@ from backend.schemas.operations import (
 from backend.core.security import get_current_user, require_role
 from backend.models.core import TasaCambio
 from backend.utils.helpers import to_float, periodo_rango, ventas_periodo, tasa_actual, margen_bruto_pct, get_almacen_principal_id, verificar_periodo_abierto
+from backend.services.contabilidad import ContabilidadService
 
 def _as_aware(dt):
     """Ensure a datetime is timezone-aware (UTC). Handles naive datetimes from DB."""
@@ -735,6 +736,9 @@ def crear_compra(
             if recepcion:
                 recepcion.estado = "Conciliado"
                 recepcion.orden_compra = compra_in.numero_factura # Guardamos la referencia cruzada
+
+        # Generar Asiento Contable Automático de Compra
+        ContabilidadService.generar_asiento_compra(nueva_compra, db, tenant_id=current_user.tenant_id)
                 
         db.commit()
         db.refresh(nueva_compra)
