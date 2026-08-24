@@ -67,6 +67,9 @@ def registrar_venta_y_cxc(
         ).with_for_update().all()
         productos_dict = {p.id: p for p in productos}
 
+        from backend.utils.helpers import resolver_almacen_venta, descontar_stock_almacen
+        almacen_venta_id = resolver_almacen_venta(db, tenant_id)
+
         lineas = []
         for detalle_in in venta_in.detalles:
             producto = productos_dict.get(detalle_in.producto_id)
@@ -83,6 +86,7 @@ def registrar_venta_y_cxc(
                 )
 
             producto.stock -= detalle_in.cantidad
+            descontar_stock_almacen(db, tenant_id, producto.id, almacen_venta_id, detalle_in.cantidad)
 
             lineas.append(LineaFactura(
                 producto_id=producto.id,
@@ -102,6 +106,7 @@ def registrar_venta_y_cxc(
             moneda_documento=venta_in.moneda_pago,
             dias_credito=venta_in.dias_credito,
             vendedor_id=venta_in.vendedor_id,
+            almacen_id=almacen_venta_id,
         )
 
         # 4. Auditoría (mismo patrón que facturacion.py/bot_api.py: cada router

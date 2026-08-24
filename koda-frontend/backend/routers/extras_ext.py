@@ -406,6 +406,7 @@ class AlmacenCreate(BaseModel):
     nombre: str
     responsable: Optional[str] = None
     direccion: Optional[str] = None
+    tipo: Optional[str] = "ALMACEN"  # 'LOCAL' o 'ALMACEN'
 
 
 @router.get("/inventario/almacenes")
@@ -418,6 +419,7 @@ def listar_almacenes(db: Session = Depends(get_db), current_user: Profile = Depe
             "nombre": a.nombre,
             "responsable": a.responsable or "Sin asignar",
             "direccion": a.direccion or "Dirección no especificada",
+            "tipo": a.tipo,
             "activo": a.activo
         }
         for a in items
@@ -432,11 +434,27 @@ def crear_almacen(payload: AlmacenCreate, db: Session = Depends(get_db), current
     if existing:
         raise HTTPException(status_code=400, detail="El código de almacén ya está registrado.")
 
+    tipo_normalizado = (payload.tipo or "ALMACEN").upper()
+    if tipo_normalizado not in ("LOCAL", "ALMACEN"):
+        raise HTTPException(status_code=400, detail="El tipo debe ser 'LOCAL' o 'ALMACEN'.")
+    if tipo_normalizado == "LOCAL":
+        otro_local = db.query(Almacen).filter(
+            Almacen.tenant_id == current_user.tenant_id,
+            Almacen.activo == True,  # noqa: E712
+            Almacen.tipo == "LOCAL",
+        ).first()
+        if otro_local:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ya existe un Local activo ('{otro_local.nombre}'). Cambia primero su tipo a Almacén antes de marcar otro como Local.",
+            )
+
     nuevo = Almacen(
         codigo=payload.codigo.upper(),
         nombre=payload.nombre,
         responsable=payload.responsable,
         direccion=payload.direccion,
+        tipo=tipo_normalizado,
         activo=True,
         tenant_id=current_user.tenant_id
     )
@@ -451,10 +469,28 @@ def actualizar_almacen(almacen_id: int, payload: AlmacenCreate, db: Session = De
     a = db.query(Almacen).filter(Almacen.id == almacen_id, Almacen.tenant_id == current_user.tenant_id).first()
     if not a:
         raise HTTPException(status_code=404, detail="Almacén no encontrado.")
+
+    tipo_normalizado = (payload.tipo or "ALMACEN").upper()
+    if tipo_normalizado not in ("LOCAL", "ALMACEN"):
+        raise HTTPException(status_code=400, detail="El tipo debe ser 'LOCAL' o 'ALMACEN'.")
+    if tipo_normalizado == "LOCAL":
+        otro_local = db.query(Almacen).filter(
+            Almacen.tenant_id == current_user.tenant_id,
+            Almacen.activo == True,  # noqa: E712
+            Almacen.tipo == "LOCAL",
+            Almacen.id != almacen_id,
+        ).first()
+        if otro_local:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ya existe un Local activo ('{otro_local.nombre}'). Cambia primero su tipo a Almacén antes de marcar otro como Local.",
+            )
+
     a.codigo = payload.codigo.upper()
     a.nombre = payload.nombre
     a.responsable = payload.responsable
     a.direccion = payload.direccion
+    a.tipo = tipo_normalizado
     db.commit()
     return {"ok": True}
 
@@ -487,6 +523,7 @@ def resumen_almacenes(db: Session = Depends(get_db), current_user: Profile = Dep
             "nombre": a.nombre,
             "responsable": a.responsable or "Sin asignar",
             "direccion": a.direccion or "Dirección no especificada",
+            "tipo": a.tipo,
             "activo": a.activo,
             "productos": int(resumen_map[a.id].productos) if a.id in resumen_map else 0,
             "valor_usd": to_float(resumen_map[a.id].valor) if a.id in resumen_map else 0.0,

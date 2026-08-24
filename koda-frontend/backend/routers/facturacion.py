@@ -135,6 +135,9 @@ def emitir_factura_fiscal(
 
     try:
         # --- 3. Resolver productos, validar/descontar stock ---
+        from backend.utils.helpers import resolver_almacen_venta, descontar_stock_almacen
+        almacen_venta_id = resolver_almacen_venta(db, tenant_id)
+
         lineas = []
         for det in detalles_in:
             prod_key = str(det.producto_id)
@@ -158,6 +161,7 @@ def emitir_factura_fiscal(
                 )
 
             producto.stock -= cantidad
+            descontar_stock_almacen(db, tenant_id, producto.id, almacen_venta_id, cantidad)
 
             lineas.append(LineaFactura(
                 producto_id=producto.id,
@@ -181,6 +185,7 @@ def emitir_factura_fiscal(
             dias_credito=0,
             vendedor_id=body.vendedor_id,
             tasa_personalizada=body.tasa_cambio_bs,
+            almacen_id=almacen_venta_id,
         )
 
         now = resultado.venta.fecha

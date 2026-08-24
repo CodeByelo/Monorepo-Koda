@@ -385,6 +385,11 @@ class Almacen(Base):
     responsable = Column(String(100), default="Sin asignar", nullable=True)
     direccion = Column(String(250), default="Dirección no especificada", nullable=True)
     activo = Column(Boolean, default=True, nullable=False)
+    # 'LOCAL' = tu tienda/negocio físico (punto de venta); 'ALMACEN' = depósito
+    # de mercancía. Solo puede existir UN almacén activo con tipo='LOCAL' por
+    # tenant a la vez (ver validación en crear_almacen/actualizar_almacen) —
+    # es el que usan las ventas por defecto para saber de dónde descontar.
+    tipo = Column(String(20), default="ALMACEN", nullable=False)
 
 
 class TransferenciaInventario(Base):

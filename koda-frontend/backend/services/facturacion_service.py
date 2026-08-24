@@ -140,6 +140,7 @@ def procesar_emision_factura(
     dias_credito: int = 0,
     vendedor_id: Optional[int] = None,
     tasa_personalizada: Optional[Decimal] = None,
+    almacen_id: Optional[int] = None,
 ) -> ResultadoFactura:
     if not lineas:
         raise ValueError("La factura debe tener al menos un detalle.")
@@ -289,6 +290,7 @@ def procesar_emision_factura(
             cantidad=-linea.cantidad,
             documento_referencia=numero_factura,
             tenant_id=tenant_id,
+            almacen_id=almacen_id,
         ))
 
     # --- Cuenta por Cobrar ---

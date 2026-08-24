@@ -72,6 +72,47 @@ def get_almacen_principal_id(db: Session, tenant_id) -> Optional[int]:
     return almacen.id if almacen else None
 
 
+def get_almacen_local_id(db: Session, tenant_id) -> Optional[int]:
+    """Devuelve el id del almacén marcado tipo='LOCAL' (la tienda física),
+    o None si el tenant todavía no configuró ninguno como tal."""
+    almacen = (
+        db.query(Almacen)
+        .filter(Almacen.tenant_id == tenant_id, Almacen.activo == True, Almacen.tipo == "LOCAL")  # noqa: E712
+        .first()
+    )
+    return almacen.id if almacen else None
+
+
+def resolver_almacen_venta(db: Session, tenant_id) -> Optional[int]:
+    """Almacén del cual debe descontarse una venta: el marcado LOCAL si
+    existe; si no, el almacén "principal" de siempre (compatibilidad con
+    tenants que aún no configuraron un Local explícito); None si el tenant
+    no tiene ningún almacén activo todavía."""
+    local_id = get_almacen_local_id(db, tenant_id)
+    return local_id if local_id else get_almacen_principal_id(db, tenant_id)
+
+
+def descontar_stock_almacen(db: Session, tenant_id, producto_id: int, almacen_id: Optional[int], cantidad) -> None:
+    """Descuenta `cantidad` del StockPorAlmacen del almacén de una venta.
+
+    Deliberadamente NO bloquea la venta si el desglose por almacén no
+    alcanza o no existe fila — `Producto.stock` (el total global) ya es
+    quien autoriza o rechaza la venta; esto es solo mantener el desglose
+    por almacén lo más fiel posible, con piso en 0 (nunca negativo)."""
+    from backend.models.erp_extended import StockPorAlmacen
+    if not almacen_id:
+        return
+    fila = db.query(StockPorAlmacen).filter(
+        StockPorAlmacen.producto_id == producto_id,
+        StockPorAlmacen.almacen_id == almacen_id,
+        StockPorAlmacen.tenant_id == tenant_id,
+    ).with_for_update().first()
+    if not fila:
+        return
+    nueva_cantidad = Decimal(str(fila.cantidad)) - Decimal(str(cantidad))
+    fila.cantidad = nueva_cantidad if nueva_cantidad > 0 else Decimal("0")
+
+
 def periodo_rango(periodo: str) -> Tuple[datetime, datetime]:
     """periodo formato YYYY-MM -> inicio y fin del mes."""
     year, month = map(int, periodo.split("-"))

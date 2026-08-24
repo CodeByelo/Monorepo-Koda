@@ -41,6 +41,7 @@ from backend.core.security import verify_bot_api_key
 from backend.models.operations import Cliente, Producto
 from backend.models.erp_extended import Almacen, AuditoriaLog, StockPorAlmacen, Vendedor
 from backend.services.facturacion_service import LineaFactura, procesar_emision_factura
+from backend.utils.helpers import resolver_almacen_venta, descontar_stock_almacen
 from backend.services.analitica_inventario import (
     calcular_matriz_abc,
     calcular_rentabilidad,
@@ -195,6 +196,7 @@ def crear_venta_bot(
             Producto.tenant_id == tenant_id,
         ).with_for_update().all()
         productos_por_sku = {p.sku: p for p in productos}
+        almacen_venta_id = resolver_almacen_venta(db, tenant_id)
 
         lineas_factura: List[LineaFactura] = []
         for linea in body.lineas:
@@ -223,6 +225,7 @@ def crear_venta_bot(
                 )
 
             producto.stock -= cantidad
+            descontar_stock_almacen(db, tenant_id, producto.id, almacen_venta_id, cantidad)
 
             lineas_factura.append(LineaFactura(
                 producto_id=producto.id,
@@ -243,6 +246,7 @@ def crear_venta_bot(
             moneda_documento=body.moneda_documento,
             dias_credito=0,
             vendedor_id=vendedor.id,
+            almacen_id=almacen_venta_id,
         )
 
         # --- 5. Auditoría (mismo ledger que el resto del sistema) ---
