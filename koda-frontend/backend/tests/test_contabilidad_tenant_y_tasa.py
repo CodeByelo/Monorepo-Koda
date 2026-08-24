@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.core.database import SessionLocal, Base, engine
-from backend.models.core import Profile, TasaCambio
+from backend.models.core import Profile, TasaCambio, Tenant
 from backend.models.accounting import AsientoContable, AsientoDetalle
 from backend.models.erp_extended import MatrizIntegracion, CuentaContable
 from backend.core.security import get_current_user
@@ -24,6 +24,11 @@ def test_crear_asiento_usa_tasa_actual_no_hardcoded(setup_db):
     """Verifica que POST /contabilidad/asientos use la tasa BCV real del tenant y no 36.52."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
+    tenant = Tenant(
+        id=tenant_id,
+        nombre_empresa=f"Empresa Test {uuid.uuid4().hex[:6]}",
+        estado_licencia="ACTIVA"
+    )
     user = Profile(
         id=uuid.uuid4(),
         username=f"user_{uuid.uuid4().hex[:6]}",
@@ -34,6 +39,7 @@ def test_crear_asiento_usa_tasa_actual_no_hardcoded(setup_db):
         rol_id=2,
         tenant_id=tenant_id
     )
+    db.add(tenant)
     db.add(user)
     
     # Crear tasa real específica para este tenant
@@ -92,6 +98,7 @@ def test_crear_asiento_usa_tasa_actual_no_hardcoded(setup_db):
     db.query(AsientoContable).filter(AsientoContable.id == asiento_id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
+    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -101,6 +108,17 @@ def test_matriz_integracion_aislamiento_multi_tenant(setup_db):
     db = SessionLocal()
     tenant_a = uuid.uuid4()
     tenant_b = uuid.uuid4()
+
+    tenant_obj_a = Tenant(
+        id=tenant_a,
+        nombre_empresa=f"Empresa A {uuid.uuid4().hex[:6]}",
+        estado_licencia="ACTIVA"
+    )
+    tenant_obj_b = Tenant(
+        id=tenant_b,
+        nombre_empresa=f"Empresa B {uuid.uuid4().hex[:6]}",
+        estado_licencia="ACTIVA"
+    )
 
     user_a = Profile(
         id=uuid.uuid4(),
@@ -122,6 +140,7 @@ def test_matriz_integracion_aislamiento_multi_tenant(setup_db):
         rol_id=2,
         tenant_id=tenant_b
     )
+    db.add_all([tenant_obj_a, tenant_obj_b])
     db.add_all([user_a, user_b])
     db.commit()
 
@@ -174,5 +193,6 @@ def test_matriz_integracion_aislamiento_multi_tenant(setup_db):
     # Cleanup
     db.query(MatrizIntegracion).filter(MatrizIntegracion.tenant_id.in_([tenant_a, tenant_b])).delete()
     db.query(Profile).filter(Profile.id.in_([user_a.id, user_b.id])).delete()
+    db.query(Tenant).filter(Tenant.id.in_([tenant_a, tenant_b])).delete()
     db.commit()
     db.close()
