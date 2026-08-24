@@ -55,7 +55,6 @@ def test_compra_genera_asiento_contable_automatico(setup_db):
     proveedor = Proveedor(
         nombre="Distribuidora Mayorista C.A.",
         rif=f"J-{uuid.uuid4().hex[:8].upper()}",
-        contacto="Ventas",
         telefono="0212-0000000",
         tenant_id=tenant_id
     )
@@ -83,7 +82,7 @@ def test_compra_genera_asiento_contable_automatico(setup_db):
     }
 
     res_inv = client.post("/compras", json=payload_inv)
-    assert res_inv.status_code == 200, res_inv.text
+    assert res_inv.status_code == 201, res_inv.text
     compra_inv_id = res_inv.json()["id"]
 
     # Verificar que existe el asiento contable para la compra de inventario
@@ -118,7 +117,7 @@ def test_compra_genera_asiento_contable_automatico(setup_db):
     }
 
     res_srv = client.post("/compras", json=payload_srv)
-    assert res_srv.status_code == 200, res_srv.text
+    assert res_srv.status_code == 201, res_srv.text
     compra_srv_id = res_srv.json()["id"]
 
     asiento_srv = db.query(AsientoContable).filter(
@@ -185,7 +184,6 @@ def test_compra_rechazada_en_periodo_cerrado_y_rollback_completo(setup_db):
     proveedor = Proveedor(
         nombre="Proveedor Cierre S.A.",
         rif=f"J-{uuid.uuid4().hex[:8].upper()}",
-        contacto="Ventas",
         telefono="0212-1111111",
         tenant_id=tenant_id
     )
@@ -216,7 +214,7 @@ def test_compra_rechazada_en_periodo_cerrado_y_rollback_completo(setup_db):
         "total_usd": "348.00",
         "tasa_cambio_bs": "50.00",
         "categoria": "BIENES_INVENTARIO",
-        "fecha_emision": datetime.now(timezone.utc).isoformat()
+        "fecha_emision": datetime.now(timezone.utc).date().isoformat()
     }
 
     res = client.post("/compras", json=payload)
@@ -277,7 +275,6 @@ def test_compra_asiento_visible_en_diario_y_balance(setup_db):
     proveedor = Proveedor(
         nombre="Comercializadora Balance C.A.",
         rif=f"J-{uuid.uuid4().hex[:8].upper()}",
-        contacto="Ventas",
         telefono="0212-2222222",
         tenant_id=tenant_id
     )
@@ -302,7 +299,7 @@ def test_compra_asiento_visible_en_diario_y_balance(setup_db):
     }
 
     res = client.post("/compras", json=payload)
-    assert res.status_code == 200, res.text
+    assert res.status_code == 201, res.text
     compra_id = res.json()["id"]
 
     # 1. Consultar GET /contabilidad/asientos
@@ -311,8 +308,8 @@ def test_compra_asiento_visible_en_diario_y_balance(setup_db):
     data_asientos = res_asientos.json()
     asiento_encontrado = next((a for a in data_asientos["data"] if a["referencia"] == f"COMPRA-{factura}"), None)
     assert asiento_encontrado is not None
-    assert float(asiento_encontrado["total_debe_usd"]) == 580.0
-    assert float(asiento_encontrado["total_haber_usd"]) == 580.0
+    assert float(asiento_encontrado["total_debe"]) == 580.0
+    assert float(asiento_encontrado["total_haber"]) == 580.0
 
     # 2. Consultar GET /contabilidad/balance-comprobacion
     current_period = datetime.now(timezone.utc).strftime("%Y-%m")

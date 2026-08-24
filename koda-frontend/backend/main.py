@@ -226,6 +226,21 @@ async def startup_db_init():
                     """))
                     connection.execute(text("ALTER TABLE public.matriz_integracion DROP CONSTRAINT IF EXISTS _tenant_evento_matriz_uc;"))
                     connection.execute(text("ALTER TABLE public.matriz_integracion ADD CONSTRAINT _tenant_evento_matriz_uc UNIQUE (tenant_id, evento);"))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos ADD COLUMN IF NOT EXISTS tenant_id UUID;"))
+                    connection.execute(text("UPDATE public.cierres_periodos SET tenant_id = '00000000-0000-0000-0000-000000000001' WHERE tenant_id IS NULL;"))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos ALTER COLUMN tenant_id SET NOT NULL;"))
+                    connection.execute(text("""
+                        DO $$ DECLARE r RECORD; BEGIN
+                          FOR r IN SELECT con.conname FROM pg_constraint con
+                            JOIN pg_class rel ON rel.oid = con.conrelid
+                            JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+                            WHERE nsp.nspname='public' AND rel.relname='cierres_periodos' AND con.contype='u'
+                              AND con.conkey = ARRAY(SELECT attnum FROM pg_attribute WHERE attrelid=rel.oid AND attname='periodo')
+                          LOOP EXECUTE format('ALTER TABLE public.cierres_periodos DROP CONSTRAINT IF EXISTS %I', r.conname); END LOOP;
+                        END $$;
+                    """))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos DROP CONSTRAINT IF EXISTS _tenant_periodo_cierre_uc;"))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos ADD CONSTRAINT _tenant_periodo_cierre_uc UNIQUE (tenant_id, periodo);"))
                 else:
                     for col_sql in [
                         "ALTER TABLE productos ADD COLUMN imagen_url TEXT",
@@ -234,6 +249,7 @@ async def startup_db_init():
                         "ALTER TABLE ventas ADD COLUMN igtf_usd NUMERIC(15,2) DEFAULT 0.00",
                         "ALTER TABLE ventas ADD COLUMN creado_por VARCHAR(36)",
                         "ALTER TABLE matriz_integracion ADD COLUMN tenant_id VARCHAR(36)",
+                        "ALTER TABLE cierres_periodos ADD COLUMN tenant_id VARCHAR(36)",
                     ]:
                         try:
                             connection.execute(text(col_sql))

@@ -430,3 +430,72 @@ def test_aislamiento_multitenant_asientos_y_balance(setup_db):
     db.query(Tenant).filter(Tenant.id.in_([tenant_a_id, tenant_b_id])).delete(synchronize_session=False)
     db.commit()
     db.close()
+
+
+def test_cierre_periodo_aislado_por_tenant(setup_db):
+    """5. Verifica que dos tenants distintos puedan cerrar el mismo período sin colisión de unicidad."""
+    db = SessionLocal()
+
+    # Tenant 1
+    tenant_1_id = uuid.uuid4()
+    tenant_1 = Tenant(id=tenant_1_id, nombre_empresa="Tenant 1 Cierre", estado_licencia="ACTIVA")
+    user_1 = Profile(
+        id=uuid.uuid4(),
+        username=f"user_1_{uuid.uuid4().hex[:6]}",
+        nombre="Admin 1",
+        apellido="Test",
+        email=f"user_1_{uuid.uuid4().hex[:6]}@test.com",
+        password_hash="fake",
+        rol_id=1,
+        tenant_id=tenant_1_id
+    )
+    db.add(tenant_1)
+    db.flush()
+    db.add(user_1)
+
+    # Tenant 2
+    tenant_2_id = uuid.uuid4()
+    tenant_2 = Tenant(id=tenant_2_id, nombre_empresa="Tenant 2 Cierre", estado_licencia="ACTIVA")
+    user_2 = Profile(
+        id=uuid.uuid4(),
+        username=f"user_2_{uuid.uuid4().hex[:6]}",
+        nombre="Admin 2",
+        apellido="Test",
+        email=f"user_2_{uuid.uuid4().hex[:6]}@test.com",
+        password_hash="fake",
+        rol_id=1,
+        tenant_id=tenant_2_id
+    )
+    db.add(tenant_2)
+    db.flush()
+    db.add(user_2)
+    db.commit()
+
+    client = TestClient(app)
+    periodo_test = "2026-08"
+
+    # Tenant 1 cierra periodo_test
+    app.dependency_overrides[get_current_user] = lambda: user_1
+    resp_1 = client.post("/contabilidad/cierre/ejecutar", json={"periodo": periodo_test})
+    assert resp_1.status_code == 200, resp_1.text
+    assert resp_1.json()["ok"] is True
+
+    # Tenant 2 cierra el MISMO periodo_test (no debe colisionar)
+    app.dependency_overrides[get_current_user] = lambda: user_2
+    resp_2 = client.post("/contabilidad/cierre/ejecutar", json={"periodo": periodo_test})
+    assert resp_2.status_code == 200, resp_2.text
+    assert resp_2.json()["ok"] is True
+
+    # Verificar que existen ambos registros en la BD
+    cierres = db.query(CierrePeriodo).filter(CierrePeriodo.periodo == periodo_test).all()
+    tenant_ids_cerrados = [c.tenant_id for c in cierres]
+    assert tenant_1_id in tenant_ids_cerrados
+    assert tenant_2_id in tenant_ids_cerrados
+
+    # Cleanup
+    db.query(CierrePeriodo).filter(CierrePeriodo.tenant_id.in_([tenant_1_id, tenant_2_id])).delete(synchronize_session=False)
+    db.query(Profile).filter(Profile.id.in_([user_1.id, user_2.id])).delete(synchronize_session=False)
+    db.query(Tenant).filter(Tenant.id.in_([tenant_1_id, tenant_2_id])).delete(synchronize_session=False)
+    db.commit()
+    db.close()
+
