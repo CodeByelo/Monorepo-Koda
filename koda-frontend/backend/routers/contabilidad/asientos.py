@@ -2,16 +2,34 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
+from decimal import Decimal
 import io
+from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 
 from backend.core.database import get_db
-from backend.models.accounting import AsientoContable
+from backend.models.accounting import AsientoContable, AsientoDetalle
 from backend.schemas.accounting import AsientoContableResponse, PaginatedAsientoContableResponse
+from backend.utils.helpers import verificar_periodo_abierto
 from backend.core.security import get_current_user
 
-router = APIRouter(prefix="/contabilidad", tags=["Contabilidad y Finanzas"])
+router = APIRouter()
+
+
+class AsientoLinea(BaseModel):
+    cuenta_codigo: str
+    cuenta_nombre: str
+    debe: Decimal = Decimal("0")
+    haber: Decimal = Decimal("0")
+    centro_costo: Optional[str] = None
+
+
+class AsientoCreate(BaseModel):
+    concepto: str
+    referencia: str
+    lineas: List[AsientoLinea]
+
 
 @router.get("/asientos", response_model=PaginatedAsientoContableResponse)
 def listar_asientos(
@@ -52,6 +70,7 @@ def listar_asientos(
         "offset": offset,
         "data": asientos
     }
+
 
 @router.get("/asientos/exportar-pdf")
 def exportar_asientos_pdf(
@@ -120,6 +139,7 @@ def exportar_asientos_pdf(
         headers={"Content-Disposition": "attachment; filename=libro_diario_oficial.pdf"}
     )
 
+
 @router.get("/asientos/{id}", response_model=AsientoContableResponse)
 def obtener_asiento(
     id: int,
@@ -135,4 +155,37 @@ def obtener_asiento(
     ).first()
     if not asiento:
         raise HTTPException(status_code=404, detail="Asiento contable no encontrado")
+    return asiento
+
+
+@router.post("/asientos")
+def crear_asiento(body: AsientoCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    verificar_periodo_abierto(db, current_user.tenant_id, datetime.now(timezone.utc), contexto="asientos")
+
+    total_debe = sum(float(l.debe) for l in body.lineas)
+    total_haber = sum(float(l.haber) for l in body.lineas)
+    if round(total_debe, 2) != round(total_haber, 2):
+        raise HTTPException(400, detail="El asiento debe cuadrar: Debe = Haber")
+    asiento = AsientoContable(
+        concepto=body.concepto,
+        referencia=body.referencia,
+        total_debe=total_debe,
+        total_haber=total_haber,
+        tasa_cambio_bs=Decimal("36.52"), # Default rate
+        tenant_id=current_user.tenant_id  # Aislar por empresa
+    )
+    db.add(asiento)
+    db.flush()
+    for l in body.lineas:
+        db.add(AsientoDetalle(
+            asiento_id=asiento.id,
+            cuenta_codigo=l.cuenta_codigo,
+            cuenta_nombre=l.cuenta_nombre,
+            debe=l.debe,
+            haber=l.haber,
+            centro_costo=l.centro_costo,
+            tenant_id=current_user.tenant_id,
+        ))
+    db.commit()
+    db.refresh(asiento)
     return asiento

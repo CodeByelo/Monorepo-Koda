@@ -41,9 +41,9 @@ __all__ = [
     "logistics_new",
 ]
 from backend.routers import (
-    auth, rates, sales, fiscal, inventory, accounting as accounting_router,
+    auth, rates, sales, fiscal, contabilidad, inventory,
     hr as hr_router, productos, proveedores, audit, entidades, clientes,
-    dashboard_ext, fiscal_ext, contabilidad_ext, modulos_ext, admin_ext, extras_ext,
+    dashboard_ext, modulos_ext, admin_ext, extras_ext,
     pagos, reportes, developer, developer_router, payroll, facturacion, telegram_api,
     forense, telemetry, bot_api, garantias, sso_bridge,
 )
@@ -331,9 +331,7 @@ app.include_router(modulos_ext.inventario_ext_router)
 app.include_router(inventory.router)
 app.include_router(fiscal.router)
 app.include_router(audit.router)
-app.include_router(fiscal_ext.router)
-app.include_router(accounting_router.router)
-app.include_router(contabilidad_ext.router)
+app.include_router(contabilidad.router)
 app.include_router(hr_router.router)
 app.include_router(productos.router)
 app.include_router(clientes.router)
