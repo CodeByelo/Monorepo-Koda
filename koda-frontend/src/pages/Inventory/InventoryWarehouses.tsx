@@ -7,7 +7,8 @@ import {
   BookOpen,
   X,
   Store,
-  Warehouse
+  Warehouse,
+  Pencil
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -33,6 +34,16 @@ const InventoryWarehouses = () => {
   const [newAddress, setNewAddress] = useState('');
   const [newTipo, setNewTipo] = useState<'LOCAL' | 'ALMACEN'>('ALMACEN');
   const [isCreating, setIsCreating] = useState(false);
+
+  // Edit Warehouse modal states
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editCode, setEditCode] = useState('');
+  const [editName, setEditName] = useState('');
+  const [editManager, setEditManager] = useState('');
+  const [editAddress, setEditAddress] = useState('');
+  const [editTipo, setEditTipo] = useState<'LOCAL' | 'ALMACEN'>('ALMACEN');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'error') => {
     setToast({ message, type });
@@ -115,6 +126,41 @@ const InventoryWarehouses = () => {
     }
   };
 
+  const openEditModal = (w: any) => {
+    setEditingId(w.id);
+    setEditCode(w.location);
+    setEditName(w.name);
+    setEditManager(w.manager === 'Sin asignar' ? '' : w.manager);
+    setEditAddress(w.address || '');
+    setEditTipo(w.tipo === 'LOCAL' ? 'LOCAL' : 'ALMACEN');
+    setShowEditModal(true);
+  };
+
+  const handleUpdateWarehouse = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingId) return;
+    setIsSavingEdit(true);
+    try {
+      await api.put(`/inventario/almacenes/${editingId}`, {
+        codigo: editCode,
+        nombre: editName,
+        responsable: editManager || 'Sin asignar',
+        direccion: editAddress || 'Dirección no especificada',
+        tipo: editTipo
+      });
+      showToast('Almacén actualizado con éxito.', 'success');
+      setShowEditModal(false);
+      setEditingId(null);
+      fetchAllData();
+    } catch (err: any) {
+      console.error(err);
+      const detail = err?.response?.data?.detail || err?.message || 'Error al actualizar el almacén.';
+      showToast(detail, 'error');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
   const filteredWarehouses = warehouses.filter(w => 
     w.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     w.location.toLowerCase().includes(searchQuery.toLowerCase())
@@ -154,7 +200,6 @@ const InventoryWarehouses = () => {
         </div>
       </header>
 
-      {/* Grid de 4 Columnas de KPIs */}
       <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
         {stats.map((stat, i) => (
           <div key={i} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between h-32 group hover:border-[#0b5156]/30 transition-all">
@@ -167,7 +212,6 @@ const InventoryWarehouses = () => {
         ))}
       </section>
 
-      {/* Banners Horizontales de Mercancía en Tránsito */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {[
           { l: 'EN TRÁNSITO', t: 'Transferencias Pendientes', v: `${dash?.trans?.pendientesUds || 0} uds`, d: 'Confirmar en almacén destino.', c: 'bg-amber-50 border-amber-200 text-amber-800' },
@@ -189,7 +233,6 @@ const InventoryWarehouses = () => {
         ))}
       </div>
 
-      {/* Checklist Horizontal Simétrico de Control de Almacenes */}
       <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 grid grid-cols-1 lg:grid-cols-3 gap-4 text-[10px] font-black text-slate-500 uppercase tracking-wider">
         <div 
           onClick={() => navigate('/inventario/transferencias')}
@@ -214,14 +257,12 @@ const InventoryWarehouses = () => {
         </div>
       </div>
 
-      {/* Separación de Local vs Almacenes de Depósito */}
       {(() => {
         const localWh = filteredWarehouses.find(w => w.tipo === 'LOCAL');
         const depotWarehouses = filteredWarehouses.filter(w => w.tipo !== 'LOCAL');
 
         return (
           <div className="space-y-6">
-            {/* Tarjeta Destacada de Tu Local */}
             {localWh && (
               <article className="w-full bg-gradient-to-r from-teal-900 to-[#0b5156] text-white p-8 rounded-3xl border border-teal-700/50 shadow-lg space-y-4">
                 <div className="flex justify-between items-start flex-wrap gap-4">
@@ -250,12 +291,18 @@ const InventoryWarehouses = () => {
                       <span className="text-[10px] font-bold uppercase text-teal-200 block">Valor en Local</span>
                       <strong className="text-2xl font-black text-amber-300 font-mono">{localWh.value}</strong>
                     </div>
+                    <button
+                      onClick={() => openEditModal(localWh)}
+                      className="bg-white/10 hover:bg-white/20 backdrop-blur-md p-3 rounded-2xl border border-white/10 text-white transition-all"
+                      title="Editar Local"
+                    >
+                      <Pencil size={18} />
+                    </button>
                   </div>
                 </div>
               </article>
             )}
 
-            {/* Tabla de Almacenes de Depósito */}
             <article className="w-full bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
               <div className="flex justify-between items-center flex-wrap gap-4">
                 <div>
@@ -293,12 +340,13 @@ const InventoryWarehouses = () => {
                       <th className="py-4 px-4 text-right">Valor</th>
                       <th className="py-4 px-4 text-center">Tránsito</th>
                       <th className="py-4 px-6 text-center">Estado</th>
+                      <th className="py-4 px-4 text-center">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
                     {depotWarehouses.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="py-12 text-center text-slate-400 font-bold text-xs uppercase tracking-widest">
+                        <td colSpan={8} className="py-12 text-center text-slate-400 font-bold text-xs uppercase tracking-widest">
                           No se encontraron almacenes de depósito registrados.
                         </td>
                       </tr>
@@ -328,6 +376,15 @@ const InventoryWarehouses = () => {
                         <td className="py-5 px-4 text-center font-bold text-amber-600">{w.transit}</td>
                         <td className="py-5 px-6 text-center">
                           <span className={`${w.color} text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-tighter`}>{w.status}</span>
+                        </td>
+                        <td className="py-5 px-4 text-center">
+                          <button
+                            onClick={() => openEditModal(w)}
+                            className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-[#0b5156] transition-colors"
+                            title="Editar almacén"
+                          >
+                            <Pencil size={14} />
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -418,6 +475,87 @@ const InventoryWarehouses = () => {
                 className="w-full bg-[#0b5156] text-white py-3.5 rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all disabled:opacity-70 mt-2"
               >
                 {isCreating ? 'Guardando...' : 'Guardar Instalación'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Editar Almacén */}
+      {showEditModal && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-md p-8 space-y-6 animate-in zoom-in-95 duration-300">
+            <div className="flex justify-between items-center">
+              <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">Editar Almacén / Local</h3>
+              <button
+                onClick={() => setShowEditModal(false)}
+                className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateWarehouse} className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Tipo de Instalación</label>
+                <select
+                  value={editTipo}
+                  onChange={(e) => setEditTipo(e.target.value as 'LOCAL' | 'ALMACEN')}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs font-black text-slate-700 focus:outline-none focus:border-[#0b5156]/50 uppercase"
+                >
+                  <option value="ALMACEN">🏭 Almacén (depósito)</option>
+                  <option value="LOCAL">🏪 Local (mi negocio / punto de venta)</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Código del Almacén</label>
+                <input
+                  type="text"
+                  required
+                  value={editCode}
+                  onChange={(e) => setEditCode(e.target.value.toUpperCase())}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0b5156]/50 uppercase"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Nombre del Almacén / Local</label>
+                <input
+                  type="text"
+                  required
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0b5156]/50"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Responsable</label>
+                <input
+                  type="text"
+                  value={editManager}
+                  onChange={(e) => setEditManager(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0b5156]/50"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Dirección</label>
+                <input
+                  type="text"
+                  value={editAddress}
+                  onChange={(e) => setEditAddress(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#0b5156]/50"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSavingEdit}
+                className="w-full bg-[#0b5156] text-white py-3.5 rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-green-900/20 hover:bg-[#083a3d] transition-all disabled:opacity-70 mt-2"
+              >
+                {isSavingEdit ? 'Guardando...' : 'Guardar Cambios'}
               </button>
             </form>
           </div>
