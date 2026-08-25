@@ -4917,119 +4917,130 @@ def descargar_factura_pdf(
     if tasa_val <= 0:
         tasa_val = 784.6633
 
-    es_solo_bolivares = moneda_doc == 'SOLO_VES'
+    modo_impresion = moneda_doc if moneda_doc in ("SOLO_USD", "SOLO_VES") else "BIMONETARIO"
 
     c.drawString(50, alto - 148, f"Razón Social: {cliente_nombre}")
     c.drawString(50, alto - 162, f"R.I.F. / C.I.: {cliente_rif}")
     c.drawString(50, alto - 176, f"Método de Pago: {metodo_pago}")
-    if not es_solo_bolivares:
+    if modo_impresion != 'SOLO_USD':
         c.drawString(50, alto - 190, f"Tasa de Cambio: Bs. {tasa_val:,.2f}")
-    
-    # Tabla de Detalles
+
+    # --- Tabla de Detalles ---
     c.line(50, alto - 210, ancho - 50, alto - 210)
-    
-    if es_solo_bolivares:
+
+    if modo_impresion == "SOLO_VES":
         data_tabla = [["CANT.", "DESCRIPCIÓN PRODUCTO", "PRECIO (Bs.)", "TOTAL (Bs.)"]]
-    else:
+        col_widths = [50, 260, 100, 100]
+    elif modo_impresion == "SOLO_USD":
         data_tabla = [["CANT.", "DESCRIPCIÓN PRODUCTO", "PRECIO (USD)", "TOTAL (USD)"]]
+        col_widths = [50, 260, 100, 100]
+    else:  # BIMONETARIO — cada línea en AMBAS monedas
+        data_tabla = [["CANT.", "DESCRIPCIÓN", "PRECIO ($)", "PRECIO (Bs.)", "TOTAL ($)", "TOTAL (Bs.)"]]
+        col_widths = [35, 150, 65, 75, 65, 75]
 
     detalles = getattr(venta, "detalles", []) or []
     for item in detalles:
         prod_nombre = item.producto.nombre if (item and getattr(item, "producto", None)) else "Producto"
         precio_usd = float(getattr(item, "precio_usd_capturado", 0) or 0)
         cantidad = float(getattr(item, "cantidad", 1) or 1)
-        
-        if es_solo_bolivares:
-            precio_bs = precio_usd * tasa_val
-            sub_total_linea_bs = precio_bs * cantidad
-            data_tabla.append([
-                f"{cantidad:.0f}",
-                prod_nombre.upper(),
-                f"Bs. {precio_bs:,.2f}",
-                f"Bs. {sub_total_linea_bs:,.2f}"
-            ])
-        else:
-            sub_total_linea = precio_usd * cantidad
-            data_tabla.append([
-                f"{cantidad:.0f}",
-                prod_nombre.upper(),
-                f"${precio_usd:.2f}",
-                f"${sub_total_linea:.2f}"
-            ])
-        
-    if len(data_tabla) == 1:
-        data_tabla.append(["1", "CONSUMO GENERAL", f"${total_usd:.2f}", f"${total_usd:.2f}"])
+        precio_bs = precio_usd * tasa_val
+        sub_total_usd = precio_usd * cantidad
+        sub_total_bs = precio_bs * cantidad
 
-    t = Table(data_tabla, colWidths=[50, 260, 100, 100])
+        if modo_impresion == "SOLO_VES":
+            data_tabla.append([f"{cantidad:.0f}", prod_nombre.upper(), f"Bs. {precio_bs:,.2f}", f"Bs. {sub_total_bs:,.2f}"])
+        elif modo_impresion == "SOLO_USD":
+            data_tabla.append([f"{cantidad:.0f}", prod_nombre.upper(), f"${precio_usd:.2f}", f"${sub_total_usd:.2f}"])
+        else:
+            data_tabla.append([
+                f"{cantidad:.0f}", prod_nombre.upper(),
+                f"${precio_usd:.2f}", f"Bs. {precio_bs:,.2f}",
+                f"${sub_total_usd:.2f}", f"Bs. {sub_total_bs:,.2f}",
+            ])
+
+    if len(data_tabla) == 1:
+        if modo_impresion == "SOLO_VES":
+            data_tabla.append(["1", "CONSUMO GENERAL", f"Bs. {total_usd*tasa_val:,.2f}", f"Bs. {total_usd*tasa_val:,.2f}"])
+        elif modo_impresion == "SOLO_USD":
+            data_tabla.append(["1", "CONSUMO GENERAL", f"${total_usd:.2f}", f"${total_usd:.2f}"])
+        else:
+            data_tabla.append(["1", "CONSUMO GENERAL", f"${total_usd:.2f}", f"Bs. {total_usd*tasa_val:,.2f}", f"${total_usd:.2f}", f"Bs. {total_usd*tasa_val:,.2f}"])
+
+    t = Table(data_tabla, colWidths=col_widths)
     t.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#0b5156")),
         ('TEXTCOLOR', (0,0), (-1,0), colors.white),
         ('ALIGN', (0,0), (-1,-1), 'LEFT'),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0,0), (-1,0), 9),
+        ('FONTSIZE', (0,0), (-1,0), 8 if modo_impresion == "BIMONETARIO" else 9),
         ('BOTTOMPADDING', (0,0), (-1,0), 6),
         ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#f8fafc")),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cbd5e1")),
         ('FONTNAME', (0,1), (-1,-1), 'Helvetica'),
-        ('FONTSIZE', (0,1), (-1,-1), 9),
+        ('FONTSIZE', (0,1), (-1,-1), 8 if modo_impresion == "BIMONETARIO" else 9),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
     ]))
-    
-    # Calcular alto requerido por la tabla
+
     tabla_alto = len(data_tabla) * 20
     pos_y_tabla = alto - 230 - tabla_alto
-    
     t.wrapOn(c, ancho - 100, alto)
     t.drawOn(c, 50, pos_y_tabla)
-    
-    # Resumen de Totales
+
+    # --- Resumen de Totales ---
     pos_y_totales = pos_y_tabla - 20
     c.setLineWidth(1)
     c.line(50, pos_y_totales, ancho - 50, pos_y_totales)
-    
+
     total_bs = total_usd * tasa_val
-    
-    if es_solo_bolivares:
-        subtotal_bs = subtotal_usd * tasa_val
-        iva_bs = iva_usd * tasa_val
-        
+    subtotal_bs = subtotal_usd * tasa_val
+    iva_bs = iva_usd * tasa_val
+    igtf_bs = igtf_usd * tasa_val
+
+    if modo_impresion == "SOLO_VES":
         c.setFont("Helvetica-Bold", 10)
         c.drawString(350, pos_y_totales - 20, "SUBTOTAL (Bs.):")
         c.drawRightString(ancho - 50, pos_y_totales - 20, f"Bs. {subtotal_bs:,.2f}")
-        
         c.drawString(350, pos_y_totales - 35, "I.V.A. (16% Bs.):")
         c.drawRightString(ancho - 50, pos_y_totales - 35, f"Bs. {iva_bs:,.2f}")
-        
         c.setFont("Helvetica-Bold", 12)
         c.setFillColor(colors.HexColor("#0b5156"))
         c.drawString(350, pos_y_totales - 55, "TOTAL GENERAL (Bs.):")
         c.drawRightString(ancho - 50, pos_y_totales - 55, f"Bs. {total_bs:,.2f}")
-    else:
+
+    elif modo_impresion == "SOLO_USD":
         c.setFont("Helvetica-Bold", 10)
         c.drawString(350, pos_y_totales - 20, "SUBTOTAL (USD):")
         c.drawRightString(ancho - 50, pos_y_totales - 20, f"${subtotal_usd:.2f}")
-        
         c.drawString(350, pos_y_totales - 35, "I.V.A. (16% USD):")
         c.drawRightString(ancho - 50, pos_y_totales - 35, f"${iva_usd:.2f}")
-        
         if igtf_usd > 0:
             c.drawString(350, pos_y_totales - 50, "I.G.T.F. PERCIBIDO (3%):")
             c.drawRightString(ancho - 50, pos_y_totales - 50, f"${igtf_usd:.2f}")
             offset_y = 65
         else:
             offset_y = 50
-            
         c.setFont("Helvetica-Bold", 11)
         c.setFillColor(colors.HexColor("#0b5156"))
         c.drawString(350, pos_y_totales - offset_y, "TOTAL GENERAL (USD):")
         c.drawRightString(ancho - 50, pos_y_totales - offset_y, f"${total_usd:.2f}")
-        
-        # Mostrar equivalente en Bs sólo si no es una factura configurada como Solo Divisas estricta
-        if moneda_doc != 'SOLO_USD':
-            c.setFont("Helvetica-Bold", 10)
-            c.setFillColor(colors.HexColor("#1e293b"))
-            c.drawString(350, pos_y_totales - offset_y - 18, "TOTAL EQUIVALENTE (Bs.):")
-            c.drawRightString(ancho - 50, pos_y_totales - offset_y - 18, f"Bs. {total_bs:,.2f}")
+        # SOLO_USD: nada en Bs, ni siquiera una línea de equivalente.
+
+    else:  # BIMONETARIO — cada renglón de totales en ambas monedas
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(350, pos_y_totales - 20, "SUBTOTAL:")
+        c.drawRightString(ancho - 50, pos_y_totales - 20, f"${subtotal_usd:.2f}  /  Bs. {subtotal_bs:,.2f}")
+        c.drawString(350, pos_y_totales - 35, "I.V.A. (16%):")
+        c.drawRightString(ancho - 50, pos_y_totales - 35, f"${iva_usd:.2f}  /  Bs. {iva_bs:,.2f}")
+        if igtf_usd > 0:
+            c.drawString(350, pos_y_totales - 50, "I.G.T.F. (3%):")
+            c.drawRightString(ancho - 50, pos_y_totales - 50, f"${igtf_usd:.2f}  /  Bs. {igtf_bs:,.2f}")
+            offset_y = 65
+        else:
+            offset_y = 50
+        c.setFont("Helvetica-Bold", 11)
+        c.setFillColor(colors.HexColor("#0b5156"))
+        c.drawString(350, pos_y_totales - offset_y, "TOTAL GENERAL:")
+        c.drawRightString(ancho - 50, pos_y_totales - offset_y, f"${total_usd:.2f}  /  Bs. {total_bs:,.2f}")
     
     # Pie de Página Legal
     c.setFillColor(colors.black)
