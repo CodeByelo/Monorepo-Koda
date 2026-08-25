@@ -82,7 +82,7 @@ def _crear_ambiente_facturacion(db):
     db.add(cliente)
 
     producto = Producto(
-        codigo=f"PROD-{uuid.uuid4().hex[:6]}",
+        sku=f"PROD-{uuid.uuid4().hex[:6]}",
         nombre="Producto Prueba POS",
         precio_usd=Decimal("100.00"),
         costo_usd=Decimal("60.00"),
@@ -322,3 +322,15 @@ def test_pdf_factura_se_genera_sin_error_en_los_3_formatos(setup_db):
         assert len(pdf_res.content) > 0
 
     db.close()
+
+
+def test_igtf_no_depende_de_moneda_pago_redundante_en_sales():
+    """7. Verifica que derivar_aplica_igtf dependa exclusivamente de metodo_pago."""
+    from backend.services.facturacion_service import derivar_aplica_igtf
+    assert derivar_aplica_igtf("Divisa", "VES") is True
+    assert derivar_aplica_igtf("Divisa", "USD") is True
+    assert derivar_aplica_igtf("Divisa", None) is True
+    assert derivar_aplica_igtf("Efectivo", "USD") is False
+    assert derivar_aplica_igtf("Transferencia", "USD") is False
+    assert derivar_aplica_igtf("PagoMovil", "USD") is False
+

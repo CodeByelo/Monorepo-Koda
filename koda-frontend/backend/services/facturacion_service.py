@@ -81,18 +81,22 @@ def resolver_precio_unitario(producto) -> Decimal:
     return Decimal(str(producto.precio_usd))
 
 
-def derivar_aplica_igtf(metodo_pago: str, moneda: Optional[str]) -> bool:
+def derivar_aplica_igtf(metodo_pago: str, moneda: Optional[str] = None) -> bool:
     """
     Deriva si aplica IGTF (3%) según la normativa SENIAT:
     Aplica ÚNICAMENTE si el pago se realiza en Divisas / Moneda Extranjera.
     Pagos en Bolívares (Pago Móvil, Transferencia bancaria nacional, Efectivo Bs)
     están EXENTOS de IGTF.
+
+    Se deriva EXCLUSIVAMENTE del método de pago, nunca de `moneda`
+    (que hoy puede ser `moneda_documento`, un formato de IMPRESIÓN elegido
+    por el usuario en el POS, sin relación con la moneda real del pago;
+    ver Fix 3 del desvío POS Moneda Documento — antes de esto era posible
+    evadir el IGTF pagando en Divisa e imprimiendo la factura como "Solo
+    Bolívares"). El parámetro `moneda` se conserva solo por compatibilidad
+    de firma con los llamadores existentes, pero ya no se usa.
     """
     metodo_norm = (metodo_pago or "").strip().upper()
-    moneda_norm = (moneda or "").strip().upper()
-    if moneda_norm in ("VED", "VES", "BS", "SOLO_VES"):
-        return False
-    # Si el método de pago es explícitamente en divisas o moneda extranjera
     return metodo_norm in ("DIVISA", "DIVISAS", "USD", "DOLARES", "CASH_USD")
 
 

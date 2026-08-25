@@ -5002,10 +5002,11 @@ def descargar_factura_pdf(
         c.drawRightString(ancho - 50, pos_y_totales - 20, f"Bs. {subtotal_bs:,.2f}")
         c.drawString(350, pos_y_totales - 35, "I.V.A. (16% Bs.):")
         c.drawRightString(ancho - 50, pos_y_totales - 35, f"Bs. {iva_bs:,.2f}")
-        c.setFont("Helvetica-Bold", 12)
+        c.setFont("Helvetica-Bold", 10)
         c.setFillColor(colors.HexColor("#0b5156"))
-        c.drawString(350, pos_y_totales - 55, "TOTAL GENERAL (Bs.):")
-        c.drawRightString(ancho - 50, pos_y_totales - 55, f"Bs. {total_bs:,.2f}")
+        c.drawRightString(ancho - 50, pos_y_totales - 55, "TOTAL GENERAL (Bs.):")
+        c.setFont("Helvetica-Bold", 13)
+        c.drawRightString(ancho - 50, pos_y_totales - 71, f"Bs. {total_bs:,.2f}")
 
     elif modo_impresion == "SOLO_USD":
         c.setFont("Helvetica-Bold", 10)
@@ -5019,10 +5020,11 @@ def descargar_factura_pdf(
             offset_y = 65
         else:
             offset_y = 50
-        c.setFont("Helvetica-Bold", 11)
+        c.setFont("Helvetica-Bold", 10)
         c.setFillColor(colors.HexColor("#0b5156"))
-        c.drawString(350, pos_y_totales - offset_y, "TOTAL GENERAL (USD):")
-        c.drawRightString(ancho - 50, pos_y_totales - offset_y, f"${total_usd:.2f}")
+        c.drawRightString(ancho - 50, pos_y_totales - offset_y, "TOTAL GENERAL (USD):")
+        c.setFont("Helvetica-Bold", 13)
+        c.drawRightString(ancho - 50, pos_y_totales - offset_y - 16, f"${total_usd:.2f}")
         # SOLO_USD: nada en Bs, ni siquiera una línea de equivalente.
 
     else:  # BIMONETARIO — cada renglón de totales en ambas monedas
@@ -5037,10 +5039,11 @@ def descargar_factura_pdf(
             offset_y = 65
         else:
             offset_y = 50
-        c.setFont("Helvetica-Bold", 11)
+        c.setFont("Helvetica-Bold", 10)
         c.setFillColor(colors.HexColor("#0b5156"))
-        c.drawString(350, pos_y_totales - offset_y, "TOTAL GENERAL:")
-        c.drawRightString(ancho - 50, pos_y_totales - offset_y, f"${total_usd:.2f}  /  Bs. {total_bs:,.2f}")
+        c.drawRightString(ancho - 50, pos_y_totales - offset_y, "TOTAL GENERAL:")
+        c.setFont("Helvetica-Bold", 13)
+        c.drawRightString(ancho - 50, pos_y_totales - offset_y - 16, f"${total_usd:.2f}  /  Bs. {total_bs:,.2f}")
     
     # Pie de Página Legal
     c.setFillColor(colors.black)
