@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from backend.core.database import get_db
 from backend.models.core import Profile
 from backend.models.operations import Venta, Cliente
-from backend.models.erp_extended import Compra, RetencionIVA
+from backend.models.erp_extended import Compra
 from backend.utils.helpers import ventas_periodo, periodo_rango, to_float
 from backend.core.security import get_current_user
 
@@ -303,24 +303,9 @@ async def actualizar_control_compra(compra_id: int, request: Request, db: Sessio
     if not compra:
         raise HTTPException(status_code=404, detail="Compra no encontrada")
     body = await request.json()
-    ret = RetencionIVA()
-    ret.tenant_id = current_user.tenant_id
-    ret.tipo = body.get("tipo", "RECIBIDA")
-    ret.agente_rif = body.get("agente_rif", "")
-    ret.agente_nombre = body.get("agente_nombre", "")
-    ret.numero_factura = body.get("numero_factura", "")
-    ret.numero_comprobante = body.get("numero_comprobante", "")
-    ret.fecha_comprobante = datetime.strptime(body.get("fecha_comprobante"), "%Y-%m-%d") if body.get("fecha_comprobante") else datetime.now()
-    ret.base_usd = body.get("base", 0)
-    ret.alicuota = body.get("alicuota", 0) / 100.0
-    ret.monto_usd = body.get("iva_retenido", 0)
-    ret.tasa_cambio_bs = 1.0 # default
-    ret.periodo = body.get("periodo", "")
-    ret.estado = "VALIDADO"
-    
-    db.add(ret)
+    numero_control = body.get("numero_control")
+    if not numero_control:
+        raise HTTPException(status_code=400, detail="El campo 'numero_control' es requerido.")
+    compra.numero_control = numero_control
     db.commit()
-    
-    compra.numero_control = body.get("numero_control")
-    db.commit()
-    return {"ok": True, "id": ret.id, "mensaje": "Comprobante cargado exitosamente"}
+    return {"ok": True, "mensaje": "Número de control actualizado."}
