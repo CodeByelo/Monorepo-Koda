@@ -89,7 +89,9 @@ def test_nota_credito_genera_asiento_y_actualiza_cxc(setup_db):
         numero_factura=doc_num,
         total_usd=Decimal("500.00"),
         tasa_cambio_bs=Decimal("50.00"),
-        tipo_pago="CREDITO",
+        subtotal_usd=Decimal("0.00"),
+        iva_usd=Decimal("0.00"),
+        metodo_pago="Transferencia",
         estado="EMITIDA",
         fecha=datetime.now(timezone.utc),
         tenant_id=tenant_id
@@ -216,7 +218,9 @@ def test_nota_debito_genera_asiento_y_reabre_cxc_pagada(setup_db):
         numero_factura=doc_num,
         total_usd=Decimal("200.00"),
         tasa_cambio_bs=Decimal("50.00"),
-        tipo_pago="CREDITO",
+        subtotal_usd=Decimal("0.00"),
+        iva_usd=Decimal("0.00"),
+        metodo_pago="Transferencia",
         estado="EMITIDA",
         fecha=datetime.now(timezone.utc),
         tenant_id=tenant_id
@@ -344,7 +348,9 @@ def test_nota_credito_rechazada_en_periodo_cerrado_y_rollback_completo(setup_db)
         numero_factura=doc_num,
         total_usd=Decimal("300.00"),
         tasa_cambio_bs=Decimal("50.00"),
-        tipo_pago="CREDITO",
+        subtotal_usd=Decimal("0.00"),
+        iva_usd=Decimal("0.00"),
+        metodo_pago="Transferencia",
         estado="EMITIDA",
         fecha=datetime.now(timezone.utc),
         tenant_id=tenant_id
