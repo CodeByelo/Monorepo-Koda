@@ -12,6 +12,7 @@ from backend.models.core import Profile, Tenant
 from backend.models.accounting import CierrePeriodo
 from backend.models.erp_extended import AuditoriaLog
 from backend.core.security import get_current_user
+from backend.services.auth import get_current_user_from_token
 
 
 @pytest.fixture(scope="module")
@@ -64,6 +65,7 @@ def test_reabrir_periodo_requiere_justificacion(setup_db):
         return user
 
     app.dependency_overrides[get_current_user] = mock_user
+    app.dependency_overrides[get_current_user_from_token] = mock_user
     client = TestClient(app)
 
     # A) Sin justificación
@@ -95,6 +97,7 @@ def test_reabrir_periodo_requiere_rol_admin_gerente(setup_db):
         return user
 
     app.dependency_overrides[get_current_user] = mock_user
+    app.dependency_overrides[get_current_user_from_token] = mock_user
     client = TestClient(app)
 
     res = client.post(
@@ -125,6 +128,7 @@ def test_reabrir_periodo_no_borra_la_fila(setup_db):
         return user
 
     app.dependency_overrides[get_current_user] = mock_user
+    app.dependency_overrides[get_current_user_from_token] = mock_user
     client = TestClient(app)
 
     justificacion = "Ajuste contable extraordinario solicitado por Auditoría"
@@ -171,6 +175,7 @@ def test_reabrir_periodo_genera_auditoria_log(setup_db):
         return user
 
     app.dependency_overrides[get_current_user] = mock_user
+    app.dependency_overrides[get_current_user_from_token] = mock_user
     client = TestClient(app)
 
     justificacion = "Reapertura para reajuste de inventario de cierre fiscal"
@@ -215,6 +220,7 @@ def test_recerrar_periodo_reabierto_actualiza_estado(setup_db):
         return user
 
     app.dependency_overrides[get_current_user] = mock_user
+    app.dependency_overrides[get_current_user_from_token] = mock_user
     client = TestClient(app)
 
     res_recierre = client.post("/contabilidad/cierre/ejecutar", json={"periodo": periodo})
@@ -258,6 +264,7 @@ def test_cerrar_periodo_ya_cerrado_da_400(setup_db):
         return user
 
     app.dependency_overrides[get_current_user] = mock_user
+    app.dependency_overrides[get_current_user_from_token] = mock_user
     client = TestClient(app)
 
     res = client.post("/contabilidad/cierre/ejecutar", json={"periodo": periodo})
@@ -290,6 +297,7 @@ def test_cierres_historial_devuelve_estado_real(setup_db):
         return user
 
     app.dependency_overrides[get_current_user] = mock_user
+    app.dependency_overrides[get_current_user_from_token] = mock_user
     client = TestClient(app)
 
     res = client.get("/contabilidad/cierres/historial")

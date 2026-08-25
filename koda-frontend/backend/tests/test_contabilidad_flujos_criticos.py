@@ -12,6 +12,7 @@ from backend.models.core import Profile, TasaCambio, Tenant
 from backend.models.accounting import AsientoContable, AsientoDetalle, CierrePeriodo
 from backend.models.erp_extended import CuentaContable
 from backend.core.security import get_current_user
+from backend.services.auth import get_current_user_from_token
 
 
 @pytest.fixture(scope="module")
@@ -64,6 +65,7 @@ def test_asiento_rechazado_en_periodo_cerrado(setup_db):
         return user
 
     app.dependency_overrides[get_current_user] = mock_user
+    app.dependency_overrides[get_current_user_from_token] = mock_user
     client = TestClient(app)
 
     payload = {
@@ -134,6 +136,7 @@ def test_ciclo_completo_cierre_y_reapertura_periodo(setup_db):
         return user
 
     app.dependency_overrides[get_current_user] = mock_user
+    app.dependency_overrides[get_current_user_from_token] = mock_user
     client = TestClient(app)
 
     current_period = datetime.now(timezone.utc).strftime("%Y-%m")
@@ -234,6 +237,7 @@ def test_balance_comprobacion_cuadra_matematicamente(setup_db):
         return user
 
     app.dependency_overrides[get_current_user] = mock_user
+    app.dependency_overrides[get_current_user_from_token] = mock_user
     client = TestClient(app)
 
     current_period = datetime.now(timezone.utc).strftime("%Y-%m")
@@ -367,6 +371,7 @@ def test_aislamiento_multitenant_asientos_y_balance(setup_db):
 
     # 1. Crear asiento en Tenant A (100 USD)
     app.dependency_overrides[get_current_user] = lambda: user_a
+    app.dependency_overrides[get_current_user_from_token] = lambda: user_a
     resp_a = client.post("/contabilidad/asientos", json={
         "concepto": "Asiento Tenant A",
         "referencia": "REF-TENANT-A",
@@ -380,6 +385,7 @@ def test_aislamiento_multitenant_asientos_y_balance(setup_db):
 
     # 2. Crear asiento en Tenant B (250 USD)
     app.dependency_overrides[get_current_user] = lambda: user_b
+    app.dependency_overrides[get_current_user_from_token] = lambda: user_b
     resp_b = client.post("/contabilidad/asientos", json={
         "concepto": "Asiento Tenant B",
         "referencia": "REF-TENANT-B",
@@ -393,6 +399,7 @@ def test_aislamiento_multitenant_asientos_y_balance(setup_db):
 
     # 3. Listar asientos con User A -> no debe ver asiento B
     app.dependency_overrides[get_current_user] = lambda: user_a
+    app.dependency_overrides[get_current_user_from_token] = lambda: user_a
     list_a = client.get("/contabilidad/asientos")
     assert list_a.status_code == 200
     ids_a = [item["id"] for item in list_a.json()["data"]]
@@ -401,6 +408,7 @@ def test_aislamiento_multitenant_asientos_y_balance(setup_db):
 
     # 4. Listar asientos con User B -> no debe ver asiento A
     app.dependency_overrides[get_current_user] = lambda: user_b
+    app.dependency_overrides[get_current_user_from_token] = lambda: user_b
     list_b = client.get("/contabilidad/asientos")
     assert list_b.status_code == 200
     ids_b = [item["id"] for item in list_b.json()["data"]]
@@ -409,6 +417,7 @@ def test_aislamiento_multitenant_asientos_y_balance(setup_db):
 
     # 5. Balance de comprobación Tenant A -> debe = 100.0
     app.dependency_overrides[get_current_user] = lambda: user_a
+    app.dependency_overrides[get_current_user_from_token] = lambda: user_a
     bal_a = client.get(f"/contabilidad/balance-comprobacion?periodo={current_period}")
     assert bal_a.status_code == 200
     assert bal_a.json()["totales"]["debe"] == 100.0
@@ -416,6 +425,7 @@ def test_aislamiento_multitenant_asientos_y_balance(setup_db):
 
     # 6. Balance de comprobación Tenant B -> debe = 250.0
     app.dependency_overrides[get_current_user] = lambda: user_b
+    app.dependency_overrides[get_current_user_from_token] = lambda: user_b
     bal_b = client.get(f"/contabilidad/balance-comprobacion?periodo={current_period}")
     assert bal_b.status_code == 200
     assert bal_b.json()["totales"]["debe"] == 250.0
@@ -476,12 +486,14 @@ def test_cierre_periodo_aislado_por_tenant(setup_db):
 
     # Tenant 1 cierra periodo_test
     app.dependency_overrides[get_current_user] = lambda: user_1
+    app.dependency_overrides[get_current_user_from_token] = lambda: user_1
     resp_1 = client.post("/contabilidad/cierre/ejecutar", json={"periodo": periodo_test})
     assert resp_1.status_code == 200, resp_1.text
     assert resp_1.json()["ok"] is True
 
     # Tenant 2 cierra el MISMO periodo_test (no debe colisionar)
     app.dependency_overrides[get_current_user] = lambda: user_2
+    app.dependency_overrides[get_current_user_from_token] = lambda: user_2
     resp_2 = client.post("/contabilidad/cierre/ejecutar", json={"periodo": periodo_test})
     assert resp_2.status_code == 200, resp_2.text
     assert resp_2.json()["ok"] is True
