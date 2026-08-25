@@ -3,10 +3,10 @@ Tests de backend/routers/sso_bridge.py (puente de SSO real hacia
 KODA_Remaster/sistema-corporativo/backend) y de la reutilización del
 mecanismo de exchange_code preexistente (backend/routers/auth.py).
 
-Mismo patrón de acceso a datos que tests/test_nomina_legal.py: `import
-backend.main` para que `Base.metadata.create_all(...)` corra sobre el
-SQLite de pruebas, y `backend.core.database.SessionLocal` directo para
-crear los fixtures (Profile/Tenant) sin pasar por HTTP.
+Mismo patrón de acceso a datos que tests/test_nomina_legal.py:
+`Base.metadata.create_all(bind=engine)` para asegurar que las tablas
+existan sobre la base de pruebas, y `backend.core.database.SessionLocal`
+directo para crear los fixtures (Profile/Tenant) sin pasar por HTTP.
 
 Requiere las mismas variables de entorno de 32+ caracteres que el resto del
 backend (SECRET_KEY, AUDIT_LOG_SECRET, BOT_INTERNAL_API_KEY,
@@ -19,12 +19,14 @@ import uuid
 
 sys.path.insert(0, "/app")
 
-import backend.main  # noqa: F401 — dispara Base.metadata.create_all(...)
+import backend.main  # noqa: F401
 from fastapi.testclient import TestClient
 from backend.main import app
-from backend.core.database import SessionLocal
+from backend.core.database import SessionLocal, Base, engine
 from backend.core.security import SSO_BRIDGE_INTERNAL_KEY
 from backend.models.core import Profile, Tenant
+
+Base.metadata.create_all(bind=engine)
 
 client = TestClient(app)
 

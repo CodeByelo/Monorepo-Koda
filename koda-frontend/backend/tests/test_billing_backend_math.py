@@ -9,10 +9,12 @@ sys.path.insert(0, "/app")
 
 from fastapi.testclient import TestClient
 from backend.main import app
-from backend.core.database import SessionLocal, get_db
+from backend.core.database import SessionLocal, get_db, Base, engine
 from backend.models.operations import Producto, Venta, VentaDetalle, Cliente
 from backend.models.core import Profile, TasaCambio, Tenant
 from backend.core.security import get_current_user
+
+Base.metadata.create_all(bind=engine)
 
 # Mock de autenticación para que devuelva un perfil válido en los tests
 def mock_get_current_user():
