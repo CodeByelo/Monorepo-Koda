@@ -1,12 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime, timezone
 
 from backend.core.database import get_db
 from backend.models.accounting import AsientoContable, CierrePeriodo
+from backend.models.erp_extended import AuditoriaLog
+from backend.schemas.contabilidad import CierrePeriodoPayload, ReaperturaPeriodoPayload
 from backend.utils.helpers import ventas_periodo
-from backend.core.security import get_current_user
+from backend.utils.ip_utils import get_real_ip
+from backend.core.security import get_current_user, require_role
 
 router = APIRouter()
 
@@ -111,48 +114,96 @@ def cierres_historial(db: Session = Depends(get_db), current_user = Depends(get_
             "fecha_cierre": c.fecha_cierre.strftime("%d/%m/%Y %I:%M %p") if c.fecha_cierre else "-",
             "usuario": c.usuario,
             "admin": c.usuario,
-            "estado": "CERRADO"
+            "estado": c.estado,
+            "reabierto_por": c.reabierto_por,
+            "fecha_reabierto": c.fecha_reabierto.strftime("%d/%m/%Y %I:%M %p") if c.fecha_reabierto else None,
+            "motivo_reapertura": c.motivo_reapertura,
+            "veces_reabierto": c.veces_reabierto,
         }
         for c in cierres
     ]
 
 
 @router.post("/cierre/ejecutar")
-def ejecutar_cierre(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    periodo = body.get("periodo")
-    if not periodo:
-        raise HTTPException(400, detail="Período requerido")
-
+def ejecutar_cierre(
+    payload: CierrePeriodoPayload,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_role(["Admin", "Gerente"])),
+):
+    periodo = payload.periodo
     existing = db.query(CierrePeriodo).filter(
         CierrePeriodo.periodo == periodo,
         CierrePeriodo.tenant_id == current_user.tenant_id
     ).first()
-    if existing:
+
+    if existing and existing.estado == "CERRADO":
         raise HTTPException(400, detail=f"El período {periodo} ya se encuentra cerrado")
 
-    nuevo_cierre = CierrePeriodo(
-        periodo=periodo,
+    real_ip, tcp_ip = get_real_ip(request)
+    ip_registrada = real_ip if real_ip == tcp_ip else f"{real_ip} (via {tcp_ip})"
+
+    if existing:
+        # Re-cierre de un período que había sido reabierto: se actualiza
+        # la misma fila (conserva veces_reabierto y motivo_reapertura como
+        # historial de la última reapertura), nunca se pierde el registro.
+        existing.estado = "CERRADO"
+        existing.fecha_cierre = datetime.now(timezone.utc)
+        existing.usuario = current_user.nombre or current_user.email
+        accion = "RECIERRE_PERIODO"
+    else:
+        existing = CierrePeriodo(
+            periodo=periodo,
+            tenant_id=current_user.tenant_id,
+            usuario=current_user.nombre or current_user.email,
+            estado="CERRADO",
+        )
+        db.add(existing)
+        accion = "CIERRE_PERIODO"
+
+    db.add(AuditoriaLog(
+        usuario=f"{current_user.email} (ID:{current_user.id})",
+        accion=accion,
+        modulo="CONTABILIDAD_CIERRE",
+        detalle=f"Período {periodo} cerrado.",
+        ip=ip_registrada,
         tenant_id=current_user.tenant_id,
-        usuario=current_user.nombre or current_user.email
-    )
-    db.add(nuevo_cierre)
+    ))
     db.commit()
     return {"ok": True, "periodo": periodo}
 
 
 @router.post("/cierre/reabrir")
-def reabrir_cierre(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    periodo = body.get("periodo")
-    if not periodo:
-        raise HTTPException(400, detail="Período requerido")
-
+def reabrir_cierre(
+    payload: ReaperturaPeriodoPayload,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_role(["Admin", "Gerente"])),
+):
+    periodo = payload.periodo
     existing = db.query(CierrePeriodo).filter(
         CierrePeriodo.periodo == periodo,
         CierrePeriodo.tenant_id == current_user.tenant_id
     ).first()
-    if not existing:
+    if not existing or existing.estado != "CERRADO":
         raise HTTPException(400, detail=f"El período {periodo} no se encuentra cerrado")
 
-    db.delete(existing)
+    real_ip, tcp_ip = get_real_ip(request)
+    ip_registrada = real_ip if real_ip == tcp_ip else f"{real_ip} (via {tcp_ip})"
+
+    existing.estado = "REABIERTO"
+    existing.reabierto_por = current_user.nombre or current_user.email
+    existing.fecha_reabierto = datetime.now(timezone.utc)
+    existing.motivo_reapertura = payload.justificacion
+    existing.veces_reabierto = (existing.veces_reabierto or 0) + 1
+
+    db.add(AuditoriaLog(
+        usuario=f"{current_user.email} (ID:{current_user.id})",
+        accion="REAPERTURA_PERIODO",
+        modulo="CONTABILIDAD_CIERRE",
+        detalle=f"Período {periodo} reabierto. Justificación: {payload.justificacion}",
+        ip=ip_registrada,
+        tenant_id=current_user.tenant_id,
+    ))
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "periodo": periodo, "estado": "REABIERTO"}

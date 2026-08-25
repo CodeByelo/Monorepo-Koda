@@ -44,6 +44,7 @@ def verificar_periodo_abierto(
     cierre = db.query(CierrePeriodo).filter(
         CierrePeriodo.periodo == periodo,
         CierrePeriodo.tenant_id == tenant_id,
+        CierrePeriodo.estado == "CERRADO",
     ).first()
     if cierre:
         raise HTTPException(

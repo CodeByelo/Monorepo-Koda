@@ -1,6 +1,5 @@
-from sqlalchemy import ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from backend.core.database import Base
@@ -121,3 +120,8 @@ class CierrePeriodo(Base):
     periodo = Column(String(7), nullable=False) # YYYY-MM
     fecha_cierre = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     usuario = Column(String(100), nullable=True)
+    estado = Column(String(20), nullable=False, default="CERRADO")  # CERRADO | REABIERTO
+    reabierto_por = Column(String(100), nullable=True)
+    fecha_reabierto = Column(DateTime, nullable=True)
+    motivo_reapertura = Column(Text, nullable=True)
+    veces_reabierto = Column(Integer, nullable=False, default=0)

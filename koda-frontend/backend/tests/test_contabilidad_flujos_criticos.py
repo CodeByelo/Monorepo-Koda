@@ -114,6 +114,7 @@ def test_ciclo_completo_cierre_y_reapertura_periodo(setup_db):
         apellido="Test",
         email=f"contador_{uuid.uuid4().hex[:6]}@test.com",
         password_hash="fake",
+        rol="Admin",
         rol_id=2,
         tenant_id=tenant_id
     )
@@ -178,7 +179,7 @@ def test_ciclo_completo_cierre_y_reapertura_periodo(setup_db):
     assert "CERRADO" in resp_bloqueado.text or "cerrado" in resp_bloqueado.text
 
     # E) Reabrir período cerrado
-    resp_reabrir = client.post("/contabilidad/cierre/reabrir", json={"periodo": current_period})
+    resp_reabrir = client.post("/contabilidad/cierre/reabrir", json={"periodo": current_period, "justificacion": "Reapertura para ajuste de cierre"})
     assert resp_reabrir.status_code == 200, resp_reabrir.text
     assert resp_reabrir.json()["ok"] is True
 

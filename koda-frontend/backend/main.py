@@ -242,6 +242,11 @@ async def startup_db_init():
                     """))
                     connection.execute(text("ALTER TABLE public.cierres_periodos DROP CONSTRAINT IF EXISTS _tenant_periodo_cierre_uc;"))
                     connection.execute(text("ALTER TABLE public.cierres_periodos ADD CONSTRAINT _tenant_periodo_cierre_uc UNIQUE (tenant_id, periodo);"))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos ADD COLUMN IF NOT EXISTS estado VARCHAR(20) NOT NULL DEFAULT 'CERRADO';"))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos ADD COLUMN IF NOT EXISTS reabierto_por VARCHAR(100);"))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos ADD COLUMN IF NOT EXISTS fecha_reabierto TIMESTAMP;"))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos ADD COLUMN IF NOT EXISTS motivo_reapertura TEXT;"))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos ADD COLUMN IF NOT EXISTS veces_reabierto INTEGER NOT NULL DEFAULT 0;"))
                 else:
                     for col_sql in [
                         "ALTER TABLE productos ADD COLUMN imagen_url TEXT",
