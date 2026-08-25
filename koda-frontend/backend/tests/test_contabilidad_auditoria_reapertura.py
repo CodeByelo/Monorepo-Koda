@@ -27,6 +27,7 @@ def _crear_ambiente_cierre(db, rol="Admin"):
         nombre_empresa=f"Empresa Auditoria Cierre {uuid.uuid4().hex[:6]}",
         estado_licencia="ACTIVA"
     )
+    rol_id_map = {"Admin": 2, "Gerente": 5, "Vendedor": 3}
     user = Profile(
         id=uuid.uuid4(),
         username=f"user_{uuid.uuid4().hex[:6]}",
@@ -34,8 +35,7 @@ def _crear_ambiente_cierre(db, rol="Admin"):
         apellido="Contable",
         email=f"auditor_{uuid.uuid4().hex[:6]}@test.com",
         password_hash="fake",
-        rol=rol,
-        rol_id=1 if rol == "Admin" else 3,
+        rol_id=rol_id_map.get(rol, 3),
         tenant_id=tenant_id
     )
     db.add(tenant)

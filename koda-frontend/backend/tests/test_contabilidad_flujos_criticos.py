@@ -114,7 +114,6 @@ def test_ciclo_completo_cierre_y_reapertura_periodo(setup_db):
         apellido="Test",
         email=f"contador_{uuid.uuid4().hex[:6]}@test.com",
         password_hash="fake",
-        rol="Admin",
         rol_id=2,
         tenant_id=tenant_id
     )
@@ -447,7 +446,7 @@ def test_cierre_periodo_aislado_por_tenant(setup_db):
         apellido="Test",
         email=f"user_1_{uuid.uuid4().hex[:6]}@test.com",
         password_hash="fake",
-        rol_id=1,
+        rol_id=2,
         tenant_id=tenant_1_id
     )
     db.add(tenant_1)
@@ -464,7 +463,7 @@ def test_cierre_periodo_aislado_por_tenant(setup_db):
         apellido="Test",
         email=f"user_2_{uuid.uuid4().hex[:6]}@test.com",
         password_hash="fake",
-        rol_id=1,
+        rol_id=2,
         tenant_id=tenant_2_id
     )
     db.add(tenant_2)
