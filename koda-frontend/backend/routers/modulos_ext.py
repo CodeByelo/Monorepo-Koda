@@ -1426,7 +1426,15 @@ def procesar_aplicacion(body: dict, db: Session = Depends(get_db), current_user 
         total_recibido = Decimal("0.00")
         for m in metodos:
             m_type = m.get("type", "Efectivo")
-            m_amount = Decimal(str(m.get("amount", 0)))
+            m_amount_raw = Decimal(str(m.get("amount", 0)))
+            m_rate = Decimal(str(m.get("rate") or 1))
+            if m_rate == 0:
+                m_rate = Decimal("1")
+            # Igual que methodEquivalent() en el frontend (PaymentApplication.tsx):
+            # solo "Bolívares" se manda en moneda origen y hay que convertir a
+            # su equivalente en USD dividiendo por la tasa; el resto de los
+            # tipos ya vienen expresados en USD.
+            m_amount = (m_amount_raw / m_rate) if m_type == "Bolívares" else m_amount_raw
             m_account = m.get("account")
             m_ref = m.get("ref") or doc
             total_recibido += m_amount
@@ -1474,6 +1482,7 @@ def procesar_aplicacion(body: dict, db: Session = Depends(get_db), current_user 
             referencia=f"COBRO-{doc}",
             concepto=f"Cobro Factura {doc} - Cliente {cliente_nombre}",
             fecha=datetime.now(timezone.utc),
+            tasa_cambio_bs=tasa_actual(db, current_user.tenant_id),
             db=db,
             tenant_id=current_user.tenant_id,
         )

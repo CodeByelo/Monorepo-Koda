@@ -658,3 +658,142 @@ def test_cobro_rechazado_en_periodo_cerrado_y_rollback_completo(setup_db):
     db.query(Tenant).filter(Tenant.id == tenant_id).delete()
     db.commit()
     db.close()
+
+
+def test_cobro_metodo_bolivares_convierte_a_usd_correctamente(setup_db):
+    """6. Cobro en Bolívares: convierte a USD dividiendo por 'rate' antes de sumar al banco y crear asiento."""
+    db = SessionLocal()
+    tenant_id = uuid.uuid4()
+    tenant = Tenant(
+        id=tenant_id,
+        nombre_empresa=f"Empresa Cobro Bolivares {uuid.uuid4().hex[:6]}",
+        estado_licencia="ACTIVA"
+    )
+    user = Profile(
+        id=uuid.uuid4(),
+        username=f"user_{uuid.uuid4().hex[:6]}",
+        nombre="Cobrador",
+        apellido="Test",
+        email=f"cobrador_{uuid.uuid4().hex[:6]}@test.com",
+        password_hash="fake",
+        rol_id=2,
+        tenant_id=tenant_id
+    )
+    db.add(tenant)
+    db.flush()
+    db.add(user)
+
+    tasa = TasaCambio(
+        tenant_id=tenant_id,
+        valor_ves=Decimal("50.00"),
+        fuente="BCV_OFICIAL",
+        fecha=datetime.now(timezone.utc)
+    )
+    db.add(tasa)
+
+    cliente = Cliente(
+        nombre="Cliente Bolívares S.A.",
+        rif=f"J-{uuid.uuid4().hex[:8].upper()}",
+        tenant_id=tenant_id
+    )
+    db.add(cliente)
+    db.flush()
+
+    banco = CuentaBancaria(
+        banco="Banesco Bolivares",
+        numero_cuenta=f"0134-{uuid.uuid4().hex[:10]}",
+        moneda="USD",
+        saldo_actual_usd=Decimal("500.00"),
+        activa=True,
+        tenant_id=tenant_id
+    )
+    db.add(banco)
+
+    doc_num = f"FAC-BS-{uuid.uuid4().hex[:6]}"
+    cxc = CuentaPorCobrar(
+        cliente_id=cliente.id,
+        numero_documento=doc_num,
+        monto_total_usd=Decimal("100.00"),
+        monto_pagado_usd=Decimal("0.00"),
+        tasa_cambio_bs=Decimal("50.00"),
+        fecha_emision=datetime.now(timezone.utc),
+        fecha_vencimiento=datetime.now(timezone.utc),
+        estado="PENDIENTE",
+        tenant_id=tenant_id
+    )
+    db.add(cxc)
+    db.commit()
+
+    _seed_cuentas_test(db, tenant_id)
+
+    def mock_user():
+        return user
+
+    app.dependency_overrides[get_current_user] = mock_user
+    client_app = TestClient(app)
+
+    # Cliente paga Bs. 5000.00 con tasa de 50.00 => Equivalente exacto en USD = $100.00
+    payload = {
+        "factura_id": doc_num,
+        "monto": 100.00,
+        "metodos": [
+            {
+                "type": "Bolívares",
+                "account": "Banesco Bolivares",
+                "amount": "5000.00",
+                "rate": "50.00",
+                "ref": "REF-PAGOMOVIL-01"
+            }
+        ]
+    }
+
+    res = client_app.post("/cobranzas/aplicacion/procesar", json=payload)
+    assert res.status_code == 200, res.text
+    assert res.json()["ok"] is True
+
+    # 1. El banco debe haber aumentado exactamente $100.00 (500 + 100 = 600.00), NO $5000.00
+    db.refresh(banco)
+    assert banco.saldo_actual_usd == Decimal("600.00")
+
+    # 2. Movimiento bancario debe estar registrado en USD ($100.00)
+    mov = db.query(MovimientoBancario).filter(
+        MovimientoBancario.cuenta_id == banco.id,
+        MovimientoBancario.referencia == "REF-PAGOMOVIL-01",
+        MovimientoBancario.tenant_id == tenant_id
+    ).first()
+    assert mov is not None
+    assert mov.monto_usd == Decimal("100.00")
+
+    # 3. Asiento contable debe tener 1.1.01 (Caja y Bancos) al Debe por $100.00
+    asiento = db.query(AsientoContable).filter(
+        AsientoContable.referencia == f"COBRO-{doc_num}",
+        AsientoContable.tenant_id == tenant_id
+    ).first()
+    assert asiento is not None
+    assert asiento.total_debe_usd == Decimal("100.00")
+    assert asiento.total_haber_usd == Decimal("100.00")
+    assert asiento.tasa_cambio_bs == Decimal("50.00")
+
+    cuentas_map = {d.cuenta_codigo: d for d in asiento.detalles}
+    assert cuentas_map["1.1.01"].debe_usd == Decimal("100.00")
+    assert cuentas_map["1.1.02"].haber_usd == Decimal("100.00")
+
+    # 4. CxC debe quedar PAGADA
+    db.refresh(cxc)
+    assert cxc.estado == "PAGADA"
+    assert cxc.monto_pagado_usd == Decimal("100.00")
+
+    # Cleanup
+    db.query(AsientoDetalle).filter(AsientoDetalle.asiento_id == asiento.id).delete()
+    db.query(AsientoContable).filter(AsientoContable.id == asiento.id).delete()
+    db.query(MovimientoBancario).filter(MovimientoBancario.cuenta_id == banco.id).delete()
+    db.query(CuentaPorCobrar).filter(CuentaPorCobrar.id == cxc.id).delete()
+    db.query(CuentaBancaria).filter(CuentaBancaria.id == banco.id).delete()
+    db.query(Cliente).filter(Cliente.id == cliente.id).delete()
+    db.query(CuentaContable).filter(CuentaContable.tenant_id == tenant_id).delete()
+    db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
+    db.query(Profile).filter(Profile.id == user.id).delete()
+    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.commit()
+    db.close()
+

@@ -405,7 +405,8 @@ class ContabilidadService:
         concepto: str,
         fecha,
         db: Session,
-        tenant_id: str = None
+        tenant_id: str = None,
+        tasa_cambio_bs: Decimal = None
     ):
         """
         Crea un asiento contable automático para el cobro de una factura de cliente.
@@ -518,7 +519,7 @@ class ContabilidadService:
             referencia=referencia,
             total_debe_usd=total_debe,
             total_haber_usd=total_haber,
-            tasa_cambio_bs=Decimal("1.0"),
+            tasa_cambio_bs=Decimal(str(tasa_cambio_bs)) if tasa_cambio_bs else Decimal("1.0"),
             estado="ACTIVO",
             detalles=detalles,
             tenant_id=tenant_id
