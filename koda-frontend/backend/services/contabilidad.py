@@ -527,4 +527,79 @@ class ContabilidadService:
         db.add(asiento)
         return asiento
 
+    @staticmethod
+    def generar_asiento_transferencia_interna(
+        monto: Decimal,
+        tasa_cambio_bs: Decimal,
+        concepto: str,
+        referencia: str,
+        fecha,
+        db: Session,
+        tenant_id: str = None
+    ):
+        """
+        Crea el asiento de auditoría para una transferencia entre dos
+        cuentas bancarias propias del mismo tenant. Como ambas cuentas caen
+        hoy bajo la misma cuenta contable (1.1.01 Caja y Bancos — no hay
+        sub-cuenta por banco en el plan de cuentas actual), el asiento es
+        una línea al DEBE y otra al HABER en la MISMA cuenta 1.1.01, por el
+        mismo monto. El efecto neto en el balance es cero (como debe ser,
+        el dinero sigue siendo de la empresa), pero queda el rastro en el
+        Libro Diario de que el movimiento ocurrió, con el concepto
+        describiendo origen y destino.
+        """
+        fecha_asiento = fecha or datetime.now(timezone.utc)
+        periodo_asiento = fecha_asiento.strftime("%Y-%m")
+
+        cierre_query = db.query(CierrePeriodo).filter(CierrePeriodo.periodo == periodo_asiento)
+        if tenant_id:
+            cierre_query = cierre_query.filter(CierrePeriodo.tenant_id == tenant_id)
+        cierre = cierre_query.first()
+        if cierre:
+            raise HTTPException(
+                status_code=403,
+                detail=f"No se pueden registrar asientos en el período {periodo_asiento} porque está CERRADO."
+            )
+
+        cta_banco_query = db.query(CuentaContable).filter(CuentaContable.codigo == "1.1.01")
+        if tenant_id:
+            cta_banco_query = cta_banco_query.filter(CuentaContable.tenant_id == tenant_id)
+        cta_banco = cta_banco_query.first()
+        if not cta_banco:
+            raise HTTPException(status_code=400, detail="Cuenta contable 1.1.01 (Caja y Bancos) no encontrada.")
+
+        monto_dec = Decimal(str(monto)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if monto_dec <= Decimal("0.00"):
+            return None
+
+        asiento = AsientoContable(
+            fecha=fecha_asiento,
+            concepto=concepto,
+            referencia=referencia,
+            total_debe_usd=monto_dec,
+            total_haber_usd=monto_dec,
+            tasa_cambio_bs=Decimal(str(tasa_cambio_bs or 1.0)),
+            estado="ACTIVO",
+            detalles=[
+                AsientoDetalle(
+                    cuenta_codigo="1.1.01",
+                    cuenta_nombre=cta_banco.nombre,
+                    debe_usd=monto_dec,
+                    haber_usd=Decimal("0.00"),
+                    tenant_id=tenant_id
+                ),
+                AsientoDetalle(
+                    cuenta_codigo="1.1.01",
+                    cuenta_nombre=cta_banco.nombre,
+                    debe_usd=Decimal("0.00"),
+                    haber_usd=monto_dec,
+                    tenant_id=tenant_id
+                )
+            ],
+            tenant_id=tenant_id
+        )
+        db.add(asiento)
+        return asiento
+
+
 

@@ -28,6 +28,7 @@ from backend.utils.helpers import (
     TASA_CAMBIO_FALLBACK_DEFAULT,
 )
 from backend.core.security import get_current_user
+from backend.services.contabilidad import ContabilidadService
 
 router = APIRouter(tags=["Extras ERP"], dependencies=[Depends(get_current_user)])
 
@@ -1503,34 +1504,45 @@ def registrar_transferencia(body: dict, db: Session = Depends(get_db), current_u
 
 @router.post("/tesoreria/transferencias-internas/{id}/confirmar")
 def confirmar_transferencia(id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    trf = db.query(TransferenciaTesoreria).filter(TransferenciaTesoreria.id == id, TransferenciaTesoreria.tenant_id == current_user.tenant_id).first()
-    if not trf:
-        raise HTTPException(status_code=404, detail="Transferencia no encontrada")
-        
-    if trf.estado == "COMPLETADO":
-        return {"ok": True, "message": "Ya completada"}
-        
-    origen = db.query(CuentaBancaria).filter(CuentaBancaria.id == trf.cuenta_origen_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
-    destino = db.query(CuentaBancaria).filter(CuentaBancaria.id == trf.cuenta_destino_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
-    
-    if origen and destino:
-        if origen.moneda == "USD":
-            origen.saldo_actual_usd = to_float(origen.saldo_actual_usd) - float(trf.monto_usd)
-        else:
-            monto_ves = float(trf.monto_usd) * float(trf.tasa_cambio_bs)
-            origen.saldo_actual_usd = to_float(origen.saldo_actual_usd) - monto_ves
+    try:
+        trf = db.query(TransferenciaTesoreria).filter(TransferenciaTesoreria.id == id, TransferenciaTesoreria.tenant_id == current_user.tenant_id).first()
+        if not trf:
+            raise HTTPException(status_code=404, detail="Transferencia no encontrada")
             
-        if destino.moneda == "USD":
-            destino.saldo_actual_usd = to_float(destino.saldo_actual_usd) + float(trf.monto_usd)
-        else:
-            monto_ves = float(trf.monto_usd) * float(trf.tasa_cambio_bs)
-            destino.saldo_actual_usd = to_float(destino.saldo_actual_usd) + monto_ves
+        if trf.estado == "COMPLETADO":
+            return {"ok": True, "message": "Ya completada"}
+            
+        origen = db.query(CuentaBancaria).filter(CuentaBancaria.id == trf.cuenta_origen_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
+        destino = db.query(CuentaBancaria).filter(CuentaBancaria.id == trf.cuenta_destino_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
+        
+        if not origen or not destino:
+            raise HTTPException(status_code=400, detail="Cuentas no encontradas")
+
+        monto_usd = to_float(trf.monto_usd)
+
+        if origen:
+            origen.saldo_actual_usd = to_float(origen.saldo_actual_usd) - monto_usd
+        if destino:
+            destino.saldo_actual_usd = to_float(destino.saldo_actual_usd) + monto_usd
             
         trf.estado = "COMPLETADO"
+
+        # Generar Asiento Contable Automático de Transferencia Interna
+        ContabilidadService.generar_asiento_transferencia_interna(
+            monto=Decimal(str(trf.monto_usd)),
+            tasa_cambio_bs=Decimal(str(trf.tasa_cambio_bs or 1.0)),
+            concepto=f"Transferencia interna: {origen.banco} → {destino.banco}",
+            referencia=f"TRF-{trf.id}",
+            fecha=datetime.now(timezone.utc),
+            db=db,
+            tenant_id=current_user.tenant_id
+        )
+
         db.commit()
         return {"ok": True}
-        
-    return {"ok": False, "message": "Cuentas no encontradas"}
+    except HTTPException:
+        db.rollback()
+        raise
 
 
 @router.get("/tesoreria/prestamos/resumen")
