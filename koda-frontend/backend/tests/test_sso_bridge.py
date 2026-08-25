@@ -37,6 +37,7 @@ def _crear_tenant_y_perfil(session, *, activo: bool = True, con_tenant: bool = T
     if con_tenant:
         tenant = Tenant(id=tenant_id, nombre_empresa="Test SSO Bridge S.A.", estado_licencia="ACTIVA")
         session.add(tenant)
+        session.flush()  # <-- asegura que el INSERT de tenants ocurra antes que el de profiles
 
     unique = uuid.uuid4().hex[:10]
     profile = Profile(
