@@ -201,22 +201,11 @@ const POS = () => {
       return;
     }
 
-    // Determinar la moneda del documento según selección del usuario
-    let docMoneda = 'USD';
-    if (formatoDocumento === 'SOLO_VES') {
-      docMoneda = 'VED';
-    } else if (formatoDocumento === 'SOLO_USD') {
-      docMoneda = 'USD';
-    } else {
-      // Por Defecto (Bimonetario)
-      docMoneda = (metodoPago === 'Transferencia' || metodoPago === 'PagoMovil' || metodoPago === 'Efectivo') ? 'VED' : 'USD';
-    }
-
     const payload = {
       cliente_id: parseInt(client, 10),
       metodo_pago: metodoPago,
       aplica_igtf: metodoPago === 'Divisa',
-      moneda_documento: docMoneda,
+      moneda_documento: formatoDocumento,
       tasa_cambio_bs: tasaEfectiva,
       vendedor_id: vendedorId ? parseInt(vendedorId, 10) : null,
       detalles: cart.map(item => ({

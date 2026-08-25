@@ -90,7 +90,7 @@ def derivar_aplica_igtf(metodo_pago: str, moneda: Optional[str]) -> bool:
     """
     metodo_norm = (metodo_pago or "").strip().upper()
     moneda_norm = (moneda or "").strip().upper()
-    if moneda_norm in ("VED", "VES", "BS"):
+    if moneda_norm in ("VED", "VES", "BS", "SOLO_VES"):
         return False
     # Si el método de pago es explícitamente en divisas o moneda extranjera
     return metodo_norm in ("DIVISA", "DIVISAS", "USD", "DOLARES", "CASH_USD")
@@ -267,6 +267,7 @@ def procesar_emision_factura(
         creado_por=current_user.id,
         vendedor_id=vendedor.id if vendedor is not None else None,
         comision_usd=comision_usd,
+        moneda_documento=(moneda_documento if moneda_documento in ("BIMONETARIO", "SOLO_USD", "SOLO_VES") else "BIMONETARIO"),
         tenant_id=tenant_id,
     )
     db.add(nueva_venta)

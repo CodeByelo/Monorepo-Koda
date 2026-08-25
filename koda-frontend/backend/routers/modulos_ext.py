@@ -4917,8 +4917,7 @@ def descargar_factura_pdf(
     if tasa_val <= 0:
         tasa_val = 784.6633
 
-    es_solo_bolivares = (moneda_doc == 'VED' or moneda_doc == 'SOLO_VES') or (metodo_pago.upper() in ["EFECTIVO", "TRANSFERENCIA", "PAGOMOVIL"] and igtf_usd <= 0 and moneda_doc != 'USD' and moneda_doc != 'SOLO_USD')
-    es_solo_divisas = (moneda_doc in ('USD', 'SOLO_USD') and metodo_pago.upper() in ('DIVISA', 'USD') and igtf_usd > 0) or (moneda_doc in ('USD', 'SOLO_USD') and tasa_val <= 1)
+    es_solo_bolivares = moneda_doc == 'SOLO_VES'
 
     c.drawString(50, alto - 148, f"Razón Social: {cliente_nombre}")
     c.drawString(50, alto - 162, f"R.I.F. / C.I.: {cliente_rif}")
@@ -5026,7 +5025,7 @@ def descargar_factura_pdf(
         c.drawRightString(ancho - 50, pos_y_totales - offset_y, f"${total_usd:.2f}")
         
         # Mostrar equivalente en Bs sólo si no es una factura configurada como Solo Divisas estricta
-        if moneda_doc not in ('USD_ONLY', 'SOLO_USD'):
+        if moneda_doc != 'SOLO_USD':
             c.setFont("Helvetica-Bold", 10)
             c.setFillColor(colors.HexColor("#1e293b"))
             c.drawString(350, pos_y_totales - offset_y - 18, "TOTAL EQUIVALENTE (Bs.):")

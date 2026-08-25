@@ -66,6 +66,7 @@ class Venta(Base):
     # del vendedor vigente en ese momento). NULL = venta previa a esta
     # migración, para la cual no se conoce el valor real (ver reporte_vendedores).
     comision_usd = Column(Numeric(15, 2), nullable=True)
+    moneda_documento = Column(String(20), nullable=True, default="BIMONETARIO")  # BIMONETARIO / SOLO_USD / SOLO_VES — formato de moneda elegido en el POS para IMPRIMIR la factura
 
     # Relación uno-a-muchos con los detalles de la venta
     cliente = relationship("Cliente")
