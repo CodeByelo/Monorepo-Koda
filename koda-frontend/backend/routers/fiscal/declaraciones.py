@@ -9,6 +9,7 @@ from backend.core.database import get_db
 from backend.models.core import Profile
 from backend.models.operations import Venta
 from backend.models.erp_extended import Compra, DeclaracionIVA, RetencionIVA, DeclaracionISLR, Empresa
+from backend.schemas.fiscal import DeclaracionIVAPayload
 from backend.utils.helpers import ventas_periodo, periodo_rango, to_float, tasa_actual
 from backend.core.security import get_current_user
 
@@ -67,29 +68,28 @@ def historial_declaraciones_iva(db: Session = Depends(get_db), current_user: Pro
 
 
 @router.post("/declaracion-iva/borrador")
-def guardar_borrador_iva(body: dict, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
-    periodo = body.get("periodo")
+def guardar_borrador_iva(payload: DeclaracionIVAPayload, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     decl = db.query(DeclaracionIVA).filter(
-        DeclaracionIVA.periodo == periodo,
+        DeclaracionIVA.periodo == payload.periodo,
         DeclaracionIVA.tenant_id == current_user.tenant_id,
     ).first()
     if not decl:
         decl = DeclaracionIVA(
-            periodo=periodo,
+            periodo=payload.periodo,
             estado="BORRADOR",
             tasa_cambio_bs=tasa_actual(db, current_user.tenant_id),
             tenant_id=current_user.tenant_id,
         )
         db.add(decl)
-    decl.retenciones = body.get("retenciones", 0)
+    decl.retenciones = payload.retenciones
     decl.estado = "BORRADOR"
     db.commit()
     return {"ok": True}
 
 
 @router.post("/declaracion-iva/finalizar")
-def finalizar_iva(body: dict, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
-    periodo = body.get("periodo")
+def finalizar_iva(payload: DeclaracionIVAPayload, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    periodo = payload.periodo
     data = declaracion_iva(periodo, db, current_user)
     decl = db.query(DeclaracionIVA).filter(
         DeclaracionIVA.periodo == periodo,
@@ -104,7 +104,7 @@ def finalizar_iva(body: dict, db: Session = Depends(get_db), current_user: Profi
         db.add(decl)
     decl.debito_fiscal = data["debito_fiscal"]
     decl.credito_fiscal_mes = data["credito_fiscal_mes"]
-    decl.retenciones = body.get("retenciones", 0)
+    decl.retenciones = payload.retenciones
     decl.estado = "FINALIZADA"
     # NOTA: el modelo DeclaracionIVA no tiene columna `fecha_presentacion`
     # (solo `fecha_cierre`) — asignar el nombre viejo no fallaba porque
