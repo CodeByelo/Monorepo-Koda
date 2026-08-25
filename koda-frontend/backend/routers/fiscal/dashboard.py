@@ -58,10 +58,7 @@ def fiscal_dashboard(periodo: str = Query(...), db: Session = Depends(get_db), c
     ).all()
     retenciones_soportadas = sum(to_float(r.monto_usd) for r in retenciones)
     # Lógica básica Calendario SENIAT (asumiendo dígito 0 por defecto)
-    try:
-        y, m = map(int, periodo.split("-"))
-    except:
-        y, m = 2026, 7
+    y, m = map(int, periodo.split("-"))
     nm = m + 1
     ny = y
     if nm > 12:
