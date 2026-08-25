@@ -1401,28 +1401,89 @@ def datos_aplicacion(factura_id: str = Query(None), db: Session = Depends(get_db
 
 @cobranzas_router.post("/aplicacion/procesar")
 def procesar_aplicacion(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    doc = body.get("factura_id") or body.get("numero_documento")
-    if not doc:
-        raise HTTPException(status_code=400, detail="Debe proporcionar el número de factura o documento.")
-        
-    cxc = db.query(CuentaPorCobrar).filter(
-        CuentaPorCobrar.numero_documento == doc,
-        CuentaPorCobrar.tenant_id == current_user.tenant_id
-    ).first()
-    if not cxc:
-        raise HTTPException(status_code=404, detail="Cuenta por cobrar no encontrada.")
-        
-    monto_raw = body.get("monto")
-    if monto_raw is None or float(monto_raw) <= 0:
-        raise HTTPException(status_code=400, detail="El monto a aplicar debe ser mayor a cero.")
-        
-    monto = Decimal(str(monto_raw))
-    cxc.monto_pagado = min(cxc.monto_total, cxc.monto_pagado + monto)
-    if cxc.monto_pagado >= cxc.monto_total:
-        cxc.estado = "PAGADA"
-    db.commit()
-    
-    return {"ok": True, "message": "Pago aplicado exitosamente."}
+    try:
+        doc = body.get("factura_id") or body.get("numero_documento")
+        if not doc:
+            raise HTTPException(status_code=400, detail="Debe proporcionar el número de factura o documento.")
+            
+        cxc = db.query(CuentaPorCobrar).filter(
+            CuentaPorCobrar.numero_documento == doc,
+            CuentaPorCobrar.tenant_id == current_user.tenant_id
+        ).first()
+        if not cxc:
+            raise HTTPException(status_code=404, detail="Cuenta por cobrar no encontrada.")
+            
+        monto_raw = body.get("monto")
+        if monto_raw is None or float(monto_raw) <= 0:
+            raise HTTPException(status_code=400, detail="El monto a aplicar debe ser mayor a cero.")
+            
+        monto_aplicar_cxc = Decimal(str(monto_raw))
+
+        metodos = body.get("metodos")
+        if not metodos:
+            metodos = [{"type": "Efectivo", "amount": str(monto_aplicar_cxc), "account": None}]
+
+        total_recibido = Decimal("0.00")
+        for m in metodos:
+            m_type = m.get("type", "Efectivo")
+            m_amount = Decimal(str(m.get("amount", 0)))
+            m_account = m.get("account")
+            m_ref = m.get("ref") or doc
+            total_recibido += m_amount
+
+            if m_type != "Efectivo":
+                if not m_account:
+                    raise HTTPException(status_code=400, detail="Debe especificar la cuenta bancaria para pagos que no son en efectivo.")
+                banco = db.query(CuentaBancaria).filter(
+                    CuentaBancaria.banco == m_account,
+                    CuentaBancaria.tenant_id == current_user.tenant_id
+                ).first()
+                if not banco:
+                    raise HTTPException(status_code=400, detail=f"Cuenta bancaria '{m_account}' no encontrada.")
+
+                banco.saldo_actual_usd += m_amount
+
+                mov = MovimientoBancario(
+                    cuenta_id=banco.id,
+                    concepto=f"Cobro CxC {doc} ({m_type})",
+                    monto_usd=m_amount,
+                    tasa_cambio_bs=cxc.tasa_cambio_bs if getattr(cxc, "tasa_cambio_bs", None) else Decimal("1.0"),
+                    tipo="INGRESO",
+                    referencia=m_ref,
+                    estado="ACTIVO",
+                    tenant_id=current_user.tenant_id
+                )
+                db.add(mov)
+
+        cxc.monto_pagado = min(cxc.monto_total, cxc.monto_pagado + monto_aplicar_cxc)
+        if cxc.monto_pagado >= cxc.monto_total:
+            cxc.estado = "PAGADA"
+
+        diferencia_raw = body.get("diferencia", 0)
+        diferencia = Decimal(str(diferencia_raw or 0))
+        accion_diferencia = body.get("accion_diferencia", "Sin diferencia")
+
+        cliente_nombre = cxc.cliente.nombre if (getattr(cxc, "cliente", None) and getattr(cxc.cliente, "nombre", None)) else "N/A"
+
+        # Generar Asiento Contable Automático de Cobro a Cliente
+        ContabilidadService.generar_asiento_cobro_cliente(
+            monto_neto_recibido=total_recibido,
+            monto_factura_cancelado=monto_aplicar_cxc,
+            diferencia=diferencia,
+            accion_diferencia=accion_diferencia,
+            referencia=f"COBRO-{doc}",
+            concepto=f"Cobro Factura {doc} - Cliente {cliente_nombre}",
+            fecha=datetime.now(timezone.utc),
+            db=db,
+            tenant_id=current_user.tenant_id,
+        )
+
+        db.commit()
+        return {"ok": True, "message": "Pago aplicado exitosamente."}
+    except HTTPException:
+        db.rollback()
+        raise
+
 
 
 @cobranzas_router.get("/anticipos-data")

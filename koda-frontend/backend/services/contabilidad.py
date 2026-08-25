@@ -395,3 +395,135 @@ class ContabilidadService:
         db.add(asiento)
         return asiento
 
+    @staticmethod
+    def generar_asiento_cobro_cliente(
+        monto_neto_recibido: Decimal,
+        monto_factura_cancelado: Decimal,
+        diferencia: Decimal,
+        accion_diferencia: str,
+        referencia: str,
+        concepto: str,
+        fecha,
+        db: Session,
+        tenant_id: str = None
+    ):
+        """
+        Crea un asiento contable automático para el cobro de una factura de cliente.
+        Afecta:
+          - DEBE: 1.1.01 Caja y Bancos (monto neto realmente recibido)
+          - DEBE: 5.1.03 Otras Asignaciones (Gasto) — solo si accion_diferencia == "Faltante", por el monto de la diferencia
+          - HABER: 1.1.02 Cuentas por Cobrar Comerciales (monto de la factura cancelado)
+          - HABER: 5.1.03 Otras Asignaciones (Gasto) — solo si accion_diferencia == "Excedente", por el monto de la diferencia
+        """
+        fecha_asiento = fecha or datetime.now(timezone.utc)
+        periodo_asiento = fecha_asiento.strftime("%Y-%m")
+
+        cierre_query = db.query(CierrePeriodo).filter(CierrePeriodo.periodo == periodo_asiento)
+        if tenant_id:
+            cierre_query = cierre_query.filter(CierrePeriodo.tenant_id == tenant_id)
+        cierre = cierre_query.first()
+        if cierre:
+            raise HTTPException(
+                status_code=403,
+                detail=f"No se pueden registrar asientos en el período {periodo_asiento} porque está CERRADO."
+            )
+
+        cta_banco_query = db.query(CuentaContable).filter(CuentaContable.codigo == "1.1.01")
+        if tenant_id:
+            cta_banco_query = cta_banco_query.filter(CuentaContable.tenant_id == tenant_id)
+        cta_banco = cta_banco_query.first()
+        if not cta_banco:
+            raise HTTPException(status_code=400, detail="Cuenta contable 1.1.01 (Caja y Bancos) no encontrada.")
+
+        cta_cxc_query = db.query(CuentaContable).filter(CuentaContable.codigo == "1.1.02")
+        if tenant_id:
+            cta_cxc_query = cta_cxc_query.filter(CuentaContable.tenant_id == tenant_id)
+        cta_cxc = cta_cxc_query.first()
+        if not cta_cxc:
+            raise HTTPException(status_code=400, detail="Cuenta contable 1.1.02 (Cuentas por Cobrar) no encontrada.")
+
+        cta_gasto = None
+        dif_abs = abs(Decimal(str(diferencia or 0))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if accion_diferencia in ["Faltante", "Excedente"] and dif_abs > Decimal("0.00"):
+            cta_gasto_query = db.query(CuentaContable).filter(CuentaContable.codigo == "5.1.03")
+            if tenant_id:
+                cta_gasto_query = cta_gasto_query.filter(CuentaContable.tenant_id == tenant_id)
+            cta_gasto = cta_gasto_query.first()
+            if not cta_gasto:
+                raise HTTPException(status_code=400, detail="Cuenta contable 5.1.03 (Otras Asignaciones (Gasto)) no encontrada.")
+
+        monto_recibido = Decimal(str(monto_neto_recibido or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        monto_cancelado = Decimal(str(monto_factura_cancelado or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        detalles = []
+        total_debe = Decimal("0.00")
+        total_haber = Decimal("0.00")
+
+        # 1. Debe: Caja y Bancos (monto neto recibido)
+        if monto_recibido > Decimal("0.00"):
+            detalles.append(AsientoDetalle(
+                cuenta_codigo="1.1.01",
+                cuenta_nombre=cta_banco.nombre,
+                debe_usd=monto_recibido,
+                haber_usd=Decimal("0.00"),
+                tenant_id=tenant_id
+            ))
+            total_debe += monto_recibido
+
+        # 2. Debe: Diferencia si Faltante (Gasto)
+        if accion_diferencia == "Faltante" and dif_abs > Decimal("0.00") and cta_gasto:
+            detalles.append(AsientoDetalle(
+                cuenta_codigo="5.1.03",
+                cuenta_nombre=cta_gasto.nombre,
+                debe_usd=dif_abs,
+                haber_usd=Decimal("0.00"),
+                tenant_id=tenant_id
+            ))
+            total_debe += dif_abs
+
+        # 3. Haber: Cuentas por Cobrar Comerciales (monto factura cancelado)
+        if monto_cancelado > Decimal("0.00"):
+            detalles.append(AsientoDetalle(
+                cuenta_codigo="1.1.02",
+                cuenta_nombre=cta_cxc.nombre,
+                debe_usd=Decimal("0.00"),
+                haber_usd=monto_cancelado,
+                tenant_id=tenant_id
+            ))
+            total_haber += monto_cancelado
+
+        # 4. Haber: Diferencia si Excedente
+        if accion_diferencia == "Excedente" and dif_abs > Decimal("0.00") and cta_gasto:
+            detalles.append(AsientoDetalle(
+                cuenta_codigo="5.1.03",
+                cuenta_nombre=cta_gasto.nombre,
+                debe_usd=Decimal("0.00"),
+                haber_usd=dif_abs,
+                tenant_id=tenant_id
+            ))
+            total_haber += dif_abs
+
+        # Ajuste por redondeo menor (<= 0.02)
+        diff = total_debe - total_haber
+        if abs(diff) > 0 and abs(diff) <= Decimal("0.02"):
+            for det in detalles:
+                if det.cuenta_codigo == "1.1.01":
+                    det.debe_usd -= diff
+                    total_debe -= diff
+                    break
+
+        asiento = AsientoContable(
+            fecha=fecha_asiento,
+            concepto=concepto,
+            referencia=referencia,
+            total_debe_usd=total_debe,
+            total_haber_usd=total_haber,
+            tasa_cambio_bs=Decimal("1.0"),
+            estado="ACTIVO",
+            detalles=detalles,
+            tenant_id=tenant_id
+        )
+        db.add(asiento)
+        return asiento
+
+
