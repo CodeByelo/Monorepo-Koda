@@ -219,100 +219,116 @@ class NotaCreditoCreate(BaseModel):
 
 @router.post("/ventas/notas-credito")
 def crear_nota_credito(payload: NotaCreditoCreate, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
-    venta = db.query(Venta).filter(
-        Venta.numero_factura == payload.numero_factura,
-        Venta.tenant_id == current_user.tenant_id
-    ).first()
-    if not venta:
-        raise HTTPException(status_code=404, detail=f"Factura {payload.numero_factura} no encontrada en su organización.")
+    try:
+        venta = db.query(Venta).filter(
+            Venta.numero_factura == payload.numero_factura,
+            Venta.tenant_id == current_user.tenant_id
+        ).first()
+        if not venta:
+            raise HTTPException(status_code=404, detail=f"Factura {payload.numero_factura} no encontrada en su organización.")
 
-    clientes = db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).all()
-    if not clientes:
-        raise HTTPException(status_code=400, detail="Debe registrar al menos un cliente en el sistema.")
+        clientes = db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).all()
+        if not clientes:
+            raise HTTPException(status_code=400, detail="Debe registrar al menos un cliente en el sistema.")
 
-    cxc = db.query(CuentaPorCobrar).filter(
-        CuentaPorCobrar.venta_id == venta.id,
-        CuentaPorCobrar.tenant_id == current_user.tenant_id
-    ).first()
-    if cxc:
-        cliente_id = cxc.cliente_id
-    else:
-        cliente_id = clientes[0].id
-
-    tipo_str_check = payload.tipo.upper() if payload.tipo else "CREDITO"
-    if "DEBIT" not in tipo_str_check:
-        # Nota de crédito: no puede exceder el saldo pendiente real de la
-        # factura relacionada. Antes esto se "clamp"eaba silenciosamente al
-        # aplicar el monto a la CxC (el exceso simplemente desaparecía del
-        # balance por cobrar); ahora se rechaza explícitamente para que el
-        # usuario corrija el monto.
+        cxc = db.query(CuentaPorCobrar).filter(
+            CuentaPorCobrar.venta_id == venta.id,
+            CuentaPorCobrar.tenant_id == current_user.tenant_id
+        ).first()
         if cxc:
-            saldo_pendiente = Decimal(str(cxc.monto_total)) - Decimal(str(cxc.monto_pagado))
+            cliente_id = cxc.cliente_id
         else:
-            # Sin CxC asociada (ya liquidada/eliminada o nunca generada):
-            # el tope de referencia es el total facturado.
-            saldo_pendiente = Decimal(str(venta.total_usd))
+            cliente_id = clientes[0].id
 
-        if saldo_pendiente < 0:
-            saldo_pendiente = Decimal("0")
+        tipo_str_check = payload.tipo.upper() if payload.tipo else "CREDITO"
+        if "DEBIT" not in tipo_str_check:
+            # Nota de crédito: no puede exceder el saldo pendiente real de la
+            # factura relacionada. Antes esto se "clamp"eaba silenciosamente al
+            # aplicar el monto a la CxC (el exceso simplemente desaparecía del
+            # balance por cobrar); ahora se rechaza explícitamente para que el
+            # usuario corrija el monto.
+            if cxc:
+                saldo_pendiente = Decimal(str(cxc.monto_total)) - Decimal(str(cxc.monto_pagado))
+            else:
+                # Sin CxC asociada (ya liquidada/eliminada o nunca generada):
+                # el tope de referencia es el total facturado.
+                saldo_pendiente = Decimal(str(venta.total_usd))
 
-        if payload.monto > saldo_pendiente:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"El monto de la nota de crédito (${payload.monto:.2f}) excede el saldo "
-                    f"pendiente de la factura {payload.numero_factura} (${saldo_pendiente:.2f})."
-                ),
-            )
+            if saldo_pendiente < 0:
+                saldo_pendiente = Decimal("0")
 
-    cant_notas = db.query(NotaCredito).filter(NotaCredito.tenant_id == current_user.tenant_id).count()
-    tipo_str = payload.tipo.upper() if payload.tipo else "CREDITO"
-    # Determinar prefijo según tipo de nota
-    prefijo = "ND" if "DEBIT" in tipo_str else "NC"
-    nuevo_numero = f"{prefijo}-{str(cant_notas + 1).zfill(8)}"
+            if payload.monto > saldo_pendiente:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"El monto de la nota de crédito (${payload.monto:.2f}) excede el saldo "
+                        f"pendiente de la factura {payload.numero_factura} (${saldo_pendiente:.2f})."
+                    ),
+                )
 
-    tasa_bs = Decimal(str(tasa_actual(db, current_user.tenant_id)))
-    nota = NotaCredito(
-        numero=nuevo_numero,
-        venta_id=venta.id,
-        cliente_id=cliente_id,
-        monto_usd=payload.monto,
-        tasa_cambio_bs=tasa_bs,
-        motivo=payload.motivo,
-        tipo="DEBITO" if "DEBIT" in tipo_str else "CREDITO",
-        estado="EMITIDA",
-        fecha=datetime.now(timezone.utc),
-        tenant_id=current_user.tenant_id
-    )
-    db.add(nota)
+        cant_notas = db.query(NotaCredito).filter(NotaCredito.tenant_id == current_user.tenant_id).count()
+        tipo_str = payload.tipo.upper() if payload.tipo else "CREDITO"
+        # Determinar prefijo según tipo de nota
+        prefijo = "ND" if "DEBIT" in tipo_str else "NC"
+        nuevo_numero = f"{prefijo}-{str(cant_notas + 1).zfill(8)}"
 
-    if cxc:
-        if "DEBIT" in tipo_str:
-            # Nota de débito incrementa el monto original por cobrar
-            cxc.monto_total = Decimal(str(cxc.monto_total)) + payload.monto
-            if cxc.estado == "PAGADA":
-                cxc.estado = "PENDIENTE"
-        else:
-            # Nota de crédito incrementa el monto ya pagado (disminuye saldo restante)
-            cxc.monto_pagado = Decimal(str(cxc.monto_pagado)) + payload.monto
-            if cxc.monto_pagado >= cxc.monto_total:
-                cxc.monto_pagado = cxc.monto_total
-                cxc.estado = "PAGADA"
+        tasa_bs = Decimal(str(tasa_actual(db, current_user.tenant_id)))
+        nota = NotaCredito(
+            numero=nuevo_numero,
+            venta_id=venta.id,
+            cliente_id=cliente_id,
+            monto_usd=payload.monto,
+            tasa_cambio_bs=tasa_bs,
+            motivo=payload.motivo,
+            tipo="DEBITO" if "DEBIT" in tipo_str else "CREDITO",
+            estado="EMITIDA",
+            fecha=datetime.now(timezone.utc),
+            tenant_id=current_user.tenant_id
+        )
+        db.add(nota)
 
-    db.commit()
-    db.refresh(nota)
+        if cxc:
+            if "DEBIT" in tipo_str:
+                # Nota de débito incrementa el monto original por cobrar
+                cxc.monto_total = Decimal(str(cxc.monto_total)) + payload.monto
+                if cxc.estado == "PAGADA":
+                    cxc.estado = "PENDIENTE"
+            else:
+                # Nota de crédito incrementa el monto ya pagado (disminuye saldo restante)
+                cxc.monto_pagado = Decimal(str(cxc.monto_pagado)) + payload.monto
+                if cxc.monto_pagado >= cxc.monto_total:
+                    cxc.monto_pagado = cxc.monto_total
+                    cxc.estado = "PAGADA"
 
-    cliente_nombre = next((c.nombre for c in clientes if c.id == cliente_id), "")
+        # Generar Asiento Contable Automático de Nota de Crédito / Débito
+        ContabilidadService.generar_asiento_nota_credito(
+            monto=payload.monto,
+            tipo=nota.tipo,
+            tasa_cambio_bs=tasa_bs,
+            referencia=nota.numero,
+            concepto=f"{'Nota de Crédito' if nota.tipo == 'CREDITO' else 'Nota de Débito'} {nota.numero} - Factura {payload.numero_factura} - {payload.motivo}",
+            fecha=datetime.now(timezone.utc),
+            db=db,
+            tenant_id=current_user.tenant_id,
+        )
 
-    return {
-        "id": nota.numero,
-        "cliente": cliente_nombre,
-        "monto": to_float(nota.monto),
-        "motivo": nota.motivo,
-        "estado": nota.estado,
-        "fecha": nota.fecha.strftime("%d/%m/%Y"),
-        "tipo": nota.tipo,
-    }
+        db.commit()
+        db.refresh(nota)
+
+        cliente_nombre = next((c.nombre for c in clientes if c.id == cliente_id), "")
+
+        return {
+            "id": nota.numero,
+            "cliente": cliente_nombre,
+            "monto": to_float(nota.monto),
+            "motivo": nota.motivo,
+            "estado": nota.estado,
+            "fecha": nota.fecha.strftime("%d/%m/%Y"),
+            "tipo": nota.tipo,
+        }
+    except HTTPException:
+        db.rollback()
+        raise
 
 
 @router.get("/cobranzas/estado-cuenta")

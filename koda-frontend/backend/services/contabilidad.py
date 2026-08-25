@@ -601,5 +601,106 @@ class ContabilidadService:
         db.add(asiento)
         return asiento
 
+    @staticmethod
+    def generar_asiento_nota_credito(
+        monto: Decimal,
+        tipo: str,
+        tasa_cambio_bs: Decimal,
+        referencia: str,
+        concepto: str,
+        fecha,
+        db: Session,
+        tenant_id: str = None
+    ):
+        """
+        Crea el asiento contable automático para una nota de crédito o
+        débito sobre una factura de cliente. Afecta, según tipo:
+          - CREDITO: DEBE 4.1.01 Ventas de Mercancía / HABER 1.1.02 Cuentas por Cobrar Comerciales
+          - DEBITO:  DEBE 1.1.02 Cuentas por Cobrar Comerciales / HABER 4.1.01 Ventas de Mercancía
+        """
+        fecha_asiento = fecha or datetime.now(timezone.utc)
+        periodo_asiento = fecha_asiento.strftime("%Y-%m")
+
+        cierre_query = db.query(CierrePeriodo).filter(CierrePeriodo.periodo == periodo_asiento)
+        if tenant_id:
+            cierre_query = cierre_query.filter(CierrePeriodo.tenant_id == tenant_id)
+        cierre = cierre_query.first()
+        if cierre:
+            raise HTTPException(
+                status_code=403,
+                detail=f"No se pueden registrar asientos en el período {periodo_asiento} porque está CERRADO."
+            )
+
+        cta_ventas_query = db.query(CuentaContable).filter(CuentaContable.codigo == "4.1.01")
+        if tenant_id:
+            cta_ventas_query = cta_ventas_query.filter(CuentaContable.tenant_id == tenant_id)
+        cta_ventas = cta_ventas_query.first()
+        if not cta_ventas:
+            raise HTTPException(status_code=400, detail="Cuenta contable 4.1.01 (Ventas de Mercancía) no encontrada.")
+
+        cta_cxc_query = db.query(CuentaContable).filter(CuentaContable.codigo == "1.1.02")
+        if tenant_id:
+            cta_cxc_query = cta_cxc_query.filter(CuentaContable.tenant_id == tenant_id)
+        cta_cxc = cta_cxc_query.first()
+        if not cta_cxc:
+            raise HTTPException(status_code=400, detail="Cuenta contable 1.1.02 (Cuentas por Cobrar) no encontrada.")
+
+        monto_dec = Decimal(str(monto)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if monto_dec <= Decimal("0.00"):
+            return None
+
+        tipo_upper = (tipo or "CREDITO").upper()
+        if "DEBIT" in tipo_upper:
+            # DEBITO: DEBE 1.1.02 / HABER 4.1.01
+            detalles = [
+                AsientoDetalle(
+                    cuenta_codigo="1.1.02",
+                    cuenta_nombre=cta_cxc.nombre,
+                    debe_usd=monto_dec,
+                    haber_usd=Decimal("0.00"),
+                    tenant_id=tenant_id
+                ),
+                AsientoDetalle(
+                    cuenta_codigo="4.1.01",
+                    cuenta_nombre=cta_ventas.nombre,
+                    debe_usd=Decimal("0.00"),
+                    haber_usd=monto_dec,
+                    tenant_id=tenant_id
+                )
+            ]
+        else:
+            # CREDITO: DEBE 4.1.01 / HABER 1.1.02
+            detalles = [
+                AsientoDetalle(
+                    cuenta_codigo="4.1.01",
+                    cuenta_nombre=cta_ventas.nombre,
+                    debe_usd=monto_dec,
+                    haber_usd=Decimal("0.00"),
+                    tenant_id=tenant_id
+                ),
+                AsientoDetalle(
+                    cuenta_codigo="1.1.02",
+                    cuenta_nombre=cta_cxc.nombre,
+                    debe_usd=Decimal("0.00"),
+                    haber_usd=monto_dec,
+                    tenant_id=tenant_id
+                )
+            ]
+
+        asiento = AsientoContable(
+            fecha=fecha_asiento,
+            concepto=concepto,
+            referencia=referencia,
+            total_debe_usd=monto_dec,
+            total_haber_usd=monto_dec,
+            tasa_cambio_bs=Decimal(str(tasa_cambio_bs or 1.0)),
+            estado="ACTIVO",
+            detalles=detalles,
+            tenant_id=tenant_id
+        )
+        db.add(asiento)
+        return asiento
+
+
 
 
