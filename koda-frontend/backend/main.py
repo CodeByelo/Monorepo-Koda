@@ -192,6 +192,7 @@ async def startup_db_init():
                     connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS retencion_iva_usd NUMERIC(15,2) DEFAULT 0.00;"))
                     connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS igtf_usd NUMERIC(15,2) DEFAULT 0.00;"))
                     connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS creado_por UUID;"))
+                    connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS moneda_documento VARCHAR(20) DEFAULT 'BIMONETARIO';"))
                     connection.execute(text("ALTER TABLE public.kardex_movimientos ADD COLUMN IF NOT EXISTS almacen_id INTEGER REFERENCES public.almacenes(id);"))
                     connection.execute(text("ALTER TABLE public.almacenes ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) NOT NULL DEFAULT 'ALMACEN';"))
                     connection.execute(text("ALTER TABLE public.notas_entrega ADD COLUMN IF NOT EXISTS venta_id INTEGER REFERENCES public.ventas(id);"))
@@ -241,6 +242,11 @@ async def startup_db_init():
                     """))
                     connection.execute(text("ALTER TABLE public.cierres_periodos DROP CONSTRAINT IF EXISTS _tenant_periodo_cierre_uc;"))
                     connection.execute(text("ALTER TABLE public.cierres_periodos ADD CONSTRAINT _tenant_periodo_cierre_uc UNIQUE (tenant_id, periodo);"))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos ADD COLUMN IF NOT EXISTS estado VARCHAR(20) NOT NULL DEFAULT 'CERRADO';"))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos ADD COLUMN IF NOT EXISTS reabierto_por VARCHAR(100);"))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos ADD COLUMN IF NOT EXISTS fecha_reabierto TIMESTAMP;"))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos ADD COLUMN IF NOT EXISTS motivo_reapertura TEXT;"))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos ADD COLUMN IF NOT EXISTS veces_reabierto INTEGER NOT NULL DEFAULT 0;"))
                 else:
                     for col_sql in [
                         "ALTER TABLE productos ADD COLUMN imagen_url TEXT",
