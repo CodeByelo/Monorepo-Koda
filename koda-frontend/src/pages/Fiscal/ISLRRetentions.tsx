@@ -1,7 +1,6 @@
 import { 
   FileCode, 
   Download, 
-  Printer, 
   Search, 
   Filter, 
   ArrowLeft,
@@ -9,7 +8,6 @@ import {
   TriangleAlert,
   FileText,
   TrendingUp,
-  BarChart4,
   Info,
   Maximize2,
   Minimize2,
@@ -112,12 +110,6 @@ const ISLRRetentions = () => {
              <button onClick={handleExportTXT} className="bg-white text-[#0b5156] px-4 py-2.5 rounded-xl text-[10px] font-black uppercase border border-[#0b5156]/20 flex items-center gap-2 hover:bg-[#0b5156]/5 transition-all">
                 <Download size={14} /> Generar TXT (F. 99017)
              </button>
-             <button onClick={() => window.print()} className="bg-white text-[#0b5156] px-4 py-2.5 rounded-xl text-[10px] font-black uppercase border border-[#0b5156]/20 flex items-center gap-2 hover:bg-[#0b5156]/5 transition-all">
-                <Printer size={14} /> Pagos Sujetos
-             </button>
-             <button className="bg-white text-[#0b5156] px-4 py-2.5 rounded-xl text-[10px] font-black uppercase border border-[#0b5156]/20 flex items-center gap-2 hover:bg-[#0b5156]/5 transition-all">
-                <BarChart4 size={14} /> Resumen Conceptos
-             </button>
           </div>
         </div>
       </header>
@@ -180,6 +172,17 @@ const ISLRRetentions = () => {
               </div>
             ))}
           </section>
+ 
+          {/* Banner Módulo No Configurado */}
+          <div className="p-6 bg-amber-50 rounded-3xl border border-amber-100 flex gap-4">
+            <TriangleAlert size={24} className="text-amber-600 shrink-0" />
+            <div className="space-y-1">
+              <h4 className="text-sm font-black text-amber-800 uppercase">Módulo de Retenciones ISLR No Configurado</h4>
+              <p className="text-xs text-amber-700 font-bold uppercase leading-relaxed opacity-80">
+                Este módulo de retenciones ISLR aún no está configurado. El sistema no genera retenciones automáticas ni permite cargarlas manualmente todavía. Para activarlo, se necesita que el contador del negocio confirme los tipos de pago sujetos a retención (honorarios, alquileres, fletes, servicios) y el porcentaje correspondiente a cada uno.
+              </p>
+            </div>
+          </div>
 
           {/* Table Section */}
           <article className={`bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden transition-all duration-500 ${isFullScreen ? 'fixed inset-0 z-[100] m-4 rounded-[2.5rem]' : 'relative'}`}>
