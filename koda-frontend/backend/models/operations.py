@@ -28,7 +28,7 @@ class Producto(Base):
     costo_usd = Column(Numeric(15, 2), nullable=False)
     # Total global de stock. Legacy: sigue siendo la fuente de verdad para
     # ventas/facturación/valorización (routers/sales.py, facturacion.py,
-    # inventory.py, logistica.py, modulos_ext.py), ninguno de los cuales es
+    # inventory.py, logistica.py, operaciones/), ninguno de los cuales es
     # todavía consciente de almacén. El detalle real por almacén vive en
     # StockPorAlmacen (models/erp_extended.py). Las transferencias entre
     # almacenes son de suma neta cero y no tocan esta columna. Sales/compras

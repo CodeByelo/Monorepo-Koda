@@ -43,7 +43,7 @@ __all__ = [
 from backend.routers import (
     auth, rates, sales, fiscal, contabilidad, inventory,
     hr as hr_router, productos, proveedores, audit, entidades, clientes,
-    dashboard_ext, modulos_ext, admin_ext, extras_ext,
+    dashboard_ext, operaciones, admin_ext, extras_ext,
     pagos, reportes, developer, developer_router, payroll, facturacion, telegram_api,
     forense, telemetry, bot_api, garantias, sso_bridge,
 )
@@ -363,9 +363,9 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Routers del núcleo (ventas, inventario, maestros)
 app.include_router(auth.router)
 app.include_router(rates.router)
-app.include_router(modulos_ext.ventas_ext_router)
+app.include_router(operaciones.ventas_ext_router)
 app.include_router(sales.router)
-app.include_router(modulos_ext.inventario_ext_router)
+app.include_router(operaciones.inventario_ext_router)
 app.include_router(inventory.router)
 app.include_router(fiscal.router)
 app.include_router(audit.router)
@@ -377,12 +377,12 @@ app.include_router(entidades.router)
 app.include_router(proveedores.router)
 # Módulos extendidos
 app.include_router(dashboard_ext.router)
-app.include_router(modulos_ext.compras_router)
-app.include_router(modulos_ext.cobranzas_router)
-app.include_router(modulos_ext.pagos_router)
-app.include_router(modulos_ext.tesoreria_router)
-app.include_router(modulos_ext.reportes_router)
-app.include_router(modulos_ext.tasas_router)
+app.include_router(operaciones.compras_router)
+app.include_router(operaciones.cobranzas_router)
+app.include_router(operaciones.pagos_router)
+app.include_router(operaciones.tesoreria_router)
+app.include_router(operaciones.reportes_router)
+app.include_router(operaciones.tasas_router)
 app.include_router(admin_ext.router)
 app.include_router(telegram_api.router)
 app.include_router(extras_ext.router)
