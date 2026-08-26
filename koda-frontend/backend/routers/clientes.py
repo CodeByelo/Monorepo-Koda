@@ -22,8 +22,15 @@ def segmentos_clientes():
 
 @router.get("", response_model=List[ClienteResponse])
 @router.get("/", response_model=List[ClienteResponse], include_in_schema=False)
-def listar_clientes(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
-    return db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).all()
+def listar_clientes(
+    skip: int = 0,
+    limit: int = 500,
+    db: Session = Depends(get_db),
+    current_user: Profile = Depends(get_current_user)
+):
+    return db.query(Cliente).filter(
+        Cliente.tenant_id == current_user.tenant_id
+    ).order_by(Cliente.id.desc()).offset(skip).limit(limit).all()
 
 
 @router.post("", response_model=ClienteResponse, status_code=status.HTTP_201_CREATED)

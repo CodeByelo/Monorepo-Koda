@@ -185,6 +185,8 @@ def obtener_reporte_ventas(
 
 @router.get("", response_model=List[VentaResponse])
 def listar_ventas(
+    skip: int = 0,
+    limit: int = 500,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
@@ -193,7 +195,7 @@ def listar_ventas(
     """
     return db.query(Venta).options(joinedload(Venta.cliente)).filter(
         Venta.tenant_id == current_user.tenant_id
-    ).order_by(Venta.fecha.desc()).all()
+    ).order_by(Venta.fecha.desc()).offset(skip).limit(limit).all()
 
 
 RESERVED_VENTAS_SUBPATHS = {

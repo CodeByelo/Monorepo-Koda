@@ -133,6 +133,8 @@ def listar_garantias(
     cliente_id: Optional[int] = None,
     producto_id: Optional[int] = None,
     estado: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 500,
     db: Session = Depends(get_db),
     current_user: Profile = Depends(get_current_user),
 ):
@@ -146,7 +148,7 @@ def listar_garantias(
         if estado_norm not in ESTADOS_VALIDOS:
             raise HTTPException(status_code=400, detail=f"Estado inválido. Use uno de: {', '.join(ESTADOS_VALIDOS)}")
         query = query.filter(Garantia.estado == estado_norm)
-    return query.order_by(Garantia.fecha_vencimiento.desc()).all()
+    return query.order_by(Garantia.fecha_vencimiento.desc()).offset(skip).limit(limit).all()
 
 
 @router.get("/{garantia_id}", response_model=GarantiaResponse)

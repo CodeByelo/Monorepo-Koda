@@ -31,8 +31,15 @@ MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
 
 @router.get("", response_model=List[ProductoResponse])
 @router.get("/", response_model=List[ProductoResponse])
-def listar_productos(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
-    return db.query(Producto).filter(Producto.tenant_id == current_user.tenant_id).all()
+def listar_productos(
+    skip: int = 0,
+    limit: int = 500,
+    db: Session = Depends(get_db),
+    current_user: Profile = Depends(get_current_user)
+):
+    return db.query(Producto).filter(
+        Producto.tenant_id == current_user.tenant_id
+    ).order_by(Producto.id.desc()).offset(skip).limit(limit).all()
 
 @router.post("", response_model=ProductoResponse, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=ProductoResponse, status_code=status.HTTP_201_CREATED, include_in_schema=False)

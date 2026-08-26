@@ -184,8 +184,8 @@ def pos_contexto(db: Session = Depends(get_db), current_user: Profile = Depends(
 
 
 @router.get("/ventas/notas-credito")
-def listar_notas_credito(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
-    notas = db.query(NotaCredito).filter(NotaCredito.tenant_id == current_user.tenant_id).order_by(NotaCredito.fecha.desc()).all()
+def listar_notas_credito(skip: int = 0, limit: int = 500, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
+    notas = db.query(NotaCredito).filter(NotaCredito.tenant_id == current_user.tenant_id).order_by(NotaCredito.fecha.desc()).offset(skip).limit(limit).all()
     clientes = {c.id: c for c in db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).all()}
     ventas = {v.id: v for v in db.query(Venta).filter(Venta.tenant_id == current_user.tenant_id).all()}
     return [

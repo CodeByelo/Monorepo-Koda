@@ -198,6 +198,8 @@ def aprobar_ajuste(
 @router.get("/kardex/{producto_id}", response_model=List[KardexMovimientoResponse])
 def obtener_kardex_producto(
     producto_id: int,
+    skip: int = 0,
+    limit: int = 500,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
@@ -216,7 +218,7 @@ def obtener_kardex_producto(
     return db.query(KardexMovimiento).filter(
         KardexMovimiento.producto_id == producto_id,
         KardexMovimiento.tenant_id == current_user.tenant_id
-    ).order_by(KardexMovimiento.fecha.desc()).all()
+    ).order_by(KardexMovimiento.fecha.desc()).offset(skip).limit(limit).all()
 
 @router.post("/ajustes/{ajuste_id}/rechazar", response_model=AjusteInventarioResponse)
 def rechazar_ajuste(
