@@ -27,8 +27,8 @@ def verificar_periodo_abierto(
     """Rechaza la operación si `fecha` cae en un período contable ya cerrado.
 
     Único punto de verdad para el chequeo de `CierrePeriodo`: reutilizado tanto
-    por la creación manual de asientos contables (contabilidad_ext.py) como por
-    la creación de compras (modulos_ext.py), para que ambos flujos respeten el
+    por la creación manual de asientos contables (routers/contabilidad/) como por
+    la creación de compras (routers/operaciones/compras.py), para que ambos flujos respeten el
     mismo cierre de período y no se puedan registrar documentos retroactivos
     en un período ya cerrado.
 

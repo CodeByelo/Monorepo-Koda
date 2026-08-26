@@ -334,7 +334,7 @@ def consultar_stock_bot(
     minimo = to_float(producto.stock_minimo)
 
     # Desglose por almacén (mismo criterio de "principal" que
-    # GET /inventario/kardex/{producto_id}/almacenes en modulos_ext.py):
+    # GET /inventario/kardex/{producto_id}/almacenes en operaciones/inventario.py):
     # se agrega como campo NUEVO ("por_almacen") sin tocar ninguno de los
     # campos existentes, para no romper a quien ya consume este endpoint.
     principal_id = get_almacen_principal_id(db, tid)

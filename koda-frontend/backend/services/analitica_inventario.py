@@ -9,8 +9,8 @@ definición de "stock crítico", "baja rotación" o "producto en pérdida".
 
 Lógica extraída, sin cambios de negocio, de:
   - `routers/extras_ext.py::inventario_criticos` (stock crítico)
-  - `routers/modulos_ext.py::matriz_abc` (matriz de rotación/rentabilidad)
-  - `routers/modulos_ext.py::rentabilidad_productos` (margen neto / pérdida)
+  - `routers/operaciones/inventario.py::matriz_abc` (matriz de rotación/rentabilidad)
+  - `routers/operaciones/inventario.py::rentabilidad_productos` (margen neto / pérdida)
 """
 
 from dataclasses import dataclass
@@ -71,7 +71,7 @@ def calcular_matriz_abc(db: Session, tenant_id) -> List[ProductoClasificadoABC]:
     """Clasifica el catálogo del tenant en los 4 cuadrantes de la matriz
     BCG (Estrellas/Incógnitas/Vacas de Efectivo/Perros) según rotación de
     ventas (últimos 30 días) y rentabilidad bruta. Idéntica lógica a
-    `routers/modulos_ext.py::matriz_abc`."""
+    `routers/operaciones/inventario.py::matriz_abc`."""
     hace_30_dias = datetime.now(timezone.utc) - timedelta(days=30)
     ventas_query = db.query(
         VentaDetalle.producto_id,
@@ -135,7 +135,7 @@ class ProductoRentabilidad:
 def calcular_rentabilidad(db: Session, tenant_id) -> List[ProductoRentabilidad]:
     """Margen neto por producto, prorrateando los gastos operativos
     (CuentaPorPagar) por valor de stock. Idéntica lógica a
-    `routers/modulos_ext.py::rentabilidad_productos`."""
+    `routers/operaciones/inventario.py::rentabilidad_productos`."""
     productos = db.query(Producto).filter(Producto.tenant_id == tenant_id).all()
 
     gastos_totales = db.query(func.sum(CuentaPorPagar.monto_total_usd)).filter(
