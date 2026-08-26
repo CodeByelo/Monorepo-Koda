@@ -2963,34 +2963,6 @@ def dashboard_tesoreria(db: Session = Depends(get_db), current_user = Depends(ge
         },
     }
 
-
-# ---- I. TRANSFERENCIAS — CONFIRMAR ----
-
-@router.post("/tesoreria/transferencias-internas/{transferencia_id}/confirmar")
-def confirmar_transferencia(transferencia_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    transferencia = db.query(TransferenciaTesoreria).filter(TransferenciaTesoreria.id == transferencia_id, TransferenciaTesoreria.tenant_id == current_user.tenant_id).first()
-    if not transferencia:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Transferencia no encontrada")
-    
-    transferencia.estado = "CONFIRMADA"
-    
-    # Apply balances
-    cuenta_origen = db.query(CuentaBancaria).filter(CuentaBancaria.id == transferencia.cuenta_origen_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
-    cuenta_destino = db.query(CuentaBancaria).filter(CuentaBancaria.id == transferencia.cuenta_destino_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
-    monto_bs = to_float(transferencia.monto_bs)
-    tasa = to_float(tasa_actual(db, current_user.tenant_id)) or 36.42
-    monto_usd = monto_bs / tasa if tasa > 0 else 0.0
-    
-    if cuenta_origen:
-        cuenta_origen.saldo_actual_usd = to_float(cuenta_origen.saldo_actual_usd) - monto_usd
-    if cuenta_destino:
-        cuenta_destino.saldo_actual_usd = to_float(cuenta_destino.saldo_actual_usd) + monto_usd
-
-    db.commit()
-    return {"ok": True, "id": transferencia_id, "estado": "CONFIRMADA", "message": "Transferencia confirmada y saldos actualizados."}
-
-
 # ---- INVERSIONES — EXPORT EXCEL ----
 
 @router.get("/tesoreria/inversiones/exportar")
