@@ -222,14 +222,20 @@ def kardex_stats(db: Session = Depends(get_db), current_user = Depends(get_curre
 # main.py ANTES que inventory.router, FastAPI siempre matchea esta función y
 # la de inventory.py queda muerta (shadowed). Ver comentario en ese archivo.
 @inventario_ext_router.get("/kardex/{producto_id}")
-def kardex_producto(producto_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+def kardex_producto(
+    producto_id: int,
+    skip: int = 0,
+    limit: int = 500,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
     prod = db.query(Producto).filter(Producto.id == producto_id, Producto.tenant_id == current_user.tenant_id).first()
     if not prod:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
     movs = db.query(KardexMovimiento).filter(
         KardexMovimiento.producto_id == producto_id,
         KardexMovimiento.tenant_id == current_user.tenant_id
-    ).order_by(KardexMovimiento.fecha.desc()).all()
+    ).order_by(KardexMovimiento.fecha.desc()).offset(skip).limit(limit).all()
     return [{"tipo": m.tipo_movimiento, "cantidad": m.cantidad, "doc": m.documento_referencia, "fecha": m.fecha.isoformat()} for m in movs]
 
 

@@ -145,8 +145,8 @@ def compras_historial(db: Session = Depends(get_db), current_user = Depends(get_
 
 @compras_router.get("")
 @compras_router.get("/")
-def listar_compras(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    return db.query(Compra).filter(Compra.tenant_id == current_user.tenant_id).order_by(Compra.fecha.desc()).all()
+def listar_compras(skip: int = 0, limit: int = 500, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    return db.query(Compra).filter(Compra.tenant_id == current_user.tenant_id).order_by(Compra.fecha.desc()).offset(skip).limit(limit).all()
 
 
 @compras_router.get("/ordenes")
