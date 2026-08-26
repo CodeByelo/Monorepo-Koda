@@ -103,7 +103,12 @@ function _fetchWithTimeout(input: string, init: RequestInit = {}, timeoutMs = DE
   return fetch(input, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
-export async function request<T>(endpoint: string, options: RequestInit = {}, _isRetry = false): Promise<T> {
+export async function request<T>(
+  endpoint: string,
+  options: RequestInit = {},
+  _isRetry = false,
+  _timeoutRetryCount = 0
+): Promise<T> {
   const isFormData = options.body instanceof FormData;
   const headers: any = {
     ...options.headers,
@@ -124,13 +129,23 @@ export async function request<T>(endpoint: string, options: RequestInit = {}, _i
 
   let response: Response;
   try {
-    response = await _fetchWithTimeout(`${BASE_URL}${endpoint}`, {
-      ...options,
-      headers,
-      credentials: 'include', // Enviar cookies httpOnly automáticamente
-    });
+    response = await _fetchWithTimeout(
+      `${BASE_URL}${endpoint}`,
+      {
+        ...options,
+        headers,
+        credentials: 'include', // Enviar cookies httpOnly automáticamente
+      },
+      _timeoutRetryCount === 0 ? DEFAULT_TIMEOUT_MS : 45000
+    );
   } catch (err: any) {
     if (err?.name === 'AbortError') {
+      if (_timeoutRetryCount === 0) {
+        // Primer timeout: puede ser un cold-start de Render en curso.
+        // Reintentamos una vez con más margen antes de rendirnos.
+        console.warn(`[api] Timeout en ${endpoint}, reintentando con más margen (posible cold-start)...`);
+        return request<T>(endpoint, options, _isRetry, 1);
+      }
       throw new Error('Tiempo de espera agotado al contactar el servidor. Verifica tu conexión e intenta nuevamente.');
     }
     throw err;
@@ -142,7 +157,7 @@ export async function request<T>(endpoint: string, options: RequestInit = {}, _i
       const newToken = await _attemptTokenRefresh();
       if (newToken) {
         // Reintentar la petición original con el nuevo token
-        return request<T>(endpoint, options, true);
+        return request<T>(endpoint, options, true, _timeoutRetryCount);
       } else {
         // Refresh fallido — redirigir al login
         _redirectToLogin('timeout');

@@ -1,0 +1,17 @@
+name: Keep Backend Awake
+
+on:
+  schedule:
+    # Cada 10 minutos. Render duerme a los ~15 min de inactividad, así
+    # que con este margen nunca llega a dormirse.
+    - cron: '*/10 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping backend
+        run: |
+          curl -sf --max-time 60 "https://koda-backend-contable.onrender.com/" \
+            || echo "Ping falló (puede ser un cold-start en curso, no es necesariamente un error real)"
