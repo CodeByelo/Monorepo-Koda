@@ -1,6 +1,5 @@
-from sqlalchemy import ForeignKey
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from backend.core.database import Base
@@ -111,10 +110,18 @@ class AsientoDetalle(Base):
 class CierrePeriodo(Base):
     """Registro de cierres mensuales de periodos contables"""
     __tablename__ = "cierres_periodos"
-    __table_args__ = {'schema': 'public'}
-    tenant_id = Column(UUID(as_uuid=True))
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'periodo', name='_tenant_periodo_cierre_uc'),
+        {'schema': 'public'},
+    )
+    tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
 
     id = Column(Integer, primary_key=True, index=True)
-    periodo = Column(String(7), unique=True, nullable=False) # YYYY-MM
+    periodo = Column(String(7), nullable=False) # YYYY-MM
     fecha_cierre = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     usuario = Column(String(100), nullable=True)
+    estado = Column(String(20), nullable=False, default="CERRADO")  # CERRADO | REABIERTO
+    reabierto_por = Column(String(100), nullable=True)
+    fecha_reabierto = Column(DateTime, nullable=True)
+    motivo_reapertura = Column(Text, nullable=True)
+    veces_reabierto = Column(Integer, nullable=False, default=0)

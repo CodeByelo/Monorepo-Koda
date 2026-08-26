@@ -2,6 +2,7 @@
 from datetime import datetime, date, timezone
 from decimal import Decimal
 from typing import Optional, Tuple, Union
+import re
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from fastapi import HTTPException
@@ -43,6 +44,7 @@ def verificar_periodo_abierto(
     cierre = db.query(CierrePeriodo).filter(
         CierrePeriodo.periodo == periodo,
         CierrePeriodo.tenant_id == tenant_id,
+        CierrePeriodo.estado == "CERRADO",
     ).first()
     if cierre:
         raise HTTPException(
@@ -115,7 +117,11 @@ def descontar_stock_almacen(db: Session, tenant_id, producto_id: int, almacen_id
 
 def periodo_rango(periodo: str) -> Tuple[datetime, datetime]:
     """periodo formato YYYY-MM -> inicio y fin del mes."""
+    if not periodo or not re.match(r"^\d{4}-\d{2}$", periodo):
+        raise HTTPException(status_code=400, detail=f"Período inválido: '{periodo}'. Debe tener el formato YYYY-MM (ej. 2026-07).")
     year, month = map(int, periodo.split("-"))
+    if not (1 <= month <= 12):
+        raise HTTPException(status_code=400, detail=f"Período inválido: '{periodo}'. El mes debe estar entre 01 y 12.")
     inicio = datetime(year, month, 1)
     if month == 12:
         fin = datetime(year + 1, 1, 1)

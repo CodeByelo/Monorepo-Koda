@@ -41,9 +41,9 @@ __all__ = [
     "logistics_new",
 ]
 from backend.routers import (
-    auth, rates, sales, fiscal, inventory, accounting as accounting_router,
+    auth, rates, sales, fiscal, contabilidad, inventory,
     hr as hr_router, productos, proveedores, audit, entidades, clientes,
-    dashboard_ext, fiscal_ext, contabilidad_ext, modulos_ext, admin_ext, extras_ext,
+    dashboard_ext, modulos_ext, admin_ext, extras_ext,
     pagos, reportes, developer, developer_router, payroll, facturacion, telegram_api,
     forense, telemetry, bot_api, garantias, sso_bridge,
 )
@@ -192,6 +192,7 @@ async def startup_db_init():
                     connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS retencion_iva_usd NUMERIC(15,2) DEFAULT 0.00;"))
                     connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS igtf_usd NUMERIC(15,2) DEFAULT 0.00;"))
                     connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS creado_por UUID;"))
+                    connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS moneda_documento VARCHAR(20) DEFAULT 'BIMONETARIO';"))
                     connection.execute(text("ALTER TABLE public.kardex_movimientos ADD COLUMN IF NOT EXISTS almacen_id INTEGER REFERENCES public.almacenes(id);"))
                     connection.execute(text("ALTER TABLE public.almacenes ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) NOT NULL DEFAULT 'ALMACEN';"))
                     connection.execute(text("ALTER TABLE public.notas_entrega ADD COLUMN IF NOT EXISTS venta_id INTEGER REFERENCES public.ventas(id);"))
@@ -211,6 +212,41 @@ async def startup_db_init():
                     connection.execute(text("CREATE INDEX IF NOT EXISTS ix_correlativos_fiscales_tipo_documento ON public.correlativos_fiscales (tipo_documento);"))
                     connection.execute(text("ALTER TABLE public.correlativos_fiscales DROP CONSTRAINT IF EXISTS _tenant_correlativos_tipo_doc_uc;"))
                     connection.execute(text("ALTER TABLE public.correlativos_fiscales ADD CONSTRAINT _tenant_correlativos_tipo_doc_uc UNIQUE (tenant_id, tipo_documento);"))
+                    connection.execute(text("ALTER TABLE public.matriz_integracion ADD COLUMN IF NOT EXISTS tenant_id UUID;"))
+                    connection.execute(text("UPDATE public.matriz_integracion SET tenant_id = '00000000-0000-0000-0000-000000000001' WHERE tenant_id IS NULL;"))
+                    connection.execute(text("ALTER TABLE public.matriz_integracion ALTER COLUMN tenant_id SET NOT NULL;"))
+                    connection.execute(text("""
+                        DO $$ DECLARE r RECORD; BEGIN
+                          FOR r IN SELECT con.conname FROM pg_constraint con
+                            JOIN pg_class rel ON rel.oid = con.conrelid
+                            JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+                            WHERE nsp.nspname='public' AND rel.relname='matriz_integracion' AND con.contype='u'
+                              AND con.conkey = ARRAY(SELECT attnum FROM pg_attribute WHERE attrelid=rel.oid AND attname='evento')
+                          LOOP EXECUTE format('ALTER TABLE public.matriz_integracion DROP CONSTRAINT IF EXISTS %I', r.conname); END LOOP;
+                        END $$;
+                    """))
+                    connection.execute(text("ALTER TABLE public.matriz_integracion DROP CONSTRAINT IF EXISTS _tenant_evento_matriz_uc;"))
+                    connection.execute(text("ALTER TABLE public.matriz_integracion ADD CONSTRAINT _tenant_evento_matriz_uc UNIQUE (tenant_id, evento);"))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos ADD COLUMN IF NOT EXISTS tenant_id UUID;"))
+                    connection.execute(text("UPDATE public.cierres_periodos SET tenant_id = '00000000-0000-0000-0000-000000000001' WHERE tenant_id IS NULL;"))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos ALTER COLUMN tenant_id SET NOT NULL;"))
+                    connection.execute(text("""
+                        DO $$ DECLARE r RECORD; BEGIN
+                          FOR r IN SELECT con.conname FROM pg_constraint con
+                            JOIN pg_class rel ON rel.oid = con.conrelid
+                            JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+                            WHERE nsp.nspname='public' AND rel.relname='cierres_periodos' AND con.contype='u'
+                              AND con.conkey = ARRAY(SELECT attnum FROM pg_attribute WHERE attrelid=rel.oid AND attname='periodo')
+                          LOOP EXECUTE format('ALTER TABLE public.cierres_periodos DROP CONSTRAINT IF EXISTS %I', r.conname); END LOOP;
+                        END $$;
+                    """))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos DROP CONSTRAINT IF EXISTS _tenant_periodo_cierre_uc;"))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos ADD CONSTRAINT _tenant_periodo_cierre_uc UNIQUE (tenant_id, periodo);"))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos ADD COLUMN IF NOT EXISTS estado VARCHAR(20) NOT NULL DEFAULT 'CERRADO';"))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos ADD COLUMN IF NOT EXISTS reabierto_por VARCHAR(100);"))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos ADD COLUMN IF NOT EXISTS fecha_reabierto TIMESTAMP;"))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos ADD COLUMN IF NOT EXISTS motivo_reapertura TEXT;"))
+                    connection.execute(text("ALTER TABLE public.cierres_periodos ADD COLUMN IF NOT EXISTS veces_reabierto INTEGER NOT NULL DEFAULT 0;"))
                 else:
                     for col_sql in [
                         "ALTER TABLE productos ADD COLUMN imagen_url TEXT",
@@ -218,6 +254,8 @@ async def startup_db_init():
                         "ALTER TABLE ventas ADD COLUMN retencion_iva_usd NUMERIC(15,2) DEFAULT 0.00",
                         "ALTER TABLE ventas ADD COLUMN igtf_usd NUMERIC(15,2) DEFAULT 0.00",
                         "ALTER TABLE ventas ADD COLUMN creado_por VARCHAR(36)",
+                        "ALTER TABLE matriz_integracion ADD COLUMN tenant_id VARCHAR(36)",
+                        "ALTER TABLE cierres_periodos ADD COLUMN tenant_id VARCHAR(36)",
                     ]:
                         try:
                             connection.execute(text(col_sql))
@@ -331,9 +369,7 @@ app.include_router(modulos_ext.inventario_ext_router)
 app.include_router(inventory.router)
 app.include_router(fiscal.router)
 app.include_router(audit.router)
-app.include_router(fiscal_ext.router)
-app.include_router(accounting_router.router)
-app.include_router(contabilidad_ext.router)
+app.include_router(contabilidad.router)
 app.include_router(hr_router.router)
 app.include_router(productos.router)
 app.include_router(clientes.router)

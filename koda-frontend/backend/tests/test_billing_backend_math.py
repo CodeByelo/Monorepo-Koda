@@ -9,10 +9,12 @@ sys.path.insert(0, "/app")
 
 from fastapi.testclient import TestClient
 from backend.main import app
-from backend.core.database import SessionLocal, get_db
+from backend.core.database import SessionLocal, get_db, Base, engine
 from backend.models.operations import Producto, Venta, VentaDetalle, Cliente
-from backend.models.core import Profile, TasaCambio
+from backend.models.core import Profile, TasaCambio, Tenant
 from backend.core.security import get_current_user
+
+Base.metadata.create_all(bind=engine)
 
 # Mock de autenticación para que devuelva un perfil válido en los tests
 def mock_get_current_user():
@@ -20,7 +22,9 @@ def mock_get_current_user():
     try:
         user = session.query(Profile).first()
         if not user:
-            # Crear un perfil de prueba temporal
+            tenant = Tenant(nombre_empresa="Test Billing Math S.A.", estado_licencia="ACTIVA")
+            session.add(tenant)
+            session.flush()
             user = Profile(
                 username="test_auth_user",
                 nombre="Test",
@@ -28,7 +32,7 @@ def mock_get_current_user():
                 email="test_auth@koda.com",
                 password_hash="...",
                 rol_id=2,  # 2 => "Admin" (ver Profile.rol en backend/models/core.py)
-                tenant_id=uuid.uuid4()
+                tenant_id=tenant.id
             )
             session.add(user)
             session.commit()

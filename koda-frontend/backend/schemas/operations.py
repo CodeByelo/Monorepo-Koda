@@ -92,7 +92,7 @@ class FacturaEmisionRequest(BaseModel):
     cliente_id: Union[str, int]
     metodo_pago: str = Field(..., pattern="^(Efectivo|Divisa|Transferencia|PagoMovil)$")
     aplica_igtf: Optional[bool] = False
-    moneda_documento: Optional[str] = "USD"
+    moneda_documento: Optional[str] = Field(default="BIMONETARIO", pattern="^(BIMONETARIO|SOLO_USD|SOLO_VES)$")
     tasa_cambio_bs: Optional[Decimal] = None
     detalles: List[FacturaDetalleRequest] = Field(..., min_length=1)
     vendedor_id: Optional[int] = None

@@ -25,6 +25,7 @@ from backend.schemas.operations import (
 from backend.core.security import get_current_user, require_role
 from backend.models.core import TasaCambio
 from backend.utils.helpers import to_float, periodo_rango, ventas_periodo, tasa_actual, margen_bruto_pct, get_almacen_principal_id, verificar_periodo_abierto
+from backend.services.contabilidad import ContabilidadService
 
 def _as_aware(dt):
     """Ensure a datetime is timezone-aware (UTC). Handles naive datetimes from DB."""
@@ -735,6 +736,9 @@ def crear_compra(
             if recepcion:
                 recepcion.estado = "Conciliado"
                 recepcion.orden_compra = compra_in.numero_factura # Guardamos la referencia cruzada
+
+        # Generar Asiento Contable Automático de Compra
+        ContabilidadService.generar_asiento_compra(nueva_compra, db, tenant_id=current_user.tenant_id)
                 
         db.commit()
         db.refresh(nueva_compra)
@@ -1397,28 +1401,98 @@ def datos_aplicacion(factura_id: str = Query(None), db: Session = Depends(get_db
 
 @cobranzas_router.post("/aplicacion/procesar")
 def procesar_aplicacion(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    doc = body.get("factura_id") or body.get("numero_documento")
-    if not doc:
-        raise HTTPException(status_code=400, detail="Debe proporcionar el número de factura o documento.")
-        
-    cxc = db.query(CuentaPorCobrar).filter(
-        CuentaPorCobrar.numero_documento == doc,
-        CuentaPorCobrar.tenant_id == current_user.tenant_id
-    ).first()
-    if not cxc:
-        raise HTTPException(status_code=404, detail="Cuenta por cobrar no encontrada.")
-        
-    monto_raw = body.get("monto")
-    if monto_raw is None or float(monto_raw) <= 0:
-        raise HTTPException(status_code=400, detail="El monto a aplicar debe ser mayor a cero.")
-        
-    monto = Decimal(str(monto_raw))
-    cxc.monto_pagado = min(cxc.monto_total, cxc.monto_pagado + monto)
-    if cxc.monto_pagado >= cxc.monto_total:
-        cxc.estado = "PAGADA"
-    db.commit()
-    
-    return {"ok": True, "message": "Pago aplicado exitosamente."}
+    try:
+        doc = body.get("factura_id") or body.get("numero_documento")
+        if not doc:
+            raise HTTPException(status_code=400, detail="Debe proporcionar el número de factura o documento.")
+            
+        cxc = db.query(CuentaPorCobrar).filter(
+            CuentaPorCobrar.numero_documento == doc,
+            CuentaPorCobrar.tenant_id == current_user.tenant_id
+        ).first()
+        if not cxc:
+            raise HTTPException(status_code=404, detail="Cuenta por cobrar no encontrada.")
+            
+        monto_raw = body.get("monto")
+        if monto_raw is None or float(monto_raw) <= 0:
+            raise HTTPException(status_code=400, detail="El monto a aplicar debe ser mayor a cero.")
+            
+        monto_aplicar_cxc = Decimal(str(monto_raw))
+
+        metodos = body.get("metodos")
+        if not metodos:
+            metodos = [{"type": "Efectivo", "amount": str(monto_aplicar_cxc), "account": None}]
+
+        total_recibido = Decimal("0.00")
+        for m in metodos:
+            m_type = m.get("type", "Efectivo")
+            m_amount_raw = Decimal(str(m.get("amount", 0)))
+            m_rate = Decimal(str(m.get("rate") or 1))
+            if m_rate == 0:
+                m_rate = Decimal("1")
+            # Igual que methodEquivalent() en el frontend (PaymentApplication.tsx):
+            # solo "Bolívares" se manda en moneda origen y hay que convertir a
+            # su equivalente en USD dividiendo por la tasa; el resto de los
+            # tipos ya vienen expresados en USD.
+            m_amount = (m_amount_raw / m_rate) if m_type == "Bolívares" else m_amount_raw
+            m_account = m.get("account")
+            m_ref = m.get("ref") or doc
+            total_recibido += m_amount
+
+            if m_type != "Efectivo":
+                if not m_account:
+                    raise HTTPException(status_code=400, detail="Debe especificar la cuenta bancaria para pagos que no son en efectivo.")
+                banco = db.query(CuentaBancaria).filter(
+                    CuentaBancaria.banco == m_account,
+                    CuentaBancaria.tenant_id == current_user.tenant_id
+                ).first()
+                if not banco:
+                    raise HTTPException(status_code=400, detail=f"Cuenta bancaria '{m_account}' no encontrada.")
+
+                banco.saldo_actual_usd += m_amount
+
+                mov = MovimientoBancario(
+                    cuenta_id=banco.id,
+                    concepto=f"Cobro CxC {doc} ({m_type})",
+                    monto_usd=m_amount,
+                    tasa_cambio_bs=cxc.tasa_cambio_bs if getattr(cxc, "tasa_cambio_bs", None) else Decimal("1.0"),
+                    tipo="INGRESO",
+                    referencia=m_ref,
+                    estado="ACTIVO",
+                    tenant_id=current_user.tenant_id
+                )
+                db.add(mov)
+
+        cxc.monto_pagado = min(cxc.monto_total, cxc.monto_pagado + monto_aplicar_cxc)
+        if cxc.monto_pagado >= cxc.monto_total:
+            cxc.estado = "PAGADA"
+
+        diferencia_raw = body.get("diferencia", 0)
+        diferencia = Decimal(str(diferencia_raw or 0))
+        accion_diferencia = body.get("accion_diferencia", "Sin diferencia")
+
+        cliente_nombre = cxc.cliente.nombre if (getattr(cxc, "cliente", None) and getattr(cxc.cliente, "nombre", None)) else "N/A"
+
+        # Generar Asiento Contable Automático de Cobro a Cliente
+        ContabilidadService.generar_asiento_cobro_cliente(
+            monto_neto_recibido=total_recibido,
+            monto_factura_cancelado=monto_aplicar_cxc,
+            diferencia=diferencia,
+            accion_diferencia=accion_diferencia,
+            referencia=f"COBRO-{doc}",
+            concepto=f"Cobro Factura {doc} - Cliente {cliente_nombre}",
+            fecha=datetime.now(timezone.utc),
+            tasa_cambio_bs=tasa_actual(db, current_user.tenant_id),
+            db=db,
+            tenant_id=current_user.tenant_id,
+        )
+
+        db.commit()
+        return {"ok": True, "message": "Pago aplicado exitosamente."}
+    except HTTPException:
+        db.rollback()
+        raise
+
 
 
 @cobranzas_router.get("/anticipos-data")
@@ -1857,50 +1931,66 @@ class AprobarOrdenRequest(BaseModel):
 
 @pagos_router.post("/ordenes/aprobar")
 def aprobar_orden(body: AprobarOrdenRequest, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    orden_id_str = body.orden_id
-    if not orden_id_str:
-         raise HTTPException(status_code=400, detail="Falta el orden_id")
     try:
-         c_id = int(orden_id_str.replace("OP-", ""))
-    except ValueError:
-         raise HTTPException(status_code=400, detail="Formato de orden_id inválido")
+        orden_id_str = body.orden_id
+        if not orden_id_str:
+             raise HTTPException(status_code=400, detail="Falta el orden_id")
+        try:
+             c_id = int(orden_id_str.replace("OP-", ""))
+        except ValueError:
+             raise HTTPException(status_code=400, detail="Formato de orden_id inválido")
 
-    cxp = db.query(CuentaPorPagar).filter(
-        CuentaPorPagar.id == c_id,
-        CuentaPorPagar.tenant_id == current_user.tenant_id
-    ).first()
-    if not cxp:
-         raise HTTPException(status_code=404, detail="Cuenta por pagar no encontrada")
+        cxp = db.query(CuentaPorPagar).filter(
+            CuentaPorPagar.id == c_id,
+            CuentaPorPagar.tenant_id == current_user.tenant_id
+        ).first()
+        if not cxp:
+             raise HTTPException(status_code=404, detail="Cuenta por pagar no encontrada")
 
-    if cxp.estado == "PAGADA":
-         raise HTTPException(status_code=400, detail="Esta cuenta ya fue pagada")
+        if cxp.estado == "PAGADA":
+             raise HTTPException(status_code=400, detail="Esta cuenta ya fue pagada")
 
-    banco = db.query(CuentaBancaria).filter(
-        CuentaBancaria.id == body.banco_id,
-        CuentaBancaria.tenant_id == current_user.tenant_id
-    ).first()
-    if not banco:
-         raise HTTPException(status_code=400, detail="La cuenta bancaria seleccionada no existe")
+        banco = db.query(CuentaBancaria).filter(
+            CuentaBancaria.id == body.banco_id,
+            CuentaBancaria.tenant_id == current_user.tenant_id
+        ).first()
+        if not banco:
+             raise HTTPException(status_code=400, detail="La cuenta bancaria seleccionada no existe")
 
-    monto_restante = cxp.monto_total_usd - cxp.monto_pagado_usd
-    cxp.monto_pagado_usd = cxp.monto_total_usd
-    cxp.estado = "PAGADA"
+        monto_restante = cxp.monto_total_usd - cxp.monto_pagado_usd
+        cxp.monto_pagado_usd = cxp.monto_total_usd
+        cxp.estado = "PAGADA"
 
-    banco.saldo_actual_usd -= monto_restante
+        banco.saldo_actual_usd -= monto_restante
 
-    mov = MovimientoBancario(
-        cuenta_id=banco.id,
-        concepto=f"Pago Orden {orden_id_str} | Prov: {cxp.proveedor.nombre if cxp.proveedor else 'N/A'} ({body.metodo})",
-        monto_usd=monto_restante,
-        tasa_cambio_bs=cxp.tasa_cambio_bs,
-        tipo="EGRESO",
-        referencia=body.referencia,
-        estado="ACTIVO",
-        tenant_id=current_user.tenant_id
-    )
-    db.add(mov)
-    db.commit()
-    return {"ok": True, "message": "Pago registrado y procesado exitosamente"}
+        mov = MovimientoBancario(
+            cuenta_id=banco.id,
+            concepto=f"Pago Orden {orden_id_str} | Prov: {cxp.proveedor.nombre if cxp.proveedor else 'N/A'} ({body.metodo})",
+            monto_usd=monto_restante,
+            tasa_cambio_bs=cxp.tasa_cambio_bs,
+            tipo="EGRESO",
+            referencia=body.referencia,
+            estado="ACTIVO",
+            tenant_id=current_user.tenant_id
+        )
+        db.add(mov)
+
+        # Generar Asiento Contable Automático de Pago a Proveedor
+        ContabilidadService.generar_asiento_pago_proveedor(
+            monto=monto_restante,
+            tasa_cambio_bs=cxp.tasa_cambio_bs,
+            referencia=body.referencia or orden_id_str,
+            concepto=f"Pago Orden {orden_id_str} - Proveedor {cxp.proveedor.nombre if cxp.proveedor else 'N/A'}",
+            fecha=datetime.now(timezone.utc),
+            db=db,
+            tenant_id=current_user.tenant_id,
+        )
+
+        db.commit()
+        return {"ok": True, "message": "Pago registrado y procesado exitosamente"}
+    except HTTPException:
+        db.rollback()
+        raise
 
 
 class CuentaPorPagarManualRequest(BaseModel):
@@ -2033,45 +2123,62 @@ def validar_lotes(db: Session = Depends(get_db), current_user = Depends(get_curr
 
 @pagos_router.post("/lotes/procesar")
 def procesar_lotes(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    ref = body.get("referencia", "LOTE-GEN")
-    
-    cxps = db.query(CuentaPorPagar).filter(
-        CuentaPorPagar.estado != "PAGADA",
-        CuentaPorPagar.tenant_id == current_user.tenant_id
-    ).all()
-    if not cxps:
-        return {"ok": True, "message": "No hay deudas pendientes"}
+    try:
+        ref = body.get("referencia", "LOTE-GEN")
+        
+        cxps = db.query(CuentaPorPagar).filter(
+            CuentaPorPagar.estado != "PAGADA",
+            CuentaPorPagar.tenant_id == current_user.tenant_id
+        ).all()
+        if not cxps:
+            return {"ok": True, "message": "No hay deudas pendientes"}
 
-    banco = db.query(CuentaBancaria).filter(
-        CuentaBancaria.activa == True,
-        CuentaBancaria.tenant_id == current_user.tenant_id
-    ).first()
-    if not banco:
-        raise HTTPException(status_code=400, detail="No hay una cuenta bancaria activa")
+        banco = db.query(CuentaBancaria).filter(
+            CuentaBancaria.activa == True,
+            CuentaBancaria.tenant_id == current_user.tenant_id
+        ).first()
+        if not banco:
+            raise HTTPException(status_code=400, detail="No hay una cuenta bancaria activa")
 
-    total_debitar_usd = 0.0
-    for c in cxps:
-        saldo_usd = float(c.monto_total_usd - c.monto_pagado_usd)
-        c.monto_pagado_usd = c.monto_total_usd
-        c.estado = "PAGADA"
-        total_debitar_usd += saldo_usd
+        total_debitar_usd = Decimal("0.00")
+        for c in cxps:
+            saldo_usd = c.monto_total_usd - c.monto_pagado_usd
+            c.monto_pagado_usd = c.monto_total_usd
+            c.estado = "PAGADA"
+            total_debitar_usd += saldo_usd
 
-    banco.saldo_actual_usd -= Decimal(str(total_debitar_usd))
+        banco.saldo_actual_usd -= total_debitar_usd
 
-    mov = MovimientoBancario(
-        cuenta_id=banco.id,
-        concepto=f"Procesamiento Lote Pagos Ref: {ref}",
-        monto_usd=Decimal(str(total_debitar_usd)),
-        tasa_cambio_bs=Decimal("36.52"),
-        tipo="EGRESO",
-        referencia=ref,
-        estado="ACTIVO",
-        tenant_id=current_user.tenant_id
-    )
-    db.add(mov)
-    db.commit()
+        tasa_bcv = Decimal(str(tasa_actual(db, current_user.tenant_id)))
 
-    return {"ok": True, "message": f"Lote de pagos procesado. {len(cxps)} facturas liquidadas."}
+        mov = MovimientoBancario(
+            cuenta_id=banco.id,
+            concepto=f"Procesamiento Lote Pagos Ref: {ref}",
+            monto_usd=total_debitar_usd,
+            tasa_cambio_bs=tasa_bcv,
+            tipo="EGRESO",
+            referencia=ref,
+            estado="ACTIVO",
+            tenant_id=current_user.tenant_id
+        )
+        db.add(mov)
+
+        # Generar Asiento Contable Automático de Pago por Lote a Proveedores
+        ContabilidadService.generar_asiento_pago_proveedor(
+            monto=total_debitar_usd,
+            tasa_cambio_bs=tasa_bcv,
+            referencia=ref,
+            concepto=f"Pago por Lote - {len(cxps)} facturas - Ref: {ref}",
+            fecha=datetime.now(timezone.utc),
+            db=db,
+            tenant_id=current_user.tenant_id,
+        )
+
+        db.commit()
+        return {"ok": True, "message": f"Lote de pagos procesado. {len(cxps)} facturas liquidadas."}
+    except HTTPException:
+        db.rollback()
+        raise
 
 
 # --- TESORERÍA ---
@@ -4810,120 +4917,133 @@ def descargar_factura_pdf(
     if tasa_val <= 0:
         tasa_val = 784.6633
 
-    es_solo_bolivares = (moneda_doc == 'VED' or moneda_doc == 'SOLO_VES') or (metodo_pago.upper() in ["EFECTIVO", "TRANSFERENCIA", "PAGOMOVIL"] and igtf_usd <= 0 and moneda_doc != 'USD' and moneda_doc != 'SOLO_USD')
-    es_solo_divisas = (moneda_doc in ('USD', 'SOLO_USD') and metodo_pago.upper() in ('DIVISA', 'USD') and igtf_usd > 0) or (moneda_doc in ('USD', 'SOLO_USD') and tasa_val <= 1)
+    modo_impresion = moneda_doc if moneda_doc in ("SOLO_USD", "SOLO_VES") else "BIMONETARIO"
 
     c.drawString(50, alto - 148, f"Razón Social: {cliente_nombre}")
     c.drawString(50, alto - 162, f"R.I.F. / C.I.: {cliente_rif}")
     c.drawString(50, alto - 176, f"Método de Pago: {metodo_pago}")
-    if not es_solo_bolivares:
+    if modo_impresion != 'SOLO_USD':
         c.drawString(50, alto - 190, f"Tasa de Cambio: Bs. {tasa_val:,.2f}")
-    
-    # Tabla de Detalles
+
+    # --- Tabla de Detalles ---
     c.line(50, alto - 210, ancho - 50, alto - 210)
-    
-    if es_solo_bolivares:
+
+    if modo_impresion == "SOLO_VES":
         data_tabla = [["CANT.", "DESCRIPCIÓN PRODUCTO", "PRECIO (Bs.)", "TOTAL (Bs.)"]]
-    else:
+        col_widths = [50, 260, 100, 100]
+    elif modo_impresion == "SOLO_USD":
         data_tabla = [["CANT.", "DESCRIPCIÓN PRODUCTO", "PRECIO (USD)", "TOTAL (USD)"]]
+        col_widths = [50, 260, 100, 100]
+    else:  # BIMONETARIO — cada línea en AMBAS monedas
+        data_tabla = [["CANT.", "DESCRIPCIÓN", "PRECIO ($)", "PRECIO (Bs.)", "TOTAL ($)", "TOTAL (Bs.)"]]
+        col_widths = [35, 150, 65, 75, 65, 75]
 
     detalles = getattr(venta, "detalles", []) or []
     for item in detalles:
         prod_nombre = item.producto.nombre if (item and getattr(item, "producto", None)) else "Producto"
         precio_usd = float(getattr(item, "precio_usd_capturado", 0) or 0)
         cantidad = float(getattr(item, "cantidad", 1) or 1)
-        
-        if es_solo_bolivares:
-            precio_bs = precio_usd * tasa_val
-            sub_total_linea_bs = precio_bs * cantidad
-            data_tabla.append([
-                f"{cantidad:.0f}",
-                prod_nombre.upper(),
-                f"Bs. {precio_bs:,.2f}",
-                f"Bs. {sub_total_linea_bs:,.2f}"
-            ])
-        else:
-            sub_total_linea = precio_usd * cantidad
-            data_tabla.append([
-                f"{cantidad:.0f}",
-                prod_nombre.upper(),
-                f"${precio_usd:.2f}",
-                f"${sub_total_linea:.2f}"
-            ])
-        
-    if len(data_tabla) == 1:
-        data_tabla.append(["1", "CONSUMO GENERAL", f"${total_usd:.2f}", f"${total_usd:.2f}"])
+        precio_bs = precio_usd * tasa_val
+        sub_total_usd = precio_usd * cantidad
+        sub_total_bs = precio_bs * cantidad
 
-    t = Table(data_tabla, colWidths=[50, 260, 100, 100])
+        if modo_impresion == "SOLO_VES":
+            data_tabla.append([f"{cantidad:.0f}", prod_nombre.upper(), f"Bs. {precio_bs:,.2f}", f"Bs. {sub_total_bs:,.2f}"])
+        elif modo_impresion == "SOLO_USD":
+            data_tabla.append([f"{cantidad:.0f}", prod_nombre.upper(), f"${precio_usd:.2f}", f"${sub_total_usd:.2f}"])
+        else:
+            data_tabla.append([
+                f"{cantidad:.0f}", prod_nombre.upper(),
+                f"${precio_usd:.2f}", f"Bs. {precio_bs:,.2f}",
+                f"${sub_total_usd:.2f}", f"Bs. {sub_total_bs:,.2f}",
+            ])
+
+    if len(data_tabla) == 1:
+        if modo_impresion == "SOLO_VES":
+            data_tabla.append(["1", "CONSUMO GENERAL", f"Bs. {total_usd*tasa_val:,.2f}", f"Bs. {total_usd*tasa_val:,.2f}"])
+        elif modo_impresion == "SOLO_USD":
+            data_tabla.append(["1", "CONSUMO GENERAL", f"${total_usd:.2f}", f"${total_usd:.2f}"])
+        else:
+            data_tabla.append(["1", "CONSUMO GENERAL", f"${total_usd:.2f}", f"Bs. {total_usd*tasa_val:,.2f}", f"${total_usd:.2f}", f"Bs. {total_usd*tasa_val:,.2f}"])
+
+    t = Table(data_tabla, colWidths=col_widths)
     t.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#0b5156")),
         ('TEXTCOLOR', (0,0), (-1,0), colors.white),
         ('ALIGN', (0,0), (-1,-1), 'LEFT'),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0,0), (-1,0), 9),
+        ('FONTSIZE', (0,0), (-1,0), 8 if modo_impresion == "BIMONETARIO" else 9),
         ('BOTTOMPADDING', (0,0), (-1,0), 6),
         ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#f8fafc")),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cbd5e1")),
         ('FONTNAME', (0,1), (-1,-1), 'Helvetica'),
-        ('FONTSIZE', (0,1), (-1,-1), 9),
+        ('FONTSIZE', (0,1), (-1,-1), 8 if modo_impresion == "BIMONETARIO" else 9),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
     ]))
-    
-    # Calcular alto requerido por la tabla
+
     tabla_alto = len(data_tabla) * 20
     pos_y_tabla = alto - 230 - tabla_alto
-    
     t.wrapOn(c, ancho - 100, alto)
     t.drawOn(c, 50, pos_y_tabla)
-    
-    # Resumen de Totales
+
+    # --- Resumen de Totales ---
     pos_y_totales = pos_y_tabla - 20
     c.setLineWidth(1)
     c.line(50, pos_y_totales, ancho - 50, pos_y_totales)
-    
+
     total_bs = total_usd * tasa_val
-    
-    if es_solo_bolivares:
-        subtotal_bs = subtotal_usd * tasa_val
-        iva_bs = iva_usd * tasa_val
-        
+    subtotal_bs = subtotal_usd * tasa_val
+    iva_bs = iva_usd * tasa_val
+    igtf_bs = igtf_usd * tasa_val
+
+    if modo_impresion == "SOLO_VES":
         c.setFont("Helvetica-Bold", 10)
         c.drawString(350, pos_y_totales - 20, "SUBTOTAL (Bs.):")
         c.drawRightString(ancho - 50, pos_y_totales - 20, f"Bs. {subtotal_bs:,.2f}")
-        
         c.drawString(350, pos_y_totales - 35, "I.V.A. (16% Bs.):")
         c.drawRightString(ancho - 50, pos_y_totales - 35, f"Bs. {iva_bs:,.2f}")
-        
-        c.setFont("Helvetica-Bold", 12)
+        c.setFont("Helvetica-Bold", 10)
         c.setFillColor(colors.HexColor("#0b5156"))
-        c.drawString(350, pos_y_totales - 55, "TOTAL GENERAL (Bs.):")
-        c.drawRightString(ancho - 50, pos_y_totales - 55, f"Bs. {total_bs:,.2f}")
-    else:
+        c.drawRightString(ancho - 50, pos_y_totales - 55, "TOTAL GENERAL (Bs.):")
+        c.setFont("Helvetica-Bold", 13)
+        c.drawRightString(ancho - 50, pos_y_totales - 71, f"Bs. {total_bs:,.2f}")
+
+    elif modo_impresion == "SOLO_USD":
         c.setFont("Helvetica-Bold", 10)
         c.drawString(350, pos_y_totales - 20, "SUBTOTAL (USD):")
         c.drawRightString(ancho - 50, pos_y_totales - 20, f"${subtotal_usd:.2f}")
-        
         c.drawString(350, pos_y_totales - 35, "I.V.A. (16% USD):")
         c.drawRightString(ancho - 50, pos_y_totales - 35, f"${iva_usd:.2f}")
-        
         if igtf_usd > 0:
             c.drawString(350, pos_y_totales - 50, "I.G.T.F. PERCIBIDO (3%):")
             c.drawRightString(ancho - 50, pos_y_totales - 50, f"${igtf_usd:.2f}")
             offset_y = 65
         else:
             offset_y = 50
-            
-        c.setFont("Helvetica-Bold", 11)
+        c.setFont("Helvetica-Bold", 10)
         c.setFillColor(colors.HexColor("#0b5156"))
-        c.drawString(350, pos_y_totales - offset_y, "TOTAL GENERAL (USD):")
-        c.drawRightString(ancho - 50, pos_y_totales - offset_y, f"${total_usd:.2f}")
-        
-        # Mostrar equivalente en Bs sólo si no es una factura configurada como Solo Divisas estricta
-        if moneda_doc not in ('USD_ONLY', 'SOLO_USD'):
-            c.setFont("Helvetica-Bold", 10)
-            c.setFillColor(colors.HexColor("#1e293b"))
-            c.drawString(350, pos_y_totales - offset_y - 18, "TOTAL EQUIVALENTE (Bs.):")
-            c.drawRightString(ancho - 50, pos_y_totales - offset_y - 18, f"Bs. {total_bs:,.2f}")
+        c.drawRightString(ancho - 50, pos_y_totales - offset_y, "TOTAL GENERAL (USD):")
+        c.setFont("Helvetica-Bold", 13)
+        c.drawRightString(ancho - 50, pos_y_totales - offset_y - 16, f"${total_usd:.2f}")
+        # SOLO_USD: nada en Bs, ni siquiera una línea de equivalente.
+
+    else:  # BIMONETARIO — cada renglón de totales en ambas monedas
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(350, pos_y_totales - 20, "SUBTOTAL:")
+        c.drawRightString(ancho - 50, pos_y_totales - 20, f"${subtotal_usd:.2f}  /  Bs. {subtotal_bs:,.2f}")
+        c.drawString(350, pos_y_totales - 35, "I.V.A. (16%):")
+        c.drawRightString(ancho - 50, pos_y_totales - 35, f"${iva_usd:.2f}  /  Bs. {iva_bs:,.2f}")
+        if igtf_usd > 0:
+            c.drawString(350, pos_y_totales - 50, "I.G.T.F. (3%):")
+            c.drawRightString(ancho - 50, pos_y_totales - 50, f"${igtf_usd:.2f}  /  Bs. {igtf_bs:,.2f}")
+            offset_y = 65
+        else:
+            offset_y = 50
+        c.setFont("Helvetica-Bold", 10)
+        c.setFillColor(colors.HexColor("#0b5156"))
+        c.drawRightString(ancho - 50, pos_y_totales - offset_y, "TOTAL GENERAL:")
+        c.setFont("Helvetica-Bold", 13)
+        c.drawRightString(ancho - 50, pos_y_totales - offset_y - 16, f"${total_usd:.2f}  /  Bs. {total_bs:,.2f}")
     
     # Pie de Página Legal
     c.setFillColor(colors.black)
