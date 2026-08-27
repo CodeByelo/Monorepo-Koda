@@ -238,7 +238,7 @@ def test_facturar_cotizacion_exitosa_descuenta_stock_y_genera_asiento(setup_db):
 
     # 3. Validar AsientoContable
     asientos = db.query(AsientoContable).filter(
-        AsientoContable.referencia == data["numero_factura"],
+        AsientoContable.referencia == f"FAC-{data['numero_factura']}",
         AsientoContable.tenant_id == tenant.id
     ).all()
     assert len(asientos) >= 1  # Al menos asiento de venta (y costo de venta)
