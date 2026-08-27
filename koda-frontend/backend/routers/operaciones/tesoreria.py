@@ -15,7 +15,8 @@ from backend.models.erp_extended import (
     Cotizacion, CotizacionItem, OrdenVenta, RequisicionCompra, TransferenciaInventario,
     RetencionIVA, RetencionISLR, Vendedor, Almacen, RecepcionStock, DevolucionProveedor, LoteProducto,
     NotaCredito, AnticipoCliente, Cheque, FondoCajaChica, GastoCajaChica, StockPorAlmacen,
-    NotaEntrega, NotaEntregaItem
+    NotaEntrega, NotaEntregaItem, TransferenciaTesoreria, PrestamoUVC, PresupuestoPartida,
+    ColocacionInversion, AuditoriaLog
 )
 from backend.schemas.operations import (
     CotizacionCreate, CotizacionStatusUpdate, CompraCreate, RecepcionStockCreate, RecepcionStockResponse,
@@ -946,4 +947,723 @@ def exportar_arqueo_pdf(
     )
 
 
-# --- REPORTES ---
+# ============================================================
+# RUTAS MIGRADAS DESDE EXTRAS_EXT
+# ============================================================
+
+@tesoreria_router.get("/transferencias-internas")
+def transferencias_internas(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    rows = db.query(TransferenciaTesoreria).filter(TransferenciaTesoreria.tenant_id == current_user.tenant_id).order_by(TransferenciaTesoreria.fecha.desc()).limit(30).all()
+    return [
+        {
+            "id": f"TRF-{str(t.id).zfill(4)}", 
+            "desc": "Transferencia" if t.tasa_cambio_bs == 1 else "Movimiento FX", 
+            "from": t.origen.banco if t.origen else "Banco Origen",
+            "to": t.destino.banco if t.destino else "Banco Destino",
+            "amount": f"${to_float(t.monto_usd):,.2f}",
+            "meta": f"Bs. {to_float(t.monto_usd * t.tasa_cambio_bs):,.2f} a Tasa {to_float(t.tasa_cambio_bs):,.4f}" if t.tasa_cambio_bs != 1 else "Misma moneda",
+            "ref": t.concepto,
+            "status": t.estado.capitalize(),
+            "statusColor": "bg-green-100 text-green-700" if t.estado == "COMPLETADO" else ("bg-amber-100 text-amber-700" if t.estado == "PENDIENTE" else "bg-slate-100 text-slate-700"),
+            "canConfirm": t.estado == "PENDIENTE",
+            "fecha": t.fecha.strftime("%d/%m/%Y"),
+            "db_id": t.id
+        }
+        for t in rows
+    ]
+
+
+@tesoreria_router.post("/transferencias-internas")
+def registrar_transferencia(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    origen_id = body.get("origen_id")
+    destino_id = body.get("destino_id")
+    monto_usd = float(body.get("monto_usd", 0.0))
+    tasa_cambio_bs = float(body.get("tasa_cambio_bs", 1.0))
+    concepto = body.get("concepto", "Transferencia Interna")
+
+    # Validar que ambas cuentas pertenezcan al tenant
+    origen_ok = db.query(CuentaBancaria).filter(CuentaBancaria.id == origen_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
+    destino_ok = db.query(CuentaBancaria).filter(CuentaBancaria.id == destino_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
+    if not origen_ok or not destino_ok:
+        raise HTTPException(status_code=400, detail="Cuentas bancarias no válidas o no pertenecen a su inquilino.")
+
+    trf = TransferenciaTesoreria(
+        cuenta_origen_id=origen_id,
+        cuenta_destino_id=destino_id,
+        monto_usd=monto_usd,
+        tasa_cambio_bs=tasa_cambio_bs,
+        concepto=concepto,
+        estado="PENDIENTE",
+        tenant_id=current_user.tenant_id
+    )
+    db.add(trf)
+    db.commit()
+    return {"ok": True, "id": trf.id}
+
+
+@tesoreria_router.post("/transferencias-internas/{id}/confirmar")
+def confirmar_transferencia(id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    try:
+        trf = db.query(TransferenciaTesoreria).filter(TransferenciaTesoreria.id == id, TransferenciaTesoreria.tenant_id == current_user.tenant_id).first()
+        if not trf:
+            raise HTTPException(status_code=404, detail="Transferencia no encontrada")
+            
+        if trf.estado == "COMPLETADO":
+            return {"ok": True, "message": "Ya completada"}
+            
+        origen = db.query(CuentaBancaria).filter(CuentaBancaria.id == trf.cuenta_origen_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
+        destino = db.query(CuentaBancaria).filter(CuentaBancaria.id == trf.cuenta_destino_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
+        
+        if not origen or not destino:
+            raise HTTPException(status_code=400, detail="Cuentas no encontradas")
+
+        monto_usd = to_float(trf.monto_usd)
+
+        if origen:
+            origen.saldo_actual_usd = to_float(origen.saldo_actual_usd) - monto_usd
+        if destino:
+            destino.saldo_actual_usd = to_float(destino.saldo_actual_usd) + monto_usd
+            
+        trf.estado = "COMPLETADO"
+
+        # Generar Asiento Contable Automático de Transferencia Interna
+        ContabilidadService.generar_asiento_transferencia_interna(
+            monto=Decimal(str(trf.monto_usd)),
+            tasa_cambio_bs=Decimal(str(trf.tasa_cambio_bs or 1.0)),
+            concepto=f"Transferencia interna: {origen.banco} → {destino.banco}",
+            referencia=f"TRF-{trf.id}",
+            fecha=datetime.now(timezone.utc),
+            db=db,
+            tenant_id=current_user.tenant_id
+        )
+
+        db.commit()
+        return {"ok": True}
+    except HTTPException:
+        db.rollback()
+        raise
+
+
+@tesoreria_router.get("/cuentas")
+def obtener_cuentas(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    cuentas = db.query(CuentaBancaria).filter(CuentaBancaria.activa == True, CuentaBancaria.tenant_id == current_user.tenant_id).all()
+    return [
+        {
+            "id": c.id,
+            "banco": c.banco,
+            "numero_cuenta": c.numero_cuenta,
+            "moneda": c.moneda,
+            "saldo": to_float(c.saldo_actual_usd)
+        }
+        for c in cuentas
+    ]
+
+
+@tesoreria_router.get("/flujo")
+def obtener_flujo_caja_alias(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    cxc = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.estado == "PENDIENTE", CuentaPorCobrar.tenant_id == current_user.tenant_id).all()
+    cxp = db.query(CuentaPorPagar).filter(CuentaPorPagar.estado == "PENDIENTE", CuentaPorPagar.tenant_id == current_user.tenant_id).all()
+    
+    proyecciones = []
+    
+    for c in cxc:
+        monto_pendiente = to_float(c.monto_total_usd) - to_float(c.monto_pagado_usd)
+        if monto_pendiente > 0:
+            proyecciones.append({
+                "date": c.fecha_vencimiento.strftime("%d/%m/%Y") if c.fecha_vencimiento else "",
+                "concept": f"Cobro Factura {c.numero_documento}",
+                "sub": c.cliente.nombre if c.cliente else "Cliente General",
+                "area": "Cobranzas",
+                "amount": monto_pendiente,
+                "type": "Entrada",
+                "isCritical": False,
+                "isBs": c.tasa_cambio_bs > 1.0,
+                "status": "Pendiente",
+                "statusColor": "bg-yellow-100 text-yellow-700"
+            })
+            
+    for p in cxp:
+        monto_pendiente = to_float(p.monto_total_usd) - to_float(p.monto_pagado_usd)
+        if monto_pendiente > 0:
+            is_critical = monto_pendiente > 500.0
+            proyecciones.append({
+                "date": p.fecha_vencimiento.strftime("%d/%m/%Y") if p.fecha_vencimiento else "",
+                "concept": f"Pago Factura {p.numero_documento}",
+                "sub": p.proveedor.nombre if p.proveedor else "Proveedor General",
+                "area": "Compras",
+                "amount": monto_pendiente,
+                "type": "Salida",
+                "isCritical": is_critical,
+                "isBs": p.tasa_cambio_bs > 1.0,
+                "status": "Pendiente",
+                "statusColor": "bg-red-100 text-red-700" if is_critical else "bg-slate-100 text-slate-700"
+            })
+            
+    try:
+        proyecciones.sort(key=lambda x: datetime.strptime(x["date"], "%d/%m/%Y"))
+    except Exception:
+        pass
+        
+    return {
+        "proyecciones": proyecciones
+    }
+
+
+@tesoreria_router.get("/turnos")
+def obtener_auditoria_turnos(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    import json
+    
+    logs = db.query(AuditoriaLog).filter(AuditoriaLog.accion == "CIERRE_ARQUEO", AuditoriaLog.tenant_id == current_user.tenant_id).all()
+    
+    cajeros_monitoreados = set()
+    desviacion_total = 0.0
+    cajeros_con_alertas = set()
+    
+    historial_por_cajero = {}
+    ranking_data = {}
+    
+    for log in logs:
+        cajero = log.usuario
+        cajeros_monitoreados.add(cajero)
+        
+        try:
+            detalle = json.loads(log.detalle)
+        except Exception:
+            continue
+            
+        diff = to_float(detalle.get("diferencia", 0.0))
+        caja = detalle.get("caja", "Caja General")
+        fisico = to_float(detalle.get("fisico", 0.0))
+        resolucion = detalle.get("resolucion", "Aceptable")
+        
+        desviacion_total += abs(diff)
+        
+        if cajero not in ranking_data:
+            ranking_data[cajero] = {
+                "name": cajero,
+                "loss": 0.0,
+                "role": "Cajero",
+                "initials": "".join([part[0] for part in cajero.split() if part][:2]).upper()
+            }
+        ranking_data[cajero]["loss"] += diff
+        
+        if cajero not in historial_por_cajero:
+            historial_por_cajero[cajero] = []
+        historial_por_cajero[cajero].append({
+            "date": log.fecha.strftime("%d/%m/%Y %H:%M"),
+            "box": caja,
+            "physical": f"${fisico:,.2f}",
+            "diff": f"{'+' if diff >= 0 else ''}${diff:,.2f}",
+            "resolution": resolucion
+        })
+        
+    for cajero, r in ranking_data.items():
+        if abs(r["loss"]) > 20.0:
+            cajeros_con_alertas.add(cajero)
+            
+    ranking_list = []
+    for c, r in ranking_data.items():
+        loss_val = r["loss"]
+        ranking_list.append({
+            "name": r["name"],
+            "role": r["role"],
+            "initials": r["initials"],
+            "loss": f"{'-' if loss_val < 0 else ''}${abs(loss_val):,.2f}",
+            "desc": "Pérdida acumulada" if loss_val < 0 else "Sobrante acumulado",
+            "isCritical": abs(loss_val) > 20.0
+        })
+        
+    return {
+        "metricas": {
+            "cajeros_monitoreados": f"{len(cajeros_monitoreados)} Usuarios",
+            "desviacion_total": f"${desviacion_total:,.2f}",
+            "alertas_criticas": f"{len(cajeros_con_alertas)} Usuarios"
+        },
+        "ranking": ranking_list,
+        "historiales": historial_por_cajero
+    }
+
+
+@tesoreria_router.get("/prestamos/resumen")
+def resumen_prestamos_uvc(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    loans = db.query(PrestamoUVC).filter(PrestamoUVC.tenant_id == current_user.tenant_id).all()
+
+    tasa_uvc_hoy = to_float(tasa_actual(db, current_user.tenant_id))
+    tasas_recientes = (
+        db.query(TasaCambio)
+        .filter(TasaCambio.tenant_id == current_user.tenant_id)
+        .order_by(TasaCambio.fecha.desc())
+        .limit(2)
+        .all()
+    )
+    tasa_uvc_ayer = to_float(tasas_recientes[1].valor_ves) if len(tasas_recientes) > 1 else tasa_uvc_hoy
+    var_24h = ((tasa_uvc_hoy - tasa_uvc_ayer) / tasa_uvc_ayer) * 100 if tasa_uvc_ayer else 0.0
+    
+    total_uvc = 0.0
+    total_reval_bs = 0.0
+    
+    loans_list = []
+    for l in loans:
+        monto_uvc_val = to_float(l.monto_uvc)
+        tasa_inicial = to_float(l.tasa_cambio_bs)
+        
+        total_uvc += monto_uvc_val
+        saldo_bs = monto_uvc_val * tasa_uvc_hoy
+        reval_diff = (tasa_uvc_hoy - tasa_inicial) * monto_uvc_val
+        total_reval_bs += reval_diff
+        
+        banks = ["Banesco", "Banco Provincial", "Banco de Venezuela", "Banco Mercantil"]
+        bank_name = banks[l.id % len(banks)]
+        
+        loans_list.append({
+            "id": l.id,
+            "ref": f"CRE-UVC-{l.id:04d}",
+            "descripcion": l.descripcion,
+            "bank": bank_name,
+            "capital": f"{monto_uvc_val:,.2f} UVC",
+            "initRate": f"Bs. {tasa_inicial:,.2f}",
+            "currentRate": f"Bs. {tasa_uvc_hoy:,.2f}",
+            "balance": f"Bs. {saldo_bs:,.2f}",
+            "status": l.estado,
+            "color": "bg-green-100 text-green-700" if l.estado == "ACTIVO" else "bg-slate-100 text-slate-700"
+        })
+        
+    return {
+        "metricas": {
+            "tasa_uvc_hoy": f"Bs. {tasa_uvc_hoy:,.2f}",
+            "var_24h": f"{var_24h:+.2f}%",
+            "capital_pendiente_uvc": f"{total_uvc:,.2f} UVC",
+            "eqv_bs": f"Bs. {(total_uvc * tasa_uvc_hoy):,.2f}",
+            "diff_indexacion": f"Bs. {total_reval_bs:,.2f}",
+            "reval_desc": "Pérdida por revalorización mes" if total_reval_bs >= 0 else "Ganancia cambiaria acumulada"
+        },
+        "creditos": loans_list
+    }
+
+
+@tesoreria_router.post("/prestamos-uvc")
+def registrar_prestamo_uvc(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    desc = body.get("descripcion", "Préstamo Comercial UVC")
+    monto_uvc = float(body.get("monto_uvc", 0.0))
+    tasa = float(body.get("tasa", 12.0))
+    tasa_ref = to_float(tasa_actual(db, current_user.tenant_id))
+    tasa_cambio_bs = float(body.get("tasa_cambio_bs", tasa_ref))
+
+    saldo_usd = (monto_uvc * tasa_cambio_bs) / tasa_ref if tasa_ref else 0.0
+    
+    nuevo_prestamo = PrestamoUVC(
+        descripcion=desc,
+        monto_uvc=monto_uvc,
+        tasa=tasa,
+        saldo_usd=saldo_usd,
+        tasa_cambio_bs=tasa_cambio_bs,
+        estado="ACTIVO",
+        fecha_inicio=datetime.now(timezone.utc),
+        tenant_id=current_user.tenant_id
+    )
+    db.add(nuevo_prestamo)
+    db.commit()
+    return {"ok": True}
+
+
+@tesoreria_router.get("/presupuesto")
+def presupuesto_tesoreria(periodo: str = None, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    periodo = periodo or datetime.now(timezone.utc).strftime("%Y-%m")
+    partidas = db.query(PresupuestoPartida).filter(PresupuestoPartida.periodo == periodo, PresupuestoPartida.tenant_id == current_user.tenant_id).all()
+    return {"periodo": periodo, "partidas": [
+        {"centro": p.centro_costo, "concepto": p.concepto, "presupuestado": to_float(p.presupuestado_usd), "ejecutado": to_float(p.ejecutado_usd)}
+        for p in partidas
+    ]}
+
+
+@tesoreria_router.get("/presupuesto/desviacion")
+def desviacion_presupuestaria(periodo: str = None, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    periodo = periodo or datetime.now(timezone.utc).strftime("%Y-%m")
+    partidas = db.query(PresupuestoPartida).filter(PresupuestoPartida.periodo == periodo, PresupuestoPartida.tenant_id == current_user.tenant_id).all()
+    
+    oldest_mov = db.query(MovimientoBancario).filter(MovimientoBancario.tenant_id == current_user.tenant_id).order_by(MovimientoBancario.fecha.asc()).first()
+    tasa_plan = to_float(oldest_mov.tasa_cambio_bs) if oldest_mov else to_float(tasa_actual(db, current_user.tenant_id))
+
+    newest_mov = db.query(MovimientoBancario).filter(MovimientoBancario.tenant_id == current_user.tenant_id).order_by(MovimientoBancario.fecha.desc()).first()
+    tasa_real_raw = to_float(newest_mov.tasa_cambio_bs) if newest_mov else to_float(tasa_actual(db, current_user.tenant_id))
+    tasa_real = tasa_real_raw if tasa_real_raw > 5.0 else tasa_plan * 1.16
+    
+    total_plan_usd = 0.0
+    total_real_usd = 0.0
+    total_fx_impact_usd = 0.0
+    total_inefficiency_usd = 0.0
+    
+    breakdown_list = []
+    for p in partidas:
+        plan_usd = to_float(p.presupuestado_usd)
+        real_usd = to_float(p.ejecutado_usd)
+        
+        plan_bs = plan_usd * tasa_plan
+        real_bs = real_usd * tasa_real
+        
+        total_plan_usd += plan_usd
+        total_real_usd += real_usd
+        
+        deviation_usd = real_usd - plan_usd
+        
+        fx_impact_usd = 0.0
+        inefficiency_usd = 0.0
+        
+        if deviation_usd > 0:
+            fx_impact_usd = real_usd * (1 - (tasa_plan / tasa_real))
+            inefficiency_usd = max(0.0, deviation_usd - fx_impact_usd)
+            
+            total_fx_impact_usd += fx_impact_usd
+            total_inefficiency_usd += inefficiency_usd
+            
+        impact_str = f"-${deviation_usd:,.2f}" if deviation_usd > 0 else f"+${abs(deviation_usd):,.2f}"
+        
+        is_over = real_usd > plan_usd
+        
+        breakdown_list.append({
+            "item": p.concepto,
+            "centro": p.centro_costo,
+            "planBs": f"{plan_bs:,.2f}",
+            "realBs": f"{real_bs:,.2f}",
+            "planUsd": f"{plan_usd:,.2f}",
+            "realUsd": f"{real_usd:,.2f}",
+            "impact": impact_str,
+            "isOver": is_over,
+            "status": "Sobregiro" if is_over else "Conforme",
+            "cause": "Devaluación" if fx_impact_usd > inefficiency_usd else "Precios/Gestión",
+            "statusColor": "bg-red-100 text-red-700" if is_over else "bg-green-100 text-green-700",
+            "causeColor": "bg-red-50 text-red-600 border-red-100" if is_over else "bg-green-50 text-green-600 border-green-100"
+        })
+        
+    total_deviation = total_real_usd - total_plan_usd
+    fx_percent = (total_fx_impact_usd / total_real_usd * 100) if total_real_usd > 0 else 0.0
+    ineff_percent = (total_inefficiency_usd / total_real_usd * 100) if total_real_usd > 0 else 0.0
+    
+    return {
+        "periodo": periodo,
+        "tasa_plan": f"Bs. {tasa_plan:,.2f}",
+        "tasa_real": f"Bs. {tasa_real:,.2f}",
+        "metricas": {
+            "desviacion_total": f"${total_deviation:,.2f}" if total_deviation >= 0 else f"+${abs(total_deviation):,.2f}",
+            "impacto_cambiario": f"{fx_percent:.1f}%",
+            "ineficiencia_operativa": f"{ineff_percent:.1f}%"
+        },
+        "breakdown": breakdown_list,
+        "distribucion": {
+            "fx_pct": fx_percent,
+            "ineff_pct": ineff_percent
+        }
+    }
+
+
+@tesoreria_router.get("/inversiones/resumen")
+def resumen_inversiones(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    placements = db.query(ColocacionInversion).filter(ColocacionInversion.estado == "ACTIVO", ColocacionInversion.tenant_id == current_user.tenant_id).all()
+
+    tasa_real = to_float(tasa_actual(db, current_user.tenant_id))
+    
+    total_gain_bs = 0.0
+    total_capital_bs = 0.0
+    total_net_real_usd = 0.0
+    
+    placements_list = []
+    for p in placements:
+        cap_bs = to_float(p.capital_bs)
+        rate_anual = to_float(p.tasa_interes_anual)
+        plazo = p.plazo_dias
+        init_rate = to_float(p.tasa_cambio_inicial)
+        
+        interest_bs = cap_bs * (rate_anual / 100.0) * (plazo / 360.0)
+        total_gain_bs += interest_bs
+        total_capital_bs += cap_bs
+        
+        cap_usd = cap_bs / init_rate
+        final_usd = (cap_bs + interest_bs) / tasa_real
+        real_result_usd = final_usd - cap_usd
+        total_net_real_usd += real_result_usd
+        
+        fx_effect_bs = cap_bs * (1 - (init_rate / tasa_real))
+        
+        placements_list.append({
+            "id": p.id,
+            "name": p.nombre,
+            "term": f"{plazo} Días",
+            "capital": f"Bs. {cap_bs:,.2f}",
+            "rates": f"{rate_anual}% Anual",
+            "gain": f"Bs. {interest_bs:,.2f}",
+            "fxEffect": f"-Bs. {fx_effect_bs:,.2f}",
+            "realRes": f"${real_result_usd:,.2f}" if real_result_usd >= 0 else f"-${abs(real_result_usd):,.2f}",
+            "isNegative": real_result_usd < 0
+        })
+        
+    avg_interest = sum(to_float(p.tasa_interes_anual) for p in placements) / len(placements) if placements else 0.0
+    bcv_dev_pct = 15.7
+    
+    eff_real_pct = (total_net_real_usd / (total_capital_bs / tasa_real) * 100) if total_capital_bs > 0 and tasa_real else 0.0
+    
+    return {
+        "metricas": {
+            "eficiencia_real": f"{eff_real_pct:.1f}%",
+            "interes_acumulado": f"Bs. {total_gain_bs:,.2f}",
+            "devaluacion_periodo": f"{bcv_dev_pct:.1f}%"
+        },
+        "colocaciones": placements_list,
+        "interes_promedio": avg_interest,
+        "devaluacion_bcv": bcv_dev_pct
+    }
+
+
+@tesoreria_router.post("/inversiones")
+def registrar_inversion(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    nombre = body.get("nombre", "Colocación Plazo Fijo")
+    plazo_dias = int(body.get("plazo_dias", 30))
+    capital_bs = float(body.get("capital_bs", 0.0))
+    tasa_interes = float(body.get("tasa_interes_anual", 48.0))
+    tasa_cambio = float(body.get("tasa_cambio_inicial", 42.15))
+    
+    nueva_inv = ColocacionInversion(
+        nombre=nombre,
+        plazo_dias=plazo_dias,
+        capital_bs=capital_bs,
+        tasa_interes_anual=tasa_interes,
+        tasa_cambio_inicial=tasa_cambio,
+        fecha_inicio=datetime.now(timezone.utc),
+        estado="ACTIVO",
+        tenant_id=current_user.tenant_id
+    )
+    db.add(nueva_inv)
+    db.commit()
+    return {"ok": True}
+
+
+@tesoreria_router.post("/importar")
+def importar_extracto_bancario(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """Importa un extracto bancario (filas ya parseadas en el cliente, ver
+    ImportStatement.tsx) y es el mecanismo REAL de conciliación: cada fila del
+    extracto se intenta cruzar contra un movimiento interno pendiente
+    (creado por pagos, compras, etc.) por monto + fecha + tipo (reforzado por
+    referencia cuando ambas la traen). Sólo si hay un match real se marca ese
+    movimiento como CONCILIADO; si ninguna fila coincide no se marca nada en
+    masa. Las filas del extracto sin contraparte interna se insertan como
+    movimientos nuevos en estado ACTIVO, quedando disponibles para conciliar
+    manualmente (endpoints /conciliacion/relacionar y /conciliacion/marcar)."""
+    cuenta_id = body.get("cuenta_id")
+    movs = body.get("movimientos", [])
+
+    cuenta = db.query(CuentaBancaria).filter(CuentaBancaria.id == cuenta_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
+    if not cuenta:
+        return {"ok": False, "message": "Cuenta bancaria no encontrada"}
+
+    tasa_cambio = to_float(tasa_actual(db, current_user.tenant_id)) or 36.42
+
+    candidatos_pendientes = db.query(MovimientoBancario).filter(
+        MovimientoBancario.cuenta_id == cuenta_id,
+        MovimientoBancario.tenant_id == current_user.tenant_id,
+        MovimientoBancario.estado != "CONCILIADO"
+    ).all()
+
+    TOLERANCIA_USD = 0.02
+    TOLERANCIA_DIAS = 3
+
+    total_monto_usd = 0.0
+    conciliados_count = 0
+    nuevos_count = 0
+
+    for m in movs:
+        fecha_str = m.get("fecha", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+        ref = str(m.get("referencia") or "").strip()
+        concepto = m.get("concepto", "Movimiento de extracto importado")
+        monto_val = float(m.get("monto", 0.0))
+
+        try:
+            fecha_mov = datetime.strptime(fecha_str, "%Y-%m-%d") if "-" in fecha_str else datetime.now(timezone.utc)
+        except Exception:
+            fecha_mov = datetime.now(timezone.utc)
+
+        monto_usd = monto_val / tasa_cambio if tasa_cambio else 0.0
+        tipo = "INGRESO" if monto_usd >= 0 else "EGRESO"
+
+        match = None
+        for cand in candidatos_pendientes:
+            if cand.tipo != tipo:
+                continue
+            if abs(to_float(cand.monto_usd) - abs(monto_usd)) > TOLERANCIA_USD:
+                continue
+            if cand.fecha and abs((cand.fecha - fecha_mov).days) > TOLERANCIA_DIAS:
+                continue
+            if ref and cand.referencia and ref.lower() != cand.referencia.strip().lower():
+                continue
+            match = cand
+            break
+
+        if match:
+            match.estado = "CONCILIADO"
+            if ref and not match.referencia:
+                match.referencia = ref[:100]
+            candidatos_pendientes.remove(match)
+            conciliados_count += 1
+        else:
+            nuevo_mov = MovimientoBancario(
+                cuenta_id=cuenta_id,
+                fecha=fecha_mov,
+                concepto=concepto,
+                monto_usd=abs(monto_usd),
+                tasa_cambio_bs=tasa_cambio,
+                tipo=tipo,
+                referencia=ref,
+                estado="ACTIVO",
+                tenant_id=current_user.tenant_id
+            )
+            db.add(nuevo_mov)
+            total_monto_usd += monto_usd
+            nuevos_count += 1
+
+    cuenta.saldo_actual_usd = to_float(cuenta.saldo_actual_usd) + total_monto_usd
+    db.commit()
+    return {
+        "ok": True,
+        "count": len(movs),
+        "conciliados": conciliados_count,
+        "nuevos": nuevos_count,
+        "message": f"Se procesaron {len(movs)} movimientos del extracto: {conciliados_count} conciliados contra registros existentes, {nuevos_count} nuevos sin coincidencia."
+    }
+
+
+@tesoreria_router.get("/movimientos-caja")
+def movimientos_caja(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    cuentas_caja = db.query(CuentaBancaria).filter(
+        CuentaBancaria.activa == True,
+        CuentaBancaria.banco.like("%Caja%"),
+        CuentaBancaria.tenant_id == current_user.tenant_id
+    ).all()
+    cuenta_ids = [c.id for c in cuentas_caja]
+    
+    saldo_caja = sum(to_float(c.saldo_actual_usd) for c in cuentas_caja)
+    
+    movs = db.query(MovimientoBancario).filter(
+        MovimientoBancario.cuenta_id.in_(cuenta_ids),
+        MovimientoBancario.tenant_id == current_user.tenant_id
+    ).order_by(MovimientoBancario.fecha.desc()).all()
+    
+    no_deducibles = 0.0
+    soportes_count = 0
+    now = datetime.now(timezone.utc)
+    
+    for m in movs:
+        is_current_month = m.fecha.year == now.year and m.fecha.month == now.month
+        if m.tipo == "EGRESO":
+            if not m.referencia:
+                if is_current_month:
+                    no_deducibles += to_float(m.monto_usd)
+        if m.referencia:
+            soportes_count += 1
+            
+    soportes_pct = (soportes_count / len(movs) * 100.0) if len(movs) > 0 else 100.0
+    
+    return {
+        "metricas": {
+            "saldo_caja": f"${saldo_caja:,.2f}",
+            "no_deducibles": f"${no_deducibles:,.2f}",
+            "soportes_pct": f"{soportes_pct:.1f}%"
+        },
+        "movimientos": [
+            {
+                "id": m.id,
+                "date": m.fecha.strftime("%d/%m/%Y") if m.fecha else "",
+                "desc": m.concepto,
+                "amount": f"{'+' if m.tipo == 'INGRESO' else '-'}${to_float(m.monto_usd):,.2f}",
+                "support": "Factura" if m.referencia else "Sin Soporte",
+                "fiscal": "Deducible" if m.referencia else "No Deducible",
+                "fColor": "bg-green-100 text-green-700" if m.referencia else "bg-amber-100 text-amber-700",
+                "hasImage": bool(m.referencia),
+                "imageType": "file" if m.referencia else "none",
+                "cuenta_nombre": m.cuenta.banco if m.cuenta else "N/A"
+            }
+            for m in movs
+        ]
+    }
+
+
+@tesoreria_router.post("/movimientos-caja")
+def registrar_movimiento_caja(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    cuenta_id = body.get("cuenta_id")
+    concepto = body.get("concepto", "")
+    monto_usd = float(body.get("monto_usd", 0.0))
+    tipo = body.get("tipo", "INGRESO")
+    referencia = body.get("referencia", "")
+    tasa_cambio_bs = float(body.get("tasa_cambio_bs", 1.0))
+    
+    cuenta = db.query(CuentaBancaria).filter(CuentaBancaria.id == cuenta_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
+    if not cuenta:
+        raise HTTPException(status_code=404, detail="Cuenta no encontrada")
+        
+    factor = 1.0 if tipo == "INGRESO" else -1.0
+    cuenta.saldo_actual_usd = to_float(cuenta.saldo_actual_usd) + (factor * monto_usd)
+    
+    mov = MovimientoBancario(
+        cuenta_id=cuenta_id,
+        concepto=concepto,
+        monto_usd=monto_usd,
+        tasa_cambio_bs=tasa_cambio_bs,
+        tipo=tipo,
+        referencia=referencia,
+        estado="ACTIVO",
+        tenant_id=current_user.tenant_id
+    )
+    db.add(mov)
+    db.commit()
+    return {"ok": True, "id": mov.id}
+
+
+@tesoreria_router.get("/inversiones/exportar")
+def exportar_inversiones_excel(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    import io as _io
+    
+    colocaciones = db.query(ColocacionInversion).filter(ColocacionInversion.tenant_id == current_user.tenant_id).all()
+    
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Rendimiento de Inversiones"
+    
+    header_fill = PatternFill(start_color="0B5156", end_color="0B5156", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True)
+    
+    headers = ["Nombre", "Plazo (días)", "Capital (Bs)", "Tasa Anual (%)", "Interés Ganado (Bs)", "Tasa Inicial (Bs/USD)", "Resultado Real (USD)", "Fecha Registro"]
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center")
+    
+    for row_idx, c in enumerate(colocaciones, 2):
+        capital = to_float(c.capital_bs)
+        tasa = to_float(c.tasa_interes_anual)
+        plazo = int(c.plazo_dias or 30)
+        interes = capital * (tasa / 100) * (plazo / 365)
+        tasa_inicial = to_float(c.tasa_cambio_inicial)
+        resultado_usd = interes / tasa_inicial if tasa_inicial > 0 else 0
+        
+        ws.cell(row=row_idx, column=1, value=c.nombre)
+        ws.cell(row=row_idx, column=2, value=plazo)
+        ws.cell(row=row_idx, column=3, value=capital)
+        ws.cell(row=row_idx, column=4, value=tasa)
+        ws.cell(row=row_idx, column=5, value=round(interes, 2))
+        ws.cell(row=row_idx, column=6, value=tasa_inicial)
+        ws.cell(row=row_idx, column=7, value=round(resultado_usd, 2))
+        ws.cell(row=row_idx, column=8, value=c.fecha_inicio.strftime("%Y-%m-%d") if c.fecha_inicio else "")
+    
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or "")) for cell in col)
+        ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 40)
+    
+    buf = _io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=rendimiento_inversiones.xlsx"}
+    )
