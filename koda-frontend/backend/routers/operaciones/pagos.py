@@ -193,23 +193,38 @@ def pagos_dashboard(db: Session = Depends(get_db), current_user = Depends(get_cu
 
 
 @pagos_router.get("/cuentas")
-def cuentas_pagar(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+def cuentas_pagar(skip: int = 0, limit: int = 500, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     tasa_val = float(tasa_actual(db, current_user.tenant_id))
 
-    rows = db.query(CuentaPorPagar).filter(
+    todas_cxp = db.query(CuentaPorPagar).filter(
         CuentaPorPagar.estado != "PAGADA",
         CuentaPorPagar.tenant_id == current_user.tenant_id
     ).all()
 
     total_deuda_usd = 0.0
-    total_facturas = len(rows)
+    total_facturas = len(todas_cxp)
     vencido_30d_usd = 0.0
 
     now_utc = datetime.now(timezone.utc)
     limit_30d = now_utc - timedelta(days=30)
 
-    facturas_list = []
+    for r in todas_cxp:
+        saldo_usd = float(r.monto_total_usd - r.monto_pagado_usd)
+        tasa_cxp = float(r.tasa_cambio_bs)
+        saldo_usd_converted = saldo_usd / tasa_val if tasa_cxp == 1.0 else saldo_usd
+        total_deuda_usd += saldo_usd_converted
 
+        venc_dt = _as_aware(r.fecha_vencimiento)
+        if venc_dt < now_utc and venc_dt < limit_30d:
+            vencido_30d_usd += saldo_usd_converted
+
+    # Paginación aplicada únicamente al listado de facturas
+    rows = db.query(CuentaPorPagar).filter(
+        CuentaPorPagar.estado != "PAGADA",
+        CuentaPorPagar.tenant_id == current_user.tenant_id
+    ).order_by(CuentaPorPagar.fecha_emision.desc()).offset(skip).limit(limit).all()
+
+    facturas_list = []
     for r in rows:
         saldo_usd = float(r.monto_total_usd - r.monto_pagado_usd)
         tasa_cxp = float(r.tasa_cambio_bs)
@@ -221,13 +236,7 @@ def cuentas_pagar(db: Session = Depends(get_db), current_user = Depends(get_curr
             saldo_usd_converted = saldo_usd
             saldo_bs = saldo_usd * tasa_val
 
-        total_deuda_usd += saldo_usd_converted
-
         venc_dt = _as_aware(r.fecha_vencimiento)
-        if venc_dt < now_utc:
-            if venc_dt < limit_30d:
-                vencido_30d_usd += saldo_usd_converted
-
         if venc_dt < now_utc:
             due_str = "VENCIDA"
             color_status = "text-red-600"
