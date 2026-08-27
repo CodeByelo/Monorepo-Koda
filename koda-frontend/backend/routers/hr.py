@@ -150,8 +150,10 @@ def procesar_nomina_quincenal(
     monto_neto_bs = monto_asignaciones_bs + monto_bonos_bs - monto_ivss_bs - monto_faov_bs 
     
     asiento = AsientoContable(
+        tenant_id=current_user.tenant_id,
         concepto=f"Provisión de Nómina, Retenciones e INCES Patronal: {periodo}",
         referencia=f"NOM-{nueva_nomina.id}",
+        tasa_cambio_bs=tasa_bs,
         total_debe=monto_asignaciones_bs + monto_bonos_bs + monto_inces_bs,
         total_haber=monto_asignaciones_bs + monto_bonos_bs + monto_inces_bs,
         detalles=[
