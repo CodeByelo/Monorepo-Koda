@@ -1617,6 +1617,7 @@ def registrar_movimiento_caja(body: dict, db: Session = Depends(get_db), current
 
 @tesoreria_router.get("/inversiones/exportar")
 def exportar_inversiones_excel(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    from fastapi.responses import StreamingResponse
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment
     import io as _io
