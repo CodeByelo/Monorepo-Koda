@@ -56,7 +56,7 @@ def _sync_profile_employees(db: Session, current_user) -> None:
     tenant_id = _require_tenant(current_user)
     profiles = (
         db.query(Profile)
-        .filter(Profile.tenant_id == tenant_id, Profile.estado.is_(True))
+        .filter(Profile.tenant_id == tenant_id, Profile.estado == 1)
         .order_by(Profile.nombre.asc().nullslast(), Profile.email.asc().nullslast())
         .all()
     )
@@ -126,7 +126,7 @@ def list_employees(
             RHEmployee.tenant_id == _require_tenant(current_user),
             RHEmployee.status == "activo",
             Profile.tenant_id == _require_tenant(current_user),
-            Profile.estado.is_(True),
+            Profile.estado == 1,
         )
         .order_by(RHEmployee.nombres.asc())
         .all()
@@ -241,7 +241,7 @@ def list_details(
             RHPayrollDetail.period_id == period_id,
             RHEmployee.tenant_id == tenant_id,
             Profile.tenant_id == tenant_id,
-            Profile.estado.is_(True),
+            Profile.estado == 1,
         )
         .all()
     )
@@ -270,7 +270,7 @@ def bulk_save_details(
                     RHEmployee.tenant_id == tenant_id,
                     RHEmployee.status == "activo",
                     Profile.tenant_id == tenant_id,
-                    Profile.estado.is_(True),
+                    Profile.estado == 1,
                 )
                 .first()
             )
@@ -294,7 +294,7 @@ def bulk_save_details(
                 detail.monto = _round_money(item.monto)
                 detail.cantidad_horas_dias = item.cantidad_horas_dias
             else:
-                detail = RHPayrollDetail(**item.model_dump())
+                detail = RHPayrollDetail(tenant_id=tenant_id, **item.model_dump())
                 detail.monto = _round_money(item.monto)
                 db.add(detail)
             saved_details.append(detail)
@@ -327,7 +327,7 @@ def process_pre_payroll(
             RHEmployee.tenant_id == tenant_id,
             RHEmployee.status == "activo",
             Profile.tenant_id == tenant_id,
-            Profile.estado.is_(True),
+            Profile.estado == 1,
         )
         .order_by(RHEmployee.nombres.asc())
         .all()
@@ -467,6 +467,7 @@ def confirm_payroll(
         tenant_id=tenant_id,
         concepto=f"Provisión de Nómina Dinámica: {report.nombre_periodo}",
         referencia=f"NOM-{nueva_nomina.id}",
+        tasa_cambio_bs=tasa_bs,
         total_debe=monto_base_bs + monto_asignaciones_bs,
         total_haber=monto_base_bs + monto_asignaciones_bs,
         detalles=[
