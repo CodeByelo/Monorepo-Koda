@@ -32,8 +32,7 @@ pagos_router = APIRouter(prefix="/pagos", tags=["Pagos"], dependencies=[Depends(
 
 @pagos_router.get("/dashboard")
 def pagos_dashboard(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    tasa = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
-    tasa_val = float(tasa.valor_ves) if tasa else 36.52
+    tasa_val = float(tasa_actual(db, current_user.tenant_id))
 
     cxps = db.query(CuentaPorPagar).filter(
         CuentaPorPagar.estado != "PAGADA",
@@ -195,8 +194,7 @@ def pagos_dashboard(db: Session = Depends(get_db), current_user = Depends(get_cu
 
 @pagos_router.get("/cuentas")
 def cuentas_pagar(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    tasa = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
-    tasa_val = float(tasa.valor_ves) if tasa else 36.52
+    tasa_val = float(tasa_actual(db, current_user.tenant_id))
 
     rows = db.query(CuentaPorPagar).filter(
         CuentaPorPagar.estado != "PAGADA",
@@ -275,8 +273,7 @@ def cuentas_pagar(db: Session = Depends(get_db), current_user = Depends(get_curr
 
 @pagos_router.get("/ordenes")
 def ordenes_pago(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    tasa = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
-    tasa_val = float(tasa.valor_ves) if tasa else 36.52
+    tasa_val = float(tasa_actual(db, current_user.tenant_id))
 
     pendientes = db.query(CuentaPorPagar).filter(
         CuentaPorPagar.estado != "PAGADA",
@@ -527,8 +524,7 @@ def programacion_pagos(db: Session = Depends(get_db), current_user = Depends(get
 
 @pagos_router.get("/lotes/validar")
 def validar_lotes(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    tasa = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
-    tasa_val = float(tasa.valor_ves) if tasa else 36.52
+    tasa_val = float(tasa_actual(db, current_user.tenant_id))
 
     cxps = db.query(CuentaPorPagar).filter(
         CuentaPorPagar.estado != "PAGADA",
