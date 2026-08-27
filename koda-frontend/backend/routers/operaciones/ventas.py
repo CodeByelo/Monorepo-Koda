@@ -27,7 +27,7 @@ from backend.models.core import TasaCambio
 from backend.utils.helpers import (
     to_float, periodo_rango, ventas_periodo, tasa_actual, margen_bruto_pct,
     get_almacen_principal_id, verificar_periodo_abierto, resolver_almacen_venta,
-    descontar_stock_almacen
+    descontar_stock_almacen, resolver_modo_visualizacion_moneda
 )
 from backend.services.contabilidad import ContabilidadService
 from backend.services.facturacion_service import (
@@ -150,8 +150,8 @@ def descargar_factura_pdf(
     if tasa_val <= 0:
         tasa_val = 784.6633
 
-    es_solo_bolivares = (moneda_doc == 'VED' or moneda_doc == 'SOLO_VES') or (metodo_pago.upper() in ["EFECTIVO", "TRANSFERENCIA", "PAGOMOVIL"] and igtf_usd <= 0 and moneda_doc != 'USD' and moneda_doc != 'SOLO_USD')
-    es_solo_divisas = (moneda_doc in ('USD', 'SOLO_USD') and metodo_pago.upper() in ('DIVISA', 'USD') and igtf_usd > 0) or (moneda_doc in ('USD', 'SOLO_USD') and tasa_val <= 1)
+    modo = resolver_modo_visualizacion_moneda(moneda_doc)
+    es_solo_bolivares = (modo == "SOLO_VES")
 
     c.drawString(50, alto - 148, f"Razón Social: {cliente_nombre}")
     c.drawString(50, alto - 162, f"R.I.F. / C.I.: {cliente_rif}")
@@ -259,7 +259,7 @@ def descargar_factura_pdf(
         c.drawRightString(ancho - 50, pos_y_totales - offset_y, f"${total_usd:.2f}")
         
         # Mostrar equivalente en Bs sólo si no es una factura configurada como Solo Divisas estricta
-        if moneda_doc not in ('USD_ONLY', 'SOLO_USD'):
+        if modo != "SOLO_USD":
             c.setFont("Helvetica-Bold", 10)
             c.setFillColor(colors.HexColor("#1e293b"))
             c.drawString(350, pos_y_totales - offset_y - 18, "TOTAL EQUIVALENTE (Bs.):")
@@ -389,7 +389,8 @@ def descargar_ticket_pdf(
     dibujar("cliente", f"Cliente: {cliente_nombre}{cliente_rif}")
     c.line(4 * mm, y_cli - 4, ANCHO - 4 * mm, y_cli - 4)
 
-    es_pago_bolivares_puro = (venta.metodo_pago in ["Efectivo", "Transferencia", "PagoMovil"]) and float(venta.igtf_usd) <= 0
+    modo = resolver_modo_visualizacion_moneda(getattr(venta, "moneda_documento", None))
+    es_pago_bolivares_puro = (modo == "SOLO_VES")
     tasa_val = float(venta.tasa_cambio_bs) if float(venta.tasa_cambio_bs) > 0 else 1.0
 
     # --- Tabla de productos: Producto | Cantidad | Total ---
@@ -489,8 +490,9 @@ def descargar_ticket_pdf(
             fila_total("IGTF Percibido (3%):", f"${igtf_val:.2f}")
         
         fila_total("TOTAL A PAGAR (USD):", f"${total_val:.2f}", es_bold=True, tam=10)
-        fila_total("Tasa de Cambio:", f"Bs. {tasa_val:,.2f}", tam=8)
-        fila_total("TOTAL EN BOLÍVARES:", f"Bs. {total_bs_val:,.2f}", es_bold=True, tam=9)
+        if modo != "SOLO_USD":
+            fila_total("Tasa de Cambio:", f"Bs. {tasa_val:,.2f}", tam=8)
+            fila_total("TOTAL EN BOLÍVARES:", f"Bs. {total_bs_val:,.2f}", es_bold=True, tam=9)
 
     y -= 4
     c.line(4 * mm, y + 2, ANCHO - 4 * mm, y + 2)
