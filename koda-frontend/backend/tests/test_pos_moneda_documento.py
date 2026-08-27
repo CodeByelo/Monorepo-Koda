@@ -286,8 +286,18 @@ def test_emitir_factura_divisa_sigue_aplicando_igtf_sin_importar_moneda_document
     db.close()
 
 
+def _extraer_texto_pdf(contenido_bytes: bytes) -> str:
+    import io
+    from pypdf import PdfReader
+    reader = PdfReader(io.BytesIO(contenido_bytes))
+    texto_completo = ""
+    for page in reader.pages:
+        texto_completo += page.extract_text() or ""
+    return texto_completo
+
+
 def test_pdf_factura_se_genera_sin_error_en_los_3_formatos(setup_db):
-    """6. El PDF de factura se genera con 200 OK para los 3 formatos de moneda."""
+    """6. El PDF de factura se genera correctamente y su CONTENIDO refleja el formato de moneda."""
     db = SessionLocal()
     tenant, user, cliente, producto = _crear_ambiente_facturacion(db)
 
@@ -321,11 +331,88 @@ def test_pdf_factura_se_genera_sin_error_en_los_3_formatos(setup_db):
         assert pdf_res.headers.get("content-type") == "application/pdf"
         assert len(pdf_res.content) > 0
 
+        texto_pdf = _extraer_texto_pdf(pdf_res.content)
+
+        if formato == "SOLO_USD":
+            assert "TOTAL GENERAL (USD):" in texto_pdf
+            assert "$" in texto_pdf
+            assert "TOTAL EQUIVALENTE" not in texto_pdf
+            assert "TOTAL GENERAL (Bs.):" not in texto_pdf
+            assert "TOTAL (Bs.)" not in texto_pdf
+        elif formato == "SOLO_VES":
+            assert "TOTAL GENERAL (Bs.):" in texto_pdf
+            assert "Bs." in texto_pdf
+            assert "TOTAL GENERAL (USD):" not in texto_pdf
+            assert "TOTAL (USD)" not in texto_pdf
+            assert "TOTAL EQUIVALENTE" not in texto_pdf
+        elif formato == "BIMONETARIO":
+            assert "TOTAL GENERAL (USD):" in texto_pdf
+            assert "$" in texto_pdf
+            assert "TOTAL EQUIVALENTE (Bs.):" in texto_pdf
+            assert "Bs." in texto_pdf
+
+    db.close()
+
+
+def test_ticket_factura_se_genera_y_verifica_contenido_en_los_3_formatos(setup_db):
+    """7. El Ticket POS se genera y su CONTENIDO refleja el formato de moneda."""
+    db = SessionLocal()
+    tenant, user, cliente, producto = _crear_ambiente_facturacion(db)
+
+    def mock_user():
+        return user
+
+    app.dependency_overrides[get_current_user] = mock_user
+    client_app = TestClient(app)
+
+    formatos = ["BIMONETARIO", "SOLO_USD", "SOLO_VES"]
+    for formato in formatos:
+        payload = {
+            "cliente_id": cliente.id,
+            "metodo_pago": "Efectivo",
+            "moneda_documento": formato,
+            "tasa_cambio_bs": 50.0,
+            "detalles": [
+                {
+                    "producto_id": producto.id,
+                    "cantidad": 1,
+                    "precio_unitario": 100.0
+                }
+            ]
+        }
+        res = client_app.post("/v1/facturacion/emitir", json=payload)
+        assert res.status_code == 201, res.text
+        venta_id = res.json()["id"]
+
+        ticket_res = client_app.get(f"/ventas/{venta_id}/ticket")
+        assert ticket_res.status_code == 200, f"Fallo al generar Ticket para {formato}: {ticket_res.text}"
+        assert ticket_res.headers.get("content-type") == "application/pdf"
+        assert len(ticket_res.content) > 0
+
+        texto_ticket = _extraer_texto_pdf(ticket_res.content)
+
+        if formato == "SOLO_USD":
+            assert "TOTAL A PAGAR (USD):" in texto_ticket
+            assert "Total ($)" in texto_ticket
+            assert "TOTAL EN BOLÍVARES:" not in texto_ticket
+            assert "TOTAL A PAGAR (Bs.):" not in texto_ticket
+            assert "Tasa de Cambio:" not in texto_ticket
+        elif formato == "SOLO_VES":
+            assert "TOTAL A PAGAR (Bs.):" in texto_ticket
+            assert "Total (Bs.)" in texto_ticket
+            assert "TOTAL A PAGAR (USD):" not in texto_ticket
+            assert "Total ($)" not in texto_ticket
+            assert "TOTAL EN BOLÍVARES:" not in texto_ticket
+        elif formato == "BIMONETARIO":
+            assert "TOTAL A PAGAR (USD):" in texto_ticket
+            assert "TOTAL EN BOLÍVARES:" in texto_ticket
+            assert "Tasa de Cambio:" in texto_ticket
+
     db.close()
 
 
 def test_igtf_no_depende_de_moneda_pago_redundante_en_sales():
-    """7. Verifica que derivar_aplica_igtf dependa exclusivamente de metodo_pago."""
+    """8. Verifica que derivar_aplica_igtf dependa exclusivamente de metodo_pago."""
     from backend.services.facturacion_service import derivar_aplica_igtf
     assert derivar_aplica_igtf("Divisa", "VES") is True
     assert derivar_aplica_igtf("Divisa", "USD") is True

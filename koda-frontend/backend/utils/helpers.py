@@ -192,3 +192,18 @@ def ventas_mensuales_anio(db: Session, year: Optional[int] = None) -> list[float
         )
         monthly.append(to_float(total))
     return monthly
+
+
+def resolver_modo_visualizacion_moneda(moneda_documento: str | None) -> str:
+    """Determina cómo debe presentarse la moneda en el PDF/ticket de una
+    venta, basado ÚNICAMENTE en Venta.moneda_documento — nunca en
+    metodo_pago ni en igtf_usd (esos gobiernan el cálculo de impuestos,
+    no la presentación del documento). Devuelve uno de:
+    "SOLO_VES", "SOLO_USD", "BIMONETARIO" (default)."""
+    valor = (moneda_documento or "BIMONETARIO").upper()
+    if valor in ("SOLO_VES", "VED"):
+        return "SOLO_VES"
+    if valor in ("SOLO_USD", "USD", "USD_ONLY"):
+        return "SOLO_USD"
+    return "BIMONETARIO"
+
