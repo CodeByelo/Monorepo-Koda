@@ -115,31 +115,34 @@ def facturas_criticas(db: Session = Depends(get_db), current_user = Depends(get_
 def cartera_clientes(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     _sync_cxc_desde_ventas(db, current_user.tenant_id)
     clientes = db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).all()
+    todas_cxc = db.query(CuentaPorCobrar).filter(CuentaPorCobrar.tenant_id == current_user.tenant_id).all()
+
+    cxc_por_cliente = {}
+    for cxc in todas_cxc:
+        cxc_por_cliente.setdefault(cxc.cliente_id, []).append(cxc)
+
+    ahora = datetime.now(timezone.utc)
     result = []
     for c in clientes:
-        # Documentos pendientes y saldo total
-        cxc_pendientes = db.query(CuentaPorCobrar).filter(
-            CuentaPorCobrar.cliente_id == c.id, 
-            CuentaPorCobrar.estado != "PAGADA",
-            CuentaPorCobrar.tenant_id == current_user.tenant_id
-        ).all()
-        
+        cxc_cliente = cxc_por_cliente.get(c.id, [])
+        cxc_pendientes = []
+        max_pagada_fecha = None
+
+        for cxc in cxc_cliente:
+            if cxc.estado != "PAGADA":
+                cxc_pendientes.append(cxc)
+            else:
+                if cxc.fecha_emision and (max_pagada_fecha is None or cxc.fecha_emision > max_pagada_fecha):
+                    max_pagada_fecha = cxc.fecha_emision
+
         docs_count = len(cxc_pendientes)
         saldo = sum(to_float(cxc.monto_total) - to_float(cxc.monto_pagado) for cxc in cxc_pendientes)
         
         # Mora real (vencidas)
-        ahora = datetime.now(timezone.utc)
         cxc_vencidas = [cxc for cxc in cxc_pendientes if _as_aware(cxc.fecha_vencimiento) < ahora]
         mora_real = sum(to_float(cxc.monto_total) - to_float(cxc.monto_pagado) for cxc in cxc_vencidas)
         
-        # Último pago (aproximado usando la fecha de la última factura PAGADA)
-        ultima_cxc_pagada = db.query(CuentaPorCobrar).filter(
-            CuentaPorCobrar.cliente_id == c.id,
-            CuentaPorCobrar.estado == "PAGADA",
-            CuentaPorCobrar.tenant_id == current_user.tenant_id
-        ).order_by(CuentaPorCobrar.fecha_emision.desc()).first()
-        
-        ultimo_pago = ultima_cxc_pagada.fecha_emision.strftime("%d/%m/%Y") if ultima_cxc_pagada else "Sin pagos"
+        ultimo_pago = max_pagada_fecha.strftime("%d/%m/%Y") if max_pagada_fecha else "Sin pagos"
 
         result.append({
             "id": c.rif, 

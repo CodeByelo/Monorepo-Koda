@@ -332,13 +332,13 @@ def crear_banco(body: dict, db: Session = Depends(get_db), current_user = Depend
 
 
 @tesoreria_router.get("/movimientos")
-def movimientos_banco(periodo: str, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+def movimientos_banco(periodo: str, skip: int = 0, limit: int = 500, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     inicio, fin = periodo_rango(periodo)
     movs = db.query(MovimientoBancario).filter(
         MovimientoBancario.fecha >= inicio,
         MovimientoBancario.fecha < fin,
         MovimientoBancario.tenant_id == current_user.tenant_id
-    ).all()
+    ).order_by(MovimientoBancario.fecha.desc()).offset(skip).limit(limit).all()
     return [{
         "id": f"MOV-{str(m.id).zfill(4)}", 
         "fecha": m.fecha.strftime("%d/%m/%Y"), 
