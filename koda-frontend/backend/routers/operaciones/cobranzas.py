@@ -693,4 +693,55 @@ def enviar_estado_cuenta(body: dict, db: Session = Depends(get_db), current_user
     )
 
 
-# --- PAGOS ---
+@cobranzas_router.get("/estado-cuenta")
+def estado_cuenta_cliente(cliente_id: int = Query(None), rif: str = Query(None), db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    cli = None
+    if cliente_id:
+        cli = db.query(Cliente).filter(Cliente.id == cliente_id, Cliente.tenant_id == current_user.tenant_id).first()
+    elif rif:
+        cli = db.query(Cliente).filter(Cliente.rif == rif, Cliente.tenant_id == current_user.tenant_id).first()
+    else:
+        cli = db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).first()
+    if not cli:
+        return {"cliente": None, "kpis": [], "movimientos": []}
+
+    cxc = db.query(CuentaPorCobrar).filter(
+        CuentaPorCobrar.cliente_id == cli.id, CuentaPorCobrar.tenant_id == current_user.tenant_id
+    ).order_by(CuentaPorCobrar.fecha_emision).all()
+    tasa = tasa_actual(db, current_user.tenant_id)
+    saldo = sum(to_float(r.monto_total - r.monto_pagado) for r in cxc if r.estado != "PAGADA")
+    
+    movimientos = []
+    for r in cxc:
+        rate_val = to_float(r.tasa_cambio_bs) if r.tasa_cambio_bs else to_float(tasa)
+        debit_bs = to_float(r.monto_total) * rate_val
+        credit_bs = to_float(r.monto_pagado) * rate_val if r.monto_pagado > 0 else 0
+        debit_usd = to_float(r.monto_total)
+        credit_usd = to_float(r.monto_pagado)
+        
+        movimientos.append({
+            "date": r.fecha_emision.strftime("%d/%m/%Y"),
+            "rate": f"{rate_val:.4f}",
+            "doc": r.numero_documento,
+            "concept": "VENTA A CRÉDITO",
+            "debitBs": f"Bs. {debit_bs:,.2f}" if debit_bs > 0 else "-",
+            "creditBs": f"Bs. {credit_bs:,.2f}" if credit_bs > 0 else "-",
+            "debitUsd": f"${debit_usd:,.2f}",
+            "creditUsd": f"${credit_usd:,.2f}" if credit_usd > 0 else "-",
+            "balanceUsd": f"${(debit_usd - credit_usd):,.2f}",
+        })
+        
+    tasa_val = to_float(tasa)
+    saldo_ves = saldo * tasa_val
+    documentos_activos = len([r for r in cxc if r.estado != "PAGADA"])
+    
+    return {
+        "cliente": {"id": cli.id, "rif": cli.rif, "nombre": cli.nombre, "email": getattr(cli, 'email', 'No registrado')},
+        "kpis": [
+            {"label": "SALDO EXIGIBLE (USD)", "value": f"${saldo:,.2f}", "desc": "Total neto adeudado", "color": "text-slate-800"},
+            {"label": "EQUIVALENTE EN VES", "value": f"Bs. {saldo_ves:,.2f}", "desc": f"Equivalente a tasa oficial", "color": "text-amber-600"},
+            {"label": "DOCUMENTOS ACTIVOS", "value": str(documentos_activos), "desc": "Facturas a crédito vigentes", "color": "text-[#0b5156]"},
+            {"label": "TASA BCV DEL DÍA", "value": f"Bs. {tasa_val:.2f}", "desc": "Referencia oficial de cobro", "color": "text-slate-700"},
+        ],
+        "movimientos": movimientos,
+    }
