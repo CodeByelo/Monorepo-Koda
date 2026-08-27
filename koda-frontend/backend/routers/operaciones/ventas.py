@@ -15,16 +15,24 @@ from backend.models.erp_extended import (
     Cotizacion, CotizacionItem, OrdenVenta, RequisicionCompra, TransferenciaInventario,
     RetencionIVA, RetencionISLR, Vendedor, Almacen, RecepcionStock, DevolucionProveedor, LoteProducto,
     NotaCredito, AnticipoCliente, Cheque, FondoCajaChica, GastoCajaChica, StockPorAlmacen,
-    NotaEntrega, NotaEntregaItem
+    NotaEntrega, NotaEntregaItem, AuditoriaLog
 )
 from backend.schemas.operations import (
-    CotizacionCreate, CotizacionStatusUpdate, CompraCreate, RecepcionStockCreate, RecepcionStockResponse,
-    DevolucionProveedorCreate, NotaEntregaCreate, NotaEntregaEstadoUpdate
+    CotizacionCreate, CotizacionStatusUpdate, FacturarCotizacionRequest, CompraCreate,
+    RecepcionStockCreate, RecepcionStockResponse, DevolucionProveedorCreate,
+    NotaEntregaCreate, NotaEntregaEstadoUpdate
 )
 from backend.core.security import get_current_user, require_role
 from backend.models.core import TasaCambio
-from backend.utils.helpers import to_float, periodo_rango, ventas_periodo, tasa_actual, margen_bruto_pct, get_almacen_principal_id, verificar_periodo_abierto
+from backend.utils.helpers import (
+    to_float, periodo_rango, ventas_periodo, tasa_actual, margen_bruto_pct,
+    get_almacen_principal_id, verificar_periodo_abierto, resolver_almacen_venta,
+    descontar_stock_almacen
+)
 from backend.services.contabilidad import ContabilidadService
+from backend.services.facturacion_service import (
+    LineaFactura, procesar_emision_factura, resolver_precio_unitario
+)
 from backend.routers.operaciones._shared import _as_aware, ISLR_WITHHOLDING_TABLE, _resolver_islr_automatico, calcular_reserva_fiscal
 
 ventas_ext_router = APIRouter(prefix="/ventas", tags=["Ventas"], dependencies=[Depends(get_current_user)])
@@ -626,135 +634,138 @@ def actualizar_estado_cotizacion(
 @ventas_ext_router.post("/cotizaciones/{id}/facturar")
 def facturar_cotizacion(
     id: int,
+    body: Optional[FacturarCotizacionRequest] = None,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
-    from fastapi import HTTPException
-    from backend.models.fiscal import CorrelativoFiscal
-    
+    """
+    Factura una cotización en estado 'Aceptada', descontando inventario real
+    y delegando la emisión fiscal y contable en `procesar_emision_factura`.
+    """
+    tenant_id = current_user.tenant_id
+    req_body = body or FacturarCotizacionRequest()
+
     # 1. Buscar la cotización por ID y validar tenant_id
     cot = (
         db.query(Cotizacion)
-        .filter(Cotizacion.id == id, Cotizacion.tenant_id == current_user.tenant_id)
+        .filter(Cotizacion.id == id, Cotizacion.tenant_id == tenant_id)
         .first()
     )
     if not cot:
         raise HTTPException(status_code=404, detail="Cotización no encontrada")
-        
+
     # 2. Validar que el estado sea 'Aceptada'
     if cot.estado != "Aceptada":
         raise HTTPException(
             status_code=400,
             detail="Solo se pueden facturar cotizaciones en estado 'Aceptada'"
         )
-        
-    try:
-        # 3. Bloqueo secuencial y asignación del correlativo fiscal
-        correlativo = db.query(CorrelativoFiscal).filter(CorrelativoFiscal.tipo_documento == 'FACTURA').with_for_update().first()
-        if not correlativo:
-            correlativo = CorrelativoFiscal(tipo_documento='FACTURA', prefijo='FAC-', siguiente_numero=1)
-            db.add(correlativo)
-            db.flush()
-            
-        numero_factura_final = f"{correlativo.prefijo}{str(correlativo.siguiente_numero).zfill(8)}"
-        correlativo.siguiente_numero += 1
-        
-        # 4. Obtener tasa de cambio
-        tasa = Decimal(str(cot.tasa_cambio)) if cot.tasa_cambio else Decimal("1.0")
-        if tasa <= 0:
-            tasa = Decimal("1.0")
-            
-        # 5. Obtener producto genérico
-        producto_generico = db.query(Producto).filter(Producto.sku == "GEN-001").first()
-        if not producto_generico:
-            producto_generico = Producto(
-                sku="GEN-001",
-                nombre="Producto Genérico (Cotización)",
-                precio_usd=Decimal("0.00"),
-                costo_usd=Decimal("0.00"),
-                stock=Decimal("999999.00"),
-                es_exento=False
-            )
-            db.add(producto_generico)
-            db.flush()
-            
-        # 6. Procesar items y calcular subtotales en USD
-        detalles_para_guardar = []
-        subtotal_usd = Decimal("0.00")
-        
-        for item in cot.items:
-            # Intentar usar el producto_id del item, si existe
-            producto = None
-            if item.producto_id:
-                producto = db.query(Producto).filter(Producto.id == item.producto_id).first()
-            if not producto:
-                producto = producto_generico
-                
-            precio_unitario = Decimal(str(item.precio_unitario))
-            descuento_pct = Decimal(str(item.descuento_porcentaje))
-            precio_neto = precio_unitario * (Decimal("1.00") - descuento_pct / Decimal("100.00"))
-            
-            # Convertir a USD si la moneda es VES
-            if cot.moneda == "VES":
-                precio_neto_usd = precio_neto / tasa
-            else:
-                precio_neto_usd = precio_neto
-                
-            precio_neto_usd_rounded = precio_neto_usd.quantize(Decimal("0.01"))
-            subtotal_item_usd = precio_neto_usd_rounded * Decimal(str(item.cantidad))
-            subtotal_usd += subtotal_item_usd
-            
-            detalle = VentaDetalle(
-                producto_id=producto.id,
-                cantidad=Decimal(str(item.cantidad)),
-                precio_usd_capturado=precio_neto_usd_rounded
-            )
-            detalles_para_guardar.append(detalle)
-            
-        # 7. Calcular impuestos y total neto (16% IVA standard)
-        iva_usd = subtotal_usd * Decimal("0.16")
-        igtf_usd = Decimal("0.00")
-        total_usd = subtotal_usd + iva_usd
-        
-        subtotal_usd_rounded = subtotal_usd.quantize(Decimal("0.01"))
-        iva_usd_rounded = iva_usd.quantize(Decimal("0.01"))
-        total_usd_rounded = total_usd.quantize(Decimal("0.01"))
-        
-        # 8. Crear cabecera de la Venta
-        nueva_venta = Venta(
-            cliente_id=cot.cliente_id,
-            numero_factura=numero_factura_final,
-            fecha=datetime.now(timezone.utc),
-            subtotal_usd=subtotal_usd_rounded,
-            iva_usd=iva_usd_rounded,
-            igtf_usd=igtf_usd,
-            total_usd=total_usd_rounded,
-            metodo_pago="Transferencia",
-            tasa_cambio_bs=tasa,
-            estado="ACTIVA",
-            creado_por=current_user.id
+
+    # 3. Validar cliente vinculado
+    if not cot.cliente:
+        raise HTTPException(
+            status_code=400,
+            detail="La cotización no tiene un cliente vinculado. Debe vincular un cliente real antes de facturar."
         )
-        db.add(nueva_venta)
-        db.flush()
-        
-        # 9. Asociar detalles de venta
-        for detalle in detalles_para_guardar:
-            detalle.venta_id = nueva_venta.id
-            db.add(detalle)
-            
-        # 10. Actualizar el estado de la cotización original a 'Facturada'
+
+    # 4. Validar que tenga ítems y que cada ítem tenga producto_id real
+    if not cot.items:
+        raise HTTPException(
+            status_code=400,
+            detail="La cotización no tiene ítems para facturar."
+        )
+
+    for item in cot.items:
+        if not item.producto_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"La línea '{item.descripcion}' no tiene un producto vinculado. Debe vincular un producto real del catálogo antes de facturar."
+            )
+
+    try:
+        # 5. Resolver y bloquear productos del tenant
+        producto_ids = [item.producto_id for item in cot.items]
+        unique_producto_ids = list(set(producto_ids))
+
+        productos = db.query(Producto).filter(
+            Producto.id.in_(unique_producto_ids),
+            Producto.tenant_id == tenant_id
+        ).with_for_update().all()
+        productos_dict = {p.id: p for p in productos}
+
+        almacen_venta_id = resolver_almacen_venta(db, tenant_id)
+
+        lineas = []
+        for item in cot.items:
+            producto = productos_dict.get(item.producto_id)
+            if not producto:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Producto con ID {item.producto_id} no encontrado en el inventario de su empresa."
+                )
+
+            cantidad_item = Decimal(str(item.cantidad))
+            if producto.stock < cantidad_item:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Stock insuficiente para el producto '{producto.nombre}'. Disponible: {producto.stock}, Solicitado: {cantidad_item}"
+                )
+
+            producto.stock -= cantidad_item
+            descontar_stock_almacen(db, tenant_id, producto.id, almacen_venta_id, cantidad_item)
+
+            lineas.append(LineaFactura(
+                producto_id=producto.id,
+                cantidad=cantidad_item,
+                precio_unitario=resolver_precio_unitario(producto),
+                es_exento=bool(producto.es_exento),
+            ))
+
+        # 6. Delegar emisión atómica en facturacion_service
+        resultado = procesar_emision_factura(
+            db=db,
+            current_user=current_user,
+            cliente=cot.cliente,
+            lineas=lineas,
+            metodo_pago=req_body.metodo_pago,
+            moneda_documento=cot.moneda,
+            dias_credito=0,
+            vendedor_id=None,
+            almacen_id=almacen_venta_id,
+        )
+
+        # 7. Actualizar cotización y registrar auditoría
         cot.estado = "Facturada"
-        
+
+        db.add(AuditoriaLog(
+            tenant_id=tenant_id,
+            usuario=f"{current_user.email} (ID:{current_user.id})",
+            accion="VENTA_CREADA",
+            modulo="VENTAS",
+            detalle=(
+                f"Venta creada desde Cotización {cot.numero_cotizacion}: {resultado.numero_factura} | "
+                f"Cliente: {cot.cliente.nombre} ({cot.cliente.rif}) | "
+                f"Total: {cot.moneda or ''} {resultado.monto_total}"
+            ),
+        ))
+
         db.commit()
+        db.refresh(resultado.venta)
         db.refresh(cot)
-        
+
         return {
             "ok": True,
-            "numero_factura": numero_factura_final,
-            "venta_id": nueva_venta.id,
+            "numero_factura": resultado.numero_factura,
+            "venta_id": resultado.venta.id,
             "estado_cotizacion": cot.estado
         }
-        
+
+    except HTTPException as he:
+        db.rollback()
+        raise he
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         db.rollback()
         raise HTTPException(

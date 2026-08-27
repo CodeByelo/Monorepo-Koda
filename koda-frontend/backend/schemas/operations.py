@@ -205,6 +205,9 @@ class CotizacionCreate(BaseModel):
 class CotizacionStatusUpdate(BaseModel):
     estado: str = Field(..., min_length=1)
 
+class FacturarCotizacionRequest(BaseModel):
+    metodo_pago: str = Field(default="Transferencia", pattern="^(Efectivo|Divisa|Transferencia|PagoMovil)$")
+
 # ==========================================
 # ESQUEMAS PARA NOTAS DE ENTREGA (REMISIONES)
 # ==========================================
