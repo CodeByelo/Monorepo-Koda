@@ -17,7 +17,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
-from backend.core.database import get_db
+from backend.core.database import get_db, current_tenant_id_var
 from backend.core.security import get_current_user, require_role, verify_logistics_forward_key
 from backend.models.erp_extended import Vehiculo, Chofer, TurnoDespacho, RegistroMantenimiento, TurnoVentaAsociacion, TurnoGasto, LogisticaLedger, CuarentenaLogistica
 from backend.models.operations import Venta, VentaDetalle, Producto
@@ -31,7 +31,11 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 def _generar_numero_turno(db: Session) -> str:
     """Genera un número de turno secuencial: TRN-000001."""
-    last = db.query(TurnoDespacho).order_by(TurnoDespacho.id.desc()).first()
+    tenant_id = current_tenant_id_var.get()
+    query = db.query(TurnoDespacho)
+    if tenant_id:
+        query = query.filter(TurnoDespacho.tenant_id == tenant_id)
+    last = query.order_by(TurnoDespacho.id.desc()).first()
     next_id = (last.id + 1) if last else 1
     return f"TRN-{next_id:06d}"
 
@@ -298,7 +302,11 @@ def generar_pdf_hoja_ruta(turno: TurnoDespacho, db: Session) -> bytes:
 
 def registrar_evento_ledger(db: Session, turno_id: int, estado_anterior: Optional[str], estado_nuevo: str, usuario: str, motivo: Optional[str] = None):
     """Inserta un registro inmutable en el ledger de logística con hashing encadenado SHA-256."""
-    last = db.query(LogisticaLedger).order_by(LogisticaLedger.id.desc()).first()
+    tenant_id = current_tenant_id_var.get()
+    query = db.query(LogisticaLedger)
+    if tenant_id:
+        query = query.filter(LogisticaLedger.tenant_id == tenant_id)
+    last = query.order_by(LogisticaLedger.id.desc()).first()
     prev_hash = last.hash_seguridad if last else "0" * 64
     
     payload = f"{prev_hash}|{turno_id}|{estado_anterior or ''}|{estado_nuevo}|{usuario}|{motivo or ''}"

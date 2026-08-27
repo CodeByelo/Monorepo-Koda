@@ -396,7 +396,6 @@ app.include_router(payroll.router, prefix="/api")
 app.include_router(facturacion.router)
 # Módulo Logística (Flota, Choferes, Turnos de Despacho, Mantenimiento)
 app.include_router(logistica_router.router)
-app.include_router(logistica_router.router, prefix="/logistica")
 # Búnker Forense — trazabilidad inmutable de entidades del sistema
 app.include_router(forense.router)
 # Telemetría Omniscience
