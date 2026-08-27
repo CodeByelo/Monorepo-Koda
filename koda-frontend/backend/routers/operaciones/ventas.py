@@ -1006,7 +1006,10 @@ def crear_cotizacion(
 
         # 2. Resolver el cliente por nombre (debe estar pre-registrado en el maestro)
         client_name = cot_in.client.strip()
-        c = db.query(Cliente).filter(Cliente.nombre.ilike(client_name)).first()
+        c = db.query(Cliente).filter(
+            Cliente.nombre.ilike(client_name),
+            Cliente.tenant_id == current_user.tenant_id
+        ).first()
         if not c:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1014,7 +1017,7 @@ def crear_cotizacion(
             )
         
         # 3. Generar número de cotización correlativo
-        count = db.query(Cotizacion).count()
+        count = db.query(Cotizacion).filter(Cotizacion.tenant_id == current_user.tenant_id).count()
         numero_cotizacion = f"COT-2026-{str(count + 1).zfill(4)}"
 
         # 3.5 Totales SIEMPRE derivados server-side desde los ítems reales,
@@ -1038,6 +1041,7 @@ def crear_cotizacion(
 
         # 4. Crear la cabecera de la cotización
         nueva_cot = Cotizacion(
+            tenant_id=current_user.tenant_id,
             numero_cotizacion=numero_cotizacion,
             cliente_id=c.id,
             fecha_emision=cot_in.emissionDate,

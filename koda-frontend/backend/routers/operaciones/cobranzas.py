@@ -47,8 +47,7 @@ def _sync_cxc_desde_ventas(db: Session, tenant_id):
             CuentaPorCobrar.tenant_id == tenant_id
         ).first()
         if not existe:
-            tasa = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
-            tasa_bs = tasa.valor_ves if tasa else Decimal("36.52")
+            tasa_bs = Decimal(str(tasa_actual(db, tenant_id)))
             try:
                 db.add(CuentaPorCobrar(
                     cliente_id=cli.id,
@@ -185,8 +184,7 @@ def antiguedad_saldos_detalle(db: Session = Depends(get_db), current_user = Depe
     ahora = datetime.now(timezone.utc)
     
     # Get current BCV rate
-    bcv_rate = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
-    tasa_actual = float(bcv_rate.valor_ves) if bcv_rate else 38.50
+    tasa_actual_bcv = float(tasa_actual(db, current_user.tenant_id))
     
     tramos = [
         {"l": "CORRIENTE", "v": 0.0, "c": "bg-emerald-500", "min": -9999, "max": 0},
@@ -219,11 +217,11 @@ def antiguedad_saldos_detalle(db: Session = Depends(get_db), current_user = Depe
         metodo = r.venta.metodo_pago if r.venta else "Transferencia"
         if metodo not in ["Divisa", "Efectivo"]:
             total_expuesto_usd += saldo_usd_origen
-            tasa_origen = float(r.tasa_cambio_bs) if r.tasa_cambio_bs else tasa_actual
+            tasa_origen = float(r.tasa_cambio_bs) if r.tasa_cambio_bs else tasa_actual_bcv
             
             # If current rate is higher, the original Bs amount buys less USD now
             monto_bs = saldo_usd_origen * tasa_origen
-            usd_hoy = monto_bs / tasa_actual if tasa_actual > 0 else saldo_usd_origen
+            usd_hoy = monto_bs / tasa_actual_bcv if tasa_actual_bcv > 0 else saldo_usd_origen
             perdida = saldo_usd_origen - usd_hoy
             
             if perdida > 0 or dias_mora > 0:
@@ -320,8 +318,7 @@ def flujo_proyectado(db: Session = Depends(get_db), current_user = Depends(get_c
     ahora = datetime.now(timezone.utc)
     
     # Get current BCV rate
-    bcv_rate = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
-    tasa_actual = float(bcv_rate.valor_ves) if bcv_rate else 38.50
+    tasa_actual_bcv = float(tasa_actual(db, current_user.tenant_id))
     
     # 3 buckets: 7 days, 15 days, 30 days
     buckets = [
@@ -355,7 +352,7 @@ def flujo_proyectado(db: Session = Depends(get_db), current_user = Depends(get_c
                 break
         
         # Add to table
-        tasa_origen = float(r.tasa_cambio_bs) if r.tasa_cambio_bs else tasa_actual
+        tasa_origen = float(r.tasa_cambio_bs) if r.tasa_cambio_bs else tasa_actual_bcv
         monto_bs = saldo_usd * tasa_origen
         
         # Only add relevant ones to table (e.g. <= 30 days)
@@ -377,7 +374,7 @@ def flujo_proyectado(db: Session = Depends(get_db), current_user = Depends(get_c
         })
         
     return {
-        "bcv": tasa_actual,
+        "bcv": tasa_actual_bcv,
         "buckets": formatted_buckets,
         "invoices": sorted(facturas_impacto, key=lambda x: (x["due"] != "Vencida", x["usd"]), reverse=True)
     }
@@ -621,8 +618,7 @@ def procesar_aplicacion(body: dict, db: Session = Depends(get_db), current_user 
 
 @cobranzas_router.get("/anticipos-data")
 def anticipos_data(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    bcv_rate = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
-    tasa_actual = float(bcv_rate.valor_ves) if bcv_rate else 38.50
+    tasa_actual_bcv = float(tasa_actual(db, current_user.tenant_id))
     
     clientes = [{"id": c.id, "nombre": c.nombre} for c in db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).all()]
     
@@ -635,7 +631,7 @@ def anticipos_data(db: Session = Depends(get_db), current_user = Depends(get_cur
     for ant in anticipos_db:
         cliente_nombre = ant.cliente.nombre if ant.cliente else "Desconocido"
         monto_usd = float(ant.monto_usd)
-        current_bs = monto_usd * tasa_actual
+        current_bs = monto_usd * tasa_actual_bcv
         
         protected_balances.append({
             "client": cliente_nombre,
@@ -644,7 +640,7 @@ def anticipos_data(db: Session = Depends(get_db), current_user = Depends(get_cur
         })
         
     return {
-        "bcv": tasa_actual,
+        "bcv": tasa_actual_bcv,
         "clientes": clientes,
         "balances": protected_balances
     }
@@ -654,7 +650,8 @@ def anticipos_data(db: Session = Depends(get_db), current_user = Depends(get_cur
 def crear_anticipo(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     cliente_id = body.get("cliente_id")
     monto_bs = float(body.get("monto_bs", 0))
-    tasa_bcv = float(body.get("tasa_bcv", 38.50))
+    tasa_def = float(tasa_actual(db, current_user.tenant_id))
+    tasa_bcv = float(body.get("tasa_bcv") or tasa_def)
     
     if not cliente_id or monto_bs <= 0 or tasa_bcv <= 0:
         raise HTTPException(status_code=400, detail="Datos de anticipo inválidos.")

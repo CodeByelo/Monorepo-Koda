@@ -44,7 +44,7 @@ from backend.routers import (
     auth, rates, sales, fiscal, contabilidad, inventory,
     hr as hr_router, productos, proveedores, audit, entidades, clientes,
     dashboard_ext, operaciones, admin_ext, extras_ext,
-    pagos, reportes, developer, developer_router, payroll, facturacion, telegram_api,
+    reportes, developer, developer_router, payroll, facturacion, telegram_api,
     forense, telemetry, bot_api, garantias, sso_bridge,
 )
 from backend.routers import logistica as logistica_router
@@ -386,7 +386,6 @@ app.include_router(operaciones.tasas_router)
 app.include_router(admin_ext.router)
 app.include_router(telegram_api.router)
 app.include_router(extras_ext.router)
-app.include_router(pagos.router)
 app.include_router(reportes.router)
 app.include_router(developer.router)
 app.include_router(developer_router.router)
@@ -396,7 +395,6 @@ app.include_router(payroll.router, prefix="/api")
 app.include_router(facturacion.router)
 # Módulo Logística (Flota, Choferes, Turnos de Despacho, Mantenimiento)
 app.include_router(logistica_router.router)
-app.include_router(logistica_router.router, prefix="/logistica")
 # Búnker Forense — trazabilidad inmutable de entidades del sistema
 app.include_router(forense.router)
 # Telemetría Omniscience

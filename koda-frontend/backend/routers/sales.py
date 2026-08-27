@@ -166,7 +166,7 @@ def obtener_reporte_ventas(
         func.sum(Venta.iva_usd).label("iva"),
         func.sum(Venta.igtf_usd).label("igtf"),
         func.sum(Venta.total_usd).label("total")
-    ).filter(Venta.estado == "ACTIVA").first()
+    ).filter(Venta.estado == "ACTIVA", Venta.tenant_id == current_user.tenant_id).first()
     
     # Manejar caso cuando no hay registros aún
     cantidad = resultado.cantidad or 0
