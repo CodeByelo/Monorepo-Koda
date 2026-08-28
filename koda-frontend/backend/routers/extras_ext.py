@@ -13,7 +13,8 @@ from backend.models.operations import Venta, Cliente, Producto, Proveedor
 from backend.models.core import TasaCambio, Profile
 from backend.models.hr import Empleado, Nomina
 from backend.models.accounting import AsientoContable, AsientoDetalle
-from backend.models.fiscal import INPCIndice
+from backend.models.fiscal import INPCIndice, CorrelativoFiscal
+from backend.utils.helpers import tasa_actual, to_float
 from backend.schemas.hr import PaginatedEmpleadoResponse
 from backend.schemas.accounting import PaginatedLibroDiarioResponse
 from backend.models.erp_extended import (
@@ -69,7 +70,12 @@ def principal_dashboard(db: Session = Depends(get_db), current_user: Profile = D
         AjusteInventario.estado == "APROBADO",
         AjusteInventario.tenant_id == current_user.tenant_id
     ).all()
-    egresos_7d = sum(to_float(getattr(aj, 'costo_total', None) or 0) for aj in compras_7d)
+    egresos_7d = 0.0
+    for aj in compras_7d:
+        if aj.cantidad < 0:
+            producto = db.query(Producto).filter(Producto.id == aj.producto_id).first()
+            if producto:
+                egresos_7d += to_float(abs(aj.cantidad)) * to_float(producto.costo_usd)
 
     # ── Alertas reales ────────────────────────────────────────────────────────
     criticos = db.query(Producto).filter(
@@ -266,11 +272,33 @@ def crear_nota_credito(payload: NotaCreditoCreate, db: Session = Depends(get_db)
                     ),
                 )
 
-        cant_notas = db.query(NotaCredito).filter(NotaCredito.tenant_id == current_user.tenant_id).count()
         tipo_str = payload.tipo.upper() if payload.tipo else "CREDITO"
-        # Determinar prefijo según tipo de nota
-        prefijo = "ND" if "DEBIT" in tipo_str else "NC"
-        nuevo_numero = f"{prefijo}-{str(cant_notas + 1).zfill(8)}"
+        is_debito = "DEBIT" in tipo_str
+        tipo_doc_nc = "NOTA_DEBITO" if is_debito else "NOTA_CREDITO"
+        prefijo_nc = "ND-" if is_debito else "NC-"
+
+        correlativo = (
+            db.query(CorrelativoFiscal)
+            .filter(
+                CorrelativoFiscal.tipo_documento == tipo_doc_nc,
+                CorrelativoFiscal.tenant_id == current_user.tenant_id,
+            )
+            .with_for_update()
+            .first()
+        )
+        if not correlativo:
+            correlativo = CorrelativoFiscal(
+                tipo_documento=tipo_doc_nc,
+                prefijo=prefijo_nc,
+                siguiente_numero=1,
+                tenant_id=current_user.tenant_id,
+            )
+            db.add(correlativo)
+            db.flush()
+
+        numero_seq = correlativo.siguiente_numero
+        correlativo.siguiente_numero += 1
+        nuevo_numero = f"{correlativo.prefijo}{str(numero_seq).zfill(8)}"
 
         tasa_bs = Decimal(str(tasa_actual(db, current_user.tenant_id)))
         nota = NotaCredito(
@@ -775,8 +803,28 @@ def crear_vendedor(
     # Generar código automático si no se proporcionó
     codigo = (body.codigo or "").strip().upper()
     if not codigo:
-        count = db.query(Vendedor).filter(Vendedor.tenant_id == tenant_id).count()
-        codigo = f"VEN-{str(count + 1).zfill(3)}"
+        correlativo = (
+            db.query(CorrelativoFiscal)
+            .filter(
+                CorrelativoFiscal.tipo_documento == "VENDEDOR",
+                CorrelativoFiscal.tenant_id == tenant_id,
+            )
+            .with_for_update()
+            .first()
+        )
+        if not correlativo:
+            correlativo = CorrelativoFiscal(
+                tipo_documento="VENDEDOR",
+                prefijo="VEN-",
+                siguiente_numero=1,
+                tenant_id=tenant_id,
+            )
+            db.add(correlativo)
+            db.flush()
+
+        numero_seq = correlativo.siguiente_numero
+        correlativo.siguiente_numero += 1
+        codigo = f"{correlativo.prefijo}{str(numero_seq).zfill(3)}"
 
     # Validar duplicados de código en el tenant
     existe = db.query(Vendedor).filter(
@@ -851,9 +899,10 @@ def obtener_facturas_vendedor(
         cxc = v.cuenta_por_cobrar
         estado_pago = "PAGADO"
         if cxc:
-            if cxc.saldo_pendiente_usd > 0 and cxc.saldo_pendiente_usd < cxc.monto_total_usd:
+            saldo_pendiente = cxc.monto_total_usd - cxc.monto_pagado_usd
+            if saldo_pendiente > 0 and saldo_pendiente < cxc.monto_total_usd:
                 estado_pago = "PARCIAL"
-            elif cxc.saldo_pendiente_usd > 0:
+            elif saldo_pendiente > 0:
                 estado_pago = "PENDIENTE"
 
         resultado.append({
@@ -861,7 +910,7 @@ def obtener_facturas_vendedor(
             "numero_factura": v.numero_factura,
             "fecha": v.fecha.strftime("%d/%m/%Y") if v.fecha else "-",
             "cliente_nombre": v.cliente.nombre if v.cliente else "Cliente General",
-            "cliente_rif": v.cliente.rif_cedula if v.cliente else "-",
+            "cliente_rif": getattr(v.cliente, "rif_cedula", getattr(v.cliente, "rif", "-")) if v.cliente else "-",
             "monto_total_usd": float(v.total_usd or 0),
             "metodo_pago": v.metodo_pago,
             "estado": v.estado,
