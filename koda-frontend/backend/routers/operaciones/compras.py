@@ -23,6 +23,7 @@ from backend.schemas.operations import (
 )
 from backend.core.security import get_current_user, require_role
 from backend.models.core import TasaCambio
+from backend.models.fiscal import CorrelativoFiscal
 from backend.utils.helpers import to_float, periodo_rango, ventas_periodo, tasa_actual, margen_bruto_pct, get_almacen_principal_id, verificar_periodo_abierto
 from backend.services.contabilidad import ContabilidadService
 from backend.routers.operaciones._shared import _as_aware, ISLR_WITHHOLDING_TABLE, _resolver_islr_automatico, calcular_reserva_fiscal
@@ -241,9 +242,29 @@ class RequisicionCreate(BaseModel):
 @compras_router.post("/requisiciones", status_code=status.HTTP_201_CREATED)
 def create_requisicion(req: RequisicionCreate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     try:
-        # Generar número secuencial (REQ-00000000)
-        max_id = db.query(func.max(RequisicionCompra.id)).filter(RequisicionCompra.tenant_id == current_user.tenant_id).scalar() or 0
-        new_numero = f"REQ-{(max_id + 1):08d}"
+        # Generar número secuencial atómico (REQ-00000001)
+        correlativo = (
+            db.query(CorrelativoFiscal)
+            .filter(
+                CorrelativoFiscal.tipo_documento == "REQUISICION_COMPRA",
+                CorrelativoFiscal.tenant_id == current_user.tenant_id,
+            )
+            .with_for_update()
+            .first()
+        )
+        if not correlativo:
+            correlativo = CorrelativoFiscal(
+                tipo_documento="REQUISICION_COMPRA",
+                prefijo="REQ-",
+                siguiente_numero=1,
+                tenant_id=current_user.tenant_id,
+            )
+            db.add(correlativo)
+            db.flush()
+
+        numero_seq = correlativo.siguiente_numero
+        correlativo.siguiente_numero += 1
+        new_numero = f"{correlativo.prefijo}{str(numero_seq).zfill(8)}"
         
         # Get tasa actual
         tasa = tasa_actual(db, current_user.tenant_id)
@@ -266,6 +287,9 @@ def create_requisicion(req: RequisicionCreate, db: Session = Depends(get_db), cu
         db.commit()
         db.refresh(db_req)
         return {"ok": True, "id": db_req.id, "numero": db_req.numero}
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -365,7 +389,17 @@ def procesar_recepcion(
         # Almacén que recibe la mercancía: el indicado explícitamente, o el
         # almacén "principal" del tenant como fallback para no dejar
         # StockPorAlmacen sin actualizar.
-        almacen_id = req.almacen_id or get_almacen_principal_id(db, current_user.tenant_id)
+        if req.almacen_id:
+            alm = db.query(Almacen).filter(
+                Almacen.id == req.almacen_id,
+                Almacen.tenant_id == current_user.tenant_id
+            ).first()
+            if not alm:
+                raise HTTPException(status_code=404, detail="Almacén no encontrado o no pertenece a la empresa.")
+            almacen_id = alm.id
+        else:
+            almacen_id = get_almacen_principal_id(db, current_user.tenant_id)
+
         if not almacen_id:
             raise HTTPException(
                 status_code=400,
@@ -408,9 +442,29 @@ def procesar_recepcion(
             )
             db.add(destino_stock)
 
-        # Crear Hoja de Recepción
-        count = db.query(RecepcionStock).filter(RecepcionStock.tenant_id == current_user.tenant_id).count() + 1
-        hoja_id = f"REC-{count:04d}"
+        # Crear Hoja de Recepción con CorrelativoFiscal atómico
+        correlativo = (
+            db.query(CorrelativoFiscal)
+            .filter(
+                CorrelativoFiscal.tipo_documento == "RECEPCION_STOCK",
+                CorrelativoFiscal.tenant_id == current_user.tenant_id,
+            )
+            .with_for_update()
+            .first()
+        )
+        if not correlativo:
+            correlativo = CorrelativoFiscal(
+                tipo_documento="RECEPCION_STOCK",
+                prefijo="REC-",
+                siguiente_numero=1,
+                tenant_id=current_user.tenant_id,
+            )
+            db.add(correlativo)
+            db.flush()
+
+        numero_seq = correlativo.siguiente_numero
+        correlativo.siguiente_numero += 1
+        hoja_id = f"{correlativo.prefijo}{str(numero_seq).zfill(4)}"
 
         nueva_recepcion = RecepcionStock(
             hoja_id=hoja_id,
@@ -490,6 +544,15 @@ def crear_devolucion(
         if not prov:
             raise HTTPException(status_code=404, detail="Proveedor no encontrado")
 
+        # Validar factura_id si fue informada
+        if dev_in.factura_id is not None:
+            factura = db.query(Compra).filter(
+                Compra.id == dev_in.factura_id,
+                Compra.tenant_id == current_user.tenant_id
+            ).first()
+            if not factura:
+                raise HTTPException(status_code=404, detail="Factura de compra no encontrada o no pertenece a la empresa.")
+
         # Si se indica producto/cantidad, la devolución sí representa una
         # salida física de mercancía: se bloquea la fila del producto (mismo
         # patrón que aprobar_ajuste/procesar_recepcion) y se descuenta el
@@ -507,8 +570,29 @@ def crear_devolucion(
             if producto.stock - dev_in.cantidad < 0:
                 raise HTTPException(status_code=400, detail="La devolución dejaría el stock del producto en negativo.")
 
-        count = db.query(DevolucionProveedor).filter(DevolucionProveedor.tenant_id == current_user.tenant_id).count() + 1
-        numero = f"DEV-{count:04d}"
+        # CorrelativoFiscal atómico para Devolución a Proveedor
+        correlativo = (
+            db.query(CorrelativoFiscal)
+            .filter(
+                CorrelativoFiscal.tipo_documento == "DEVOLUCION_PROVEEDOR",
+                CorrelativoFiscal.tenant_id == current_user.tenant_id,
+            )
+            .with_for_update()
+            .first()
+        )
+        if not correlativo:
+            correlativo = CorrelativoFiscal(
+                tipo_documento="DEVOLUCION_PROVEEDOR",
+                prefijo="DEV-",
+                siguiente_numero=1,
+                tenant_id=current_user.tenant_id,
+            )
+            db.add(correlativo)
+            db.flush()
+
+        numero_seq = correlativo.siguiente_numero
+        correlativo.siguiente_numero += 1
+        numero = f"{correlativo.prefijo}{str(numero_seq).zfill(4)}"
 
         db_dev = DevolucionProveedor(
             numero_devolucion=numero,
@@ -529,6 +613,9 @@ def crear_devolucion(
 
         db.commit()
         return {"ok": True, "numero_devolucion": numero}
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
