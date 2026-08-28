@@ -413,9 +413,10 @@ def reporte_ventas(periodo: str = None, db: Session = Depends(get_db), current_u
         
         # Obtener tasa BCV histórica para el gráfico
         tasa_mes = db.query(TasaCambio.valor_ves).filter(
+            (TasaCambio.tenant_id == current_user.tenant_id) | (TasaCambio.tenant_id.is_(None)),
             TasaCambio.fecha < fin_temp
         ).order_by(TasaCambio.fecha.desc()).first()
-        tasa_val = float(tasa_mes[0]) if tasa_mes else 36.52
+        tasa_val = float(tasa_mes[0]) if tasa_mes else tasa_actual(db, current_user.tenant_id)
         
         chart_data.append({
             "month": meses_es[m_temp - 1],
@@ -617,8 +618,7 @@ def reporte_antiguedad(db: Session = Depends(get_db), current_user = Depends(get
     from collections import defaultdict
     
     ahora = datetime.now(timezone.utc)
-    bcv_rate = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
-    tasa_actual = float(bcv_rate.valor_ves) if bcv_rate else 36.52
+    tasa_val = tasa_actual(db, current_user.tenant_id)
     
     cxc_list = db.query(CuentaPorCobrar).filter(
         CuentaPorCobrar.tenant_id == current_user.tenant_id,
@@ -652,9 +652,9 @@ def reporte_antiguedad(db: Session = Depends(get_db), current_user = Depends(get
         metodo = c.venta.metodo_pago if c.venta else "Transferencia"
         perdida_c = 0.0
         if metodo not in ["Divisa", "Efectivo"]:
-            tasa_orig = float(c.tasa_cambio_bs) if c.tasa_cambio_bs else tasa_actual
+            tasa_orig = float(c.tasa_cambio_bs) if c.tasa_cambio_bs else tasa_val
             monto_bs = saldo * tasa_orig
-            usd_hoy = monto_bs / tasa_actual if tasa_actual > 0 else saldo
+            usd_hoy = monto_bs / tasa_val if tasa_val > 0 else saldo
             perdida_c = max(0.0, saldo - usd_hoy)
             total_perdida += perdida_c
             
@@ -757,7 +757,7 @@ def reporte_antiguedad(db: Session = Depends(get_db), current_user = Depends(get
             "days0_30": f"${data_c['days0_30']:,.2f}",
             "days31_60": f"${data_c['days31_60']:,.2f}",
             "daysPlus60": f"${data_c['daysPlus60']:,.2f}",
-            "loss": f"Bs. {(data_c['loss'] * tasa_actual):,.2f}",
+            "loss": f"Bs. {(data_c['loss'] * tasa_val):,.2f}",
             "risk": risk,
             "riskColor": risk_color
         })
@@ -781,8 +781,7 @@ def reporte_diferencial(db: Session = Depends(get_db), current_user = Depends(ge
     from backend.models.erp_extended import CuentaPorCobrar, CuentaPorPagar
     from datetime import datetime, timezone
     
-    bcv_rate = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
-    tasa_actual = float(bcv_rate.valor_ves) if bcv_rate else 36.52
+    tasa_val = tasa_actual(db, current_user.tenant_id)
     
     cxc = db.query(CuentaPorCobrar).filter(
         CuentaPorCobrar.tenant_id == current_user.tenant_id,
@@ -801,7 +800,7 @@ def reporte_diferencial(db: Session = Depends(get_db), current_user = Depends(ge
     for c in cxc:
         saldo_usd = float(c.monto_pagado_usd)
         tasa_issue = float(c.tasa_cambio_bs)
-        diff_tasa = tasa_actual - tasa_issue
+        diff_tasa = tasa_val - tasa_issue
         diff_bs = saldo_usd * diff_tasa
         
         cli_name = c.cliente.nombre if c.cliente else "Cliente General"
@@ -819,10 +818,10 @@ def reporte_diferencial(db: Session = Depends(get_db), current_user = Depends(ge
             "id": c.numero_documento,
             "client": cli_name,
             "rateIssue": f"{tasa_issue:.2f}",
-            "rateCollection": f"{tasa_actual:.2f}",
+            "rateCollection": f"{tasa_val:.2f}",
             "amountUsd": f"${saldo_usd:,.2f}",
             "amountBsIssue": f"Bs. {(saldo_usd * tasa_issue):,.2f}",
-            "amountBsCollection": f"Bs. {(saldo_usd * tasa_actual):,.2f}",
+            "amountBsCollection": f"Bs. {(saldo_usd * tasa_val):,.2f}",
             "diff": diff_str,
             "diffType": diff_type
         })
@@ -830,7 +829,7 @@ def reporte_diferencial(db: Session = Depends(get_db), current_user = Depends(ge
     for p in cxp:
         saldo_usd = float(p.monto_pagado_usd)
         tasa_issue = float(p.tasa_cambio_bs)
-        diff_tasa = tasa_actual - tasa_issue
+        diff_tasa = tasa_val - tasa_issue
         diff_bs = saldo_usd * diff_tasa
         
         prov_name = p.proveedor.nombre if p.proveedor else "Proveedor General"
@@ -848,16 +847,16 @@ def reporte_diferencial(db: Session = Depends(get_db), current_user = Depends(ge
             "id": p.numero_documento,
             "client": prov_name,
             "rateIssue": f"{tasa_issue:.2f}",
-            "rateCollection": f"{tasa_actual:.2f}",
+            "rateCollection": f"{tasa_val:.2f}",
             "amountUsd": f"${saldo_usd:,.2f}",
             "amountBsIssue": f"Bs. {(saldo_usd * tasa_issue):,.2f}",
-            "amountBsCollection": f"Bs. {(saldo_usd * tasa_actual):,.2f}",
+            "amountBsCollection": f"Bs. {(saldo_usd * tasa_val):,.2f}",
             "diff": diff_str,
             "diffType": diff_type
         })
 
     neto_ves = ganancia_ves - perdida_ves
-    neto_usd = neto_ves / tasa_actual if tasa_actual > 0 else 0.0
+    neto_usd = neto_ves / tasa_val if tasa_val > 0 else 0.0
 
     metrics = [
         {
@@ -1653,7 +1652,13 @@ def exportar_query_builder(fields: str, periodo: str = None, db: Session = Depen
     headers = [k.upper() for k in field_keys]
     writer.writerow(headers)
     
-    query = db.query(VentaDetalle).join(Venta).filter(
+    from sqlalchemy.orm import joinedload
+
+    query = db.query(VentaDetalle).join(Venta).options(
+        joinedload(VentaDetalle.venta).joinedload(Venta.cliente),
+        joinedload(VentaDetalle.venta).joinedload(Venta.vendedor),
+        joinedload(VentaDetalle.producto)
+    ).filter(
         Venta.tenant_id == current_user.tenant_id,
         Venta.estado == "ACTIVA"
     )
