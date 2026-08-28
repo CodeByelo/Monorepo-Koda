@@ -24,6 +24,7 @@ from backend.schemas.operations import (
 )
 from backend.core.security import get_current_user, require_role
 from backend.models.core import TasaCambio
+from backend.models.fiscal import CorrelativoFiscal
 from backend.utils.helpers import (
     to_float, periodo_rango, ventas_periodo, tasa_actual, margen_bruto_pct,
     get_almacen_principal_id, verificar_periodo_abierto, resolver_almacen_venta,
@@ -1001,8 +1002,7 @@ def crear_cotizacion(
     import uuid
     try:
         # 1. Obtener la tasa de cambio activa
-        tasa_activa = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
-        tasa_val = Decimal(str(tasa_activa.valor_ves)) if tasa_activa else Decimal("36.52")
+        tasa_val = Decimal(str(tasa_actual(db, current_user.tenant_id)))
 
         # 2. Resolver el cliente por nombre (debe estar pre-registrado en el maestro)
         client_name = cot_in.client.strip()
@@ -1016,9 +1016,29 @@ def crear_cotizacion(
                 detail=f"El cliente '{client_name}' no existe en el sistema. Por favor regístrelo en el maestro de clientes con su RIF correspondiente antes de cotizar."
             )
         
-        # 3. Generar número de cotización correlativo
-        count = db.query(Cotizacion).filter(Cotizacion.tenant_id == current_user.tenant_id).count()
-        numero_cotizacion = f"COT-2026-{str(count + 1).zfill(4)}"
+        # 3. Generar número de cotización correlativo atómico y aislado por tenant
+        correlativo = (
+            db.query(CorrelativoFiscal)
+            .filter(
+                CorrelativoFiscal.tipo_documento == "COTIZACION",
+                CorrelativoFiscal.tenant_id == current_user.tenant_id,
+            )
+            .with_for_update()
+            .first()
+        )
+        if not correlativo:
+            correlativo = CorrelativoFiscal(
+                tipo_documento="COTIZACION",
+                prefijo="COT-2026-",
+                siguiente_numero=1,
+                tenant_id=current_user.tenant_id,
+            )
+            db.add(correlativo)
+            db.flush()
+
+        numero_seq = correlativo.siguiente_numero
+        correlativo.siguiente_numero += 1
+        numero_cotizacion = f"{correlativo.prefijo}{str(numero_seq).zfill(4)}"
 
         # 3.5 Totales SIEMPRE derivados server-side desde los ítems reales,
         # nunca de `cot_in.subtotal/discountTotal/totalFinal` (el cliente
@@ -1130,8 +1150,32 @@ def convertir_cotizacion_a_orden(
             total_usd += precio_neto * Decimal(str(item.cantidad))
         total_usd = total_usd.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-        count = db.query(OrdenVenta).filter(OrdenVenta.tenant_id == current_user.tenant_id).count()
-        numero_orden = f"OV-{datetime.now(timezone.utc).year}-{str(count + 1).zfill(4)}"
+        current_year = datetime.now(timezone.utc).year
+        tipo_doc_ov = f"ORDEN_VENTA_{current_year}"
+        prefijo_ov = f"OV-{current_year}-"
+        
+        correlativo = (
+            db.query(CorrelativoFiscal)
+            .filter(
+                CorrelativoFiscal.tipo_documento == tipo_doc_ov,
+                CorrelativoFiscal.tenant_id == current_user.tenant_id,
+            )
+            .with_for_update()
+            .first()
+        )
+        if not correlativo:
+            correlativo = CorrelativoFiscal(
+                tipo_documento=tipo_doc_ov,
+                prefijo=prefijo_ov,
+                siguiente_numero=1,
+                tenant_id=current_user.tenant_id,
+            )
+            db.add(correlativo)
+            db.flush()
+
+        numero_seq = correlativo.siguiente_numero
+        correlativo.siguiente_numero += 1
+        numero_orden = f"{correlativo.prefijo}{str(numero_seq).zfill(4)}"
 
         nueva_orden = OrdenVenta(
             tenant_id=current_user.tenant_id,
@@ -1259,8 +1303,32 @@ def crear_nota_entrega(
         if not orden:
             raise HTTPException(status_code=404, detail="Orden de venta de origen no encontrada.")
 
-    count = db.query(NotaEntrega).filter(NotaEntrega.tenant_id == tenant_id).count()
-    numero_nota = f"NE-{datetime.now(timezone.utc).year}-{str(count + 1).zfill(4)}"
+    current_year = datetime.now(timezone.utc).year
+    tipo_doc_ne = f"NOTA_ENTREGA_{current_year}"
+    prefijo_ne = f"NE-{current_year}-"
+
+    correlativo = (
+        db.query(CorrelativoFiscal)
+        .filter(
+            CorrelativoFiscal.tipo_documento == tipo_doc_ne,
+            CorrelativoFiscal.tenant_id == tenant_id,
+        )
+        .with_for_update()
+        .first()
+    )
+    if not correlativo:
+        correlativo = CorrelativoFiscal(
+            tipo_documento=tipo_doc_ne,
+            prefijo=prefijo_ne,
+            siguiente_numero=1,
+            tenant_id=tenant_id,
+        )
+        db.add(correlativo)
+        db.flush()
+
+    numero_seq = correlativo.siguiente_numero
+    correlativo.siguiente_numero += 1
+    numero_nota = f"{correlativo.prefijo}{str(numero_seq).zfill(4)}"
 
     custom_fields_data = [cf.model_dump() for cf in nota_in.logistics.customFields]
 
@@ -1361,8 +1429,32 @@ def generar_nota_entrega_desde_venta(
 
     cliente_nombre = venta.cliente.nombre if venta.cliente else "CLIENTE GENERAL"
 
-    count = db.query(NotaEntrega).filter(NotaEntrega.tenant_id == current_user.tenant_id).count()
-    numero_nota = f"NE-{datetime.now(timezone.utc).year}-{str(count + 1).zfill(4)}"
+    current_year = datetime.now(timezone.utc).year
+    tipo_doc_ne = f"NOTA_ENTREGA_{current_year}"
+    prefijo_ne = f"NE-{current_year}-"
+
+    correlativo = (
+        db.query(CorrelativoFiscal)
+        .filter(
+            CorrelativoFiscal.tipo_documento == tipo_doc_ne,
+            CorrelativoFiscal.tenant_id == current_user.tenant_id,
+        )
+        .with_for_update()
+        .first()
+    )
+    if not correlativo:
+        correlativo = CorrelativoFiscal(
+            tipo_documento=tipo_doc_ne,
+            prefijo=prefijo_ne,
+            siguiente_numero=1,
+            tenant_id=current_user.tenant_id,
+        )
+        db.add(correlativo)
+        db.flush()
+
+    numero_seq = correlativo.siguiente_numero
+    correlativo.siguiente_numero += 1
+    numero_nota = f"{correlativo.prefijo}{str(numero_seq).zfill(4)}"
 
     nueva_nota = NotaEntrega(
         tenant_id=current_user.tenant_id,
