@@ -421,13 +421,21 @@ def aprobar_orden(body: AprobarOrdenRequest, db: Session = Depends(get_db), curr
         cxp.monto_pagado_usd = cxp.monto_total_usd
         cxp.estado = "PAGADA"
 
-        banco.saldo_actual_usd -= monto_restante
+        tasa_val = Decimal(str(tasa_actual(db, current_user.tenant_id)))
+        if float(cxp.tasa_cambio_bs) == 1.0:
+            monto_debitar_usd = (monto_restante / tasa_val).quantize(Decimal("0.01"))
+            tasa_mov = tasa_val
+        else:
+            monto_debitar_usd = monto_restante
+            tasa_mov = cxp.tasa_cambio_bs
+
+        banco.saldo_actual_usd -= monto_debitar_usd
 
         mov = MovimientoBancario(
             cuenta_id=banco.id,
             concepto=f"Pago Orden {orden_id_str} | Prov: {cxp.proveedor.nombre if cxp.proveedor else 'N/A'} ({body.metodo})",
-            monto_usd=monto_restante,
-            tasa_cambio_bs=cxp.tasa_cambio_bs,
+            monto_usd=monto_debitar_usd,
+            tasa_cambio_bs=tasa_mov,
             tipo="EGRESO",
             referencia=body.referencia,
             estado="ACTIVO",
@@ -437,8 +445,8 @@ def aprobar_orden(body: AprobarOrdenRequest, db: Session = Depends(get_db), curr
 
         # Generar Asiento Contable Automático de Pago a Proveedor
         ContabilidadService.generar_asiento_pago_proveedor(
-            monto=monto_restante,
-            tasa_cambio_bs=cxp.tasa_cambio_bs,
+            monto=monto_debitar_usd,
+            tasa_cambio_bs=tasa_mov,
             referencia=body.referencia or orden_id_str,
             concepto=f"Pago Orden {orden_id_str} - Proveedor {cxp.proveedor.nombre if cxp.proveedor else 'N/A'}",
             fecha=datetime.now(timezone.utc),
@@ -491,6 +499,7 @@ def crear_cuenta_por_pagar_manual(body: CuentaPorPagarManualRequest, db: Session
 
 @pagos_router.get("/programacion")
 def programacion_pagos(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    tasa_val = float(tasa_actual(db, current_user.tenant_id))
     hoy = datetime.now(timezone.utc).date()
     rows = db.query(CuentaPorPagar).filter(
         CuentaPorPagar.estado != "PAGADA",
@@ -498,14 +507,20 @@ def programacion_pagos(db: Session = Depends(get_db), current_user = Depends(get
     ).order_by(CuentaPorPagar.fecha_vencimiento).all()
     buckets = {"vencido_hoy": [], "esta_semana": [], "proxima_semana": [], "fin_mes": []}
 
+    total_deuda_converted_usd = 0.0
+
     for r in rows:
         saldo = to_float(r.monto_total - r.monto_pagado)
+        tasa_cxp = float(r.tasa_cambio_bs)
+        saldo_converted = saldo / tasa_val if tasa_cxp == 1.0 else saldo
+        total_deuda_converted_usd += saldo_converted
+
         dias = (r.fecha_vencimiento.date() - hoy).days
         item = {
             "id": r.id,
             "title": r.proveedor.nombre if r.proveedor else r.numero_documento,
             "meta": f"{r.numero_documento} - vence {r.fecha_vencimiento.strftime('%d/%m/%Y')}",
-            "amount": f"${saldo:,.2f}",
+            "amount": f"${saldo_converted:,.2f}",
             "urgent": dias <= 0,
             "critical": dias <= 0,
             "tag": r.estado,
@@ -520,13 +535,9 @@ def programacion_pagos(db: Session = Depends(get_db), current_user = Depends(get
             buckets["fin_mes"].append(item)
 
     liquidez = db.query(func.sum(CuentaBancaria.saldo_actual_usd)).filter(CuentaBancaria.tenant_id == current_user.tenant_id).scalar() or 0
-    deuda_indexada = db.query(func.sum(CuentaPorPagar.monto_total_usd - CuentaPorPagar.monto_pagado_usd)).filter(
-        CuentaPorPagar.estado != "PAGADA",
-        CuentaPorPagar.tenant_id == current_user.tenant_id
-    ).scalar() or 0
     return {
         "liquidez_base": to_float(liquidez),
-        "deuda_indexada": to_float(deuda_indexada),
+        "deuda_indexada": total_deuda_converted_usd,
         "columnas": buckets,
     }
 
@@ -599,16 +610,21 @@ def procesar_lotes(body: dict, db: Session = Depends(get_db), current_user = Dep
         if not banco:
             raise HTTPException(status_code=400, detail="No hay una cuenta bancaria activa")
 
+        tasa_bcv = Decimal(str(tasa_actual(db, current_user.tenant_id)))
+
         total_debitar_usd = Decimal("0.00")
         for c in cxps:
             saldo_usd = c.monto_total_usd - c.monto_pagado_usd
             c.monto_pagado_usd = c.monto_total_usd
             c.estado = "PAGADA"
-            total_debitar_usd += saldo_usd
+            
+            if float(c.tasa_cambio_bs) == 1.0:
+                saldo_converted = (saldo_usd / tasa_bcv).quantize(Decimal("0.01"))
+            else:
+                saldo_converted = saldo_usd
+            total_debitar_usd += saldo_converted
 
         banco.saldo_actual_usd -= total_debitar_usd
-
-        tasa_bcv = Decimal(str(tasa_actual(db, current_user.tenant_id)))
 
         mov = MovimientoBancario(
             cuenta_id=banco.id,
