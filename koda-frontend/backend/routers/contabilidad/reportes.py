@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from decimal import Decimal
 from typing import Optional
@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from backend.core.database import get_db
 from backend.models.accounting import AsientoContable, AsientoDetalle, CierrePeriodo
 from backend.models.erp_extended import CuentaContable
-from backend.utils.helpers import ventas_periodo, to_float
+from backend.utils.helpers import ventas_periodo, to_float, tasa_actual
 from backend.core.security import get_current_user
 from .cuentas import _seed_cuentas
 
@@ -104,7 +104,9 @@ def monitor_forense(db: Session = Depends(get_db), current_user = Depends(get_cu
     # 2. Header vs Details Integrity
     header_detail_diff = Decimal("0.00")
     has_header_diff = False
-    asientos = db.query(AsientoContable).filter(AsientoContable.tenant_id == current_user.tenant_id).all()
+    asientos = db.query(AsientoContable).options(
+        joinedload(AsientoContable.detalles)
+    ).filter(AsientoContable.tenant_id == current_user.tenant_id).all()
     for a in asientos:
         det_debe = sum(d.debe_usd for d in a.detalles)
         det_haber = sum(d.haber_usd for d in a.detalles)
@@ -266,13 +268,9 @@ def balance_comprobacion(periodo: str, db: Session = Depends(get_db), current_us
     # Dynamic forensic audit cards for "Lectura del Balance"
     from backend.models.erp_extended import CuentaBancaria
     from backend.models.operations import Producto, Venta
-    from backend.models.core import TasaCambio
     
-    # Obtener tasa de cambio para los reportes (del tenant actual)
-    tasa_obj = db.query(TasaCambio).filter(
-        TasaCambio.tenant_id == current_user.tenant_id
-    ).order_by(TasaCambio.fecha.desc()).first()
-    tasa_bcv = Decimal(str(tasa_obj.valor_ves)) if tasa_obj else Decimal("36.52")
+    # Obtener tasa de cambio para los reportes (del tenant actual o global)
+    tasa_bcv = Decimal(str(tasa_actual(db, current_user.tenant_id)))
 
     diff_val = abs(total_debe - total_haber)
     
@@ -398,11 +396,7 @@ def balance_comprobacion(periodo: str, db: Session = Depends(get_db), current_us
 def balance_general(periodo: str, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     _seed_cuentas(db, current_user.tenant_id)
     
-    from backend.models.core import TasaCambio
-    tasa_obj = db.query(TasaCambio).filter(
-        TasaCambio.tenant_id == current_user.tenant_id
-    ).order_by(TasaCambio.fecha.desc()).first()
-    tasa = Decimal(str(tasa_obj.valor_ves)) if tasa_obj else Decimal("36.52")
+    tasa = Decimal(str(tasa_actual(db, current_user.tenant_id)))
     tasa_f = float(tasa)
 
     y, m = map(int, periodo.split("-"))
@@ -1155,9 +1149,9 @@ def flujo_caja(periodo: str, db: Session = Depends(get_db), current_user = Depen
         "inversion": inversion,
         "financiamiento": financiamiento,
         "neto": incremento_neto,
-        "operacion": operacion_list,
-        "inversion": inversion_list,
-        "financiamiento": financiamiento_list,
+        "operacion_detalle": operacion_list,
+        "inversion_detalle": inversion_list,
+        "financiamiento_detalle": financiamiento_list,
         "totales": {
             "operacion": net_operativo,
             "inversion": inversion,
