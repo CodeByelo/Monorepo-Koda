@@ -37,11 +37,9 @@ def _sync_cxc_desde_ventas(db: Session, tenant_id):
         Venta.metodo_pago.in_(["Transferencia", "PagoMovil"]),
         Venta.tenant_id == tenant_id
     ).all()
-    clientes = db.query(Cliente).filter(Cliente.tenant_id == tenant_id).all()
-    if not clientes:
-        return
-    cli = clientes[0]
     for v in ventas_credito:
+        if not v.cliente_id:
+            continue
         existe = db.query(CuentaPorCobrar).filter(
             CuentaPorCobrar.numero_documento == v.numero_factura,
             CuentaPorCobrar.tenant_id == tenant_id
@@ -50,7 +48,7 @@ def _sync_cxc_desde_ventas(db: Session, tenant_id):
             tasa_bs = Decimal(str(tasa_actual(db, tenant_id)))
             try:
                 db.add(CuentaPorCobrar(
-                    cliente_id=cli.id,
+                    cliente_id=v.cliente_id,
                     venta_id=v.id,
                     numero_documento=v.numero_factura,
                     monto_total_usd=v.total,
@@ -579,7 +577,7 @@ def procesar_aplicacion(body: dict, db: Session = Depends(get_db), current_user 
                     cuenta_id=banco.id,
                     concepto=f"Cobro CxC {doc} ({m_type})",
                     monto_usd=m_amount,
-                    tasa_cambio_bs=cxc.tasa_cambio_bs if getattr(cxc, "tasa_cambio_bs", None) else Decimal("1.0"),
+                    tasa_cambio_bs=cxc.tasa_cambio_bs if getattr(cxc, "tasa_cambio_bs", None) else Decimal(str(tasa_actual(db, current_user.tenant_id))),
                     tipo="INGRESO",
                     referencia=m_ref,
                     estado="ACTIVO",
