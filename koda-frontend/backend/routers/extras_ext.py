@@ -1093,12 +1093,20 @@ def ejecutar_ajuste_inflacion(body: dict, db: Session = Depends(get_db), current
     if total_axi <= 0:
          raise HTTPException(status_code=400, detail="El monto del ajuste por inflación debe ser mayor a cero.")
          
+    tasa_val = tasa_actual(db, current_user.tenant_id)
+    if not tasa_val or tasa_val <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Configura primero una tasa de cambio BCV antes de ejecutar el ajuste por inflación."
+        )
+
     # Crear asiento contable de Ajuste por Inflación
     asiento = AsientoContable(
         concepto=f"Ajuste por Inflación de Inventario (DPC-10) - Período {periodo}",
         referencia=f"AXI-{periodo.replace('-', '')}",
         total_debe=total_axi,
         total_haber=total_axi,
+        tasa_cambio_bs=Decimal(str(tasa_val)),
         tenant_id=current_user.tenant_id,
         detalles=[
             AsientoDetalle(
@@ -1117,7 +1125,6 @@ def ejecutar_ajuste_inflacion(body: dict, db: Session = Depends(get_db), current
     )
     db.add(asiento)
     db.commit()
-    db.refresh(asiento)
     return {"ok": True, "asiento_id": asiento.id, "monto_ves": to_float(total_axi)}
 
 
