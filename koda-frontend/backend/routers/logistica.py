@@ -1094,10 +1094,13 @@ async def telegram_webhook(
                 if user:
                     user.telegram_chat_id = chat_id
                     # Si el usuario además es chofer registrado, actualizar su Chofer.telegram_chat_id
-                    chofer_perfil = db.query(Chofer).filter(
-                        Chofer.tenant_id == user.tenant_id,
-                        Chofer.nombre.ilike(f"%{user.nombre}%")
-                    ).first()
+                    chofer_perfil = None
+                    nombre_clean = user.nombre.strip() if user.nombre else ""
+                    if nombre_clean:
+                        chofer_perfil = db.query(Chofer).filter(
+                            Chofer.tenant_id == user.tenant_id,
+                            func.lower(Chofer.nombre) == nombre_clean.lower()
+                        ).first()
                     if chofer_perfil and not chofer_perfil.telegram_chat_id:
                         chofer_perfil.telegram_chat_id = chat_id
                         
@@ -1300,7 +1303,7 @@ async def telegram_webhook(
     if text_clean in ["entregado", "finalizado", "completado", "terminado", "entrega ok"]:
         estado_anterior = turno.estado
         turno.estado = "ENTREGADO"
-        turno.fecha_retorno = datetime.now()
+        turno.fecha_retorno = datetime.now(timezone.utc)
         
         # Liberar vehículo y chofer
         vehiculo = db.query(Vehiculo).filter(Vehiculo.id == turno.vehiculo_id).first()
@@ -1335,13 +1338,13 @@ async def telegram_webhook(
         
         url_file = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getFile"
         try:
-            res = requests.get(url_file, params={"file_id": file_id}, timeout=5.0)
+            res = await asyncio.to_thread(requests.get, url_file, params={"file_id": file_id}, timeout=5.0)
             if res.status_code == 200:
                 file_path = res.json().get("result", {}).get("file_path")
                 download_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
                 
                 # Descargar y guardar en local uploads
-                file_res = requests.get(download_url, timeout=10.0)
+                file_res = await asyncio.to_thread(requests.get, download_url, timeout=10.0)
                 if file_res.status_code == 200:
                     os.makedirs("uploads/logistica_pod", exist_ok=True)
                     local_filename = f"uploads/logistica_pod/turno_{turno.id}_{datetime.now().strftime('%H%M%S')}.jpg"
@@ -1359,7 +1362,7 @@ async def telegram_webhook(
                     # Cambiar estado del turno a ENTREGADO
                     estado_anterior = turno.estado
                     turno.estado = "ENTREGADO"
-                    turno.fecha_retorno = datetime.now()
+                    turno.fecha_retorno = datetime.now(timezone.utc)
                     
                     # Liberar vehículo y chofer
                     vehiculo = db.query(Vehiculo).filter(Vehiculo.id == turno.vehiculo_id).first()
@@ -1426,7 +1429,7 @@ def liquidar_gastos_turno(turno_id: int, data: TurnoLiquidar, db: Session = Depe
     estado_anterior = turno.estado
     if turno.estado in ["PROGRAMADO", "EN_RUTA"]:
         turno.estado = "ENTREGADO"
-        turno.fecha_retorno = datetime.now()
+        turno.fecha_retorno = datetime.now(timezone.utc)
         if vehiculo:
             vehiculo.estado = "DISPONIBLE"
         chofer = db.query(Chofer).filter(Chofer.id == turno.chofer_id, Chofer.tenant_id == current_user.tenant_id).first()
@@ -1802,7 +1805,7 @@ async def process_notification_jobs():
     from backend.core.database import SessionLocal
     db = SessionLocal()
     try:
-        jobs = db.query(NewNotificationJob).filter(NewNotificationJob.estado == "PENDING").all()
+        jobs = db.query(NewNotificationJob).filter(NewNotificationJob.estado == "PENDING").with_for_update(skip_locked=True).all()
         for job in jobs:
             job.estado = "PROCESSING"
             job.intentos += 1
