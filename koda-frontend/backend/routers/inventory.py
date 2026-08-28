@@ -12,7 +12,7 @@ from backend.models.accounting import AsientoContable, AsientoDetalle
 from backend.schemas.operations import AjusteInventarioCreate, AjusteInventarioResponse, KardexMovimientoResponse
 from backend.core.security import get_current_user, require_role
 from backend.utils.idempotency import require_idempotency
-from backend.utils.helpers import get_almacen_principal_id
+from backend.utils.helpers import get_almacen_principal_id, tasa_actual
 
 router = APIRouter(prefix="/inventario", tags=["Inventario y Almacén"])
 
@@ -101,12 +101,15 @@ def aprobar_ajuste(
         )
 
     # Extraer la tasa de cambio activa para valorar el asiento contable en Bolívares
-    tasa_activa = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
-    if not tasa_activa:
-        raise HTTPException(status_code=400, detail="No hay tasa de cambio registrada para valorar contablemente el ajuste.")
+    tasa_val = tasa_actual(db, current_user.tenant_id)
+    if not tasa_val or tasa_val <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Configura primero una tasa de cambio BCV antes de registrar el ajuste."
+        )
         
     # Cálculos de costo total con redondeo bancario perfecto
-    tasa_bs = Decimal(str(tasa_activa.valor_ves))
+    tasa_bs = Decimal(str(tasa_val))
     costo_unitario_bs = Decimal(str(producto.costo_usd)) * tasa_bs
     monto_total_bs = (costo_unitario_bs * abs(ajuste.cantidad)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
@@ -168,6 +171,7 @@ def aprobar_ajuste(
         referencia=movimiento.documento_referencia,
         total_debe=monto_total_bs,
         total_haber=monto_total_bs,
+        tasa_cambio_bs=Decimal(str(tasa_val)),
         detalles=[
             AsientoDetalle(
                 cuenta_codigo=cuenta_debe["codigo"], cuenta_nombre=cuenta_debe["nombre"],
