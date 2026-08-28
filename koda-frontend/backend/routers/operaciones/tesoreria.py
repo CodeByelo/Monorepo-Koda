@@ -493,7 +493,7 @@ def flujo_caja_tesoreria(db: Session = Depends(get_db), current_user = Depends(g
         })
     for r in cxp_rows:
         saldo = to_float(r.monto_total - r.monto_pagado)
-        vencida = r.fecha_vencimiento < datetime.now(timezone.utc)
+        vencida = _as_aware(r.fecha_vencimiento) < datetime.now(timezone.utc)
         proyecciones.append({
             "date": r.fecha_vencimiento.strftime("%d/%m/%Y"),
             "fecha": r.fecha_vencimiento.strftime("%d/%m/%Y"),
@@ -616,16 +616,18 @@ def caja_chica(db: Session = Depends(get_db), current_user = Depends(get_current
 
 @tesoreria_router.post("/caja-chica/movimiento")
 def movimiento_caja_chica(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    fondo_id_str = body.get("fondo_id", "")
+    fondo_id_str = str(body.get("fondo_id", "")).strip()
+    if not fondo_id_str:
+        raise HTTPException(status_code=400, detail="fondo_id inválido o faltante")
     try:
         fid = int(fondo_id_str.replace("FD-", ""))
-    except:
-        fid = 1
+    except Exception:
+        raise HTTPException(status_code=400, detail="fondo_id inválido o faltante")
 
     fondo = db.query(FondoCajaChica).filter(
         FondoCajaChica.id == fid,
         FondoCajaChica.tenant_id == current_user.tenant_id
-    ).first()
+    ).with_for_update().first()
     if not fondo:
         raise HTTPException(status_code=404, detail="Fondo de caja chica no encontrado")
 
@@ -1011,8 +1013,8 @@ def confirmar_transferencia(id: int, db: Session = Depends(get_db), current_user
         if trf.estado == "COMPLETADO":
             return {"ok": True, "message": "Ya completada"}
             
-        origen = db.query(CuentaBancaria).filter(CuentaBancaria.id == trf.cuenta_origen_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
-        destino = db.query(CuentaBancaria).filter(CuentaBancaria.id == trf.cuenta_destino_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
+        origen = db.query(CuentaBancaria).filter(CuentaBancaria.id == trf.cuenta_origen_id, CuentaBancaria.tenant_id == current_user.tenant_id).with_for_update().first()
+        destino = db.query(CuentaBancaria).filter(CuentaBancaria.id == trf.cuenta_destino_id, CuentaBancaria.tenant_id == current_user.tenant_id).with_for_update().first()
         
         if not origen or not destino:
             raise HTTPException(status_code=400, detail="Cuentas no encontradas")
@@ -1191,7 +1193,9 @@ def resumen_prestamos_uvc(db: Session = Depends(get_db), current_user = Depends(
     tasa_uvc_hoy = to_float(tasa_actual(db, current_user.tenant_id))
     tasas_recientes = (
         db.query(TasaCambio)
-        .filter(TasaCambio.tenant_id == current_user.tenant_id)
+        .filter(
+            (TasaCambio.tenant_id == current_user.tenant_id) | (TasaCambio.tenant_id.is_(None))
+        )
         .order_by(TasaCambio.fecha.desc())
         .limit(2)
         .all()
@@ -1377,12 +1381,12 @@ def resumen_inversiones(db: Session = Depends(get_db), current_user = Depends(ge
         total_gain_bs += interest_bs
         total_capital_bs += cap_bs
         
-        cap_usd = cap_bs / init_rate
+        cap_usd = cap_bs / init_rate if init_rate > 0 else 0.0
         final_usd = (cap_bs + interest_bs) / tasa_real
         real_result_usd = final_usd - cap_usd
         total_net_real_usd += real_result_usd
         
-        fx_effect_bs = cap_bs * (1 - (init_rate / tasa_real))
+        fx_effect_bs = cap_bs * (1 - (init_rate / tasa_real)) if tasa_real else 0.0
         
         placements_list.append({
             "id": p.id,
@@ -1420,6 +1424,8 @@ def registrar_inversion(body: dict, db: Session = Depends(get_db), current_user 
     capital_bs = float(body.get("capital_bs", 0.0))
     tasa_interes = float(body.get("tasa_interes_anual", 48.0))
     tasa_cambio = float(body.get("tasa_cambio_inicial", 42.15))
+    if tasa_cambio <= 0:
+        raise HTTPException(status_code=400, detail="La tasa de cambio inicial debe ser mayor a 0")
     
     nueva_inv = ColocacionInversion(
         nombre=nombre,
@@ -1450,7 +1456,7 @@ def importar_extracto_bancario(body: dict, db: Session = Depends(get_db), curren
     cuenta_id = body.get("cuenta_id")
     movs = body.get("movimientos", [])
 
-    cuenta = db.query(CuentaBancaria).filter(CuentaBancaria.id == cuenta_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
+    cuenta = db.query(CuentaBancaria).filter(CuentaBancaria.id == cuenta_id, CuentaBancaria.tenant_id == current_user.tenant_id).with_for_update().first()
     if not cuenta:
         return {"ok": False, "message": "Cuenta bancaria no encontrada"}
 
@@ -1476,9 +1482,9 @@ def importar_extracto_bancario(body: dict, db: Session = Depends(get_db), curren
         monto_val = float(m.get("monto", 0.0))
 
         try:
-            fecha_mov = datetime.strptime(fecha_str, "%Y-%m-%d") if "-" in fecha_str else datetime.now(timezone.utc)
+            fecha_mov = datetime.strptime(fecha_str, "%Y-%m-%d") if "-" in fecha_str else datetime.now()
         except Exception:
-            fecha_mov = datetime.now(timezone.utc)
+            fecha_mov = datetime.now()
 
         monto_usd = monto_val / tasa_cambio if tasa_cambio else 0.0
         tipo = "INGRESO" if monto_usd >= 0 else "EGRESO"
@@ -1593,7 +1599,7 @@ def registrar_movimiento_caja(body: dict, db: Session = Depends(get_db), current
     referencia = body.get("referencia", "")
     tasa_cambio_bs = float(body.get("tasa_cambio_bs", 1.0))
     
-    cuenta = db.query(CuentaBancaria).filter(CuentaBancaria.id == cuenta_id, CuentaBancaria.tenant_id == current_user.tenant_id).first()
+    cuenta = db.query(CuentaBancaria).filter(CuentaBancaria.id == cuenta_id, CuentaBancaria.tenant_id == current_user.tenant_id).with_for_update().first()
     if not cuenta:
         raise HTTPException(status_code=404, detail="Cuenta no encontrada")
         
