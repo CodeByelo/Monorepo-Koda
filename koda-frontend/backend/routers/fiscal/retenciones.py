@@ -15,6 +15,7 @@ from backend.models.core import Profile
 from backend.models.operations import Venta
 from backend.models.erp_extended import RetencionIVA, RetencionISLR, Empresa
 from backend.utils.helpers import ventas_periodo, to_float, tasa_actual
+from backend.services.facturacion_service import derivar_aplica_igtf
 from backend.core.security import get_current_user
 
 router = APIRouter()
@@ -78,8 +79,10 @@ def exportar_retenciones(periodo: str, db: Session = Depends(get_db), current_us
     
     lines = []
     for r in rows:
+        if not r.numero_comprobante:
+            continue
         rif_sujeto = re.sub(r'[\s\-]', '', r.proveedor_rif.upper())
-        fecha_doc = datetime.now().strftime("%Y-%m-%d") # Fallback
+        fecha_doc = r.fecha_comprobante.strftime("%Y-%m-%d") if r.fecha_comprobante else datetime.now().strftime("%Y-%m-%d")
         
         # Convertir montos a Bolívares (VES)
         tasa = Decimal(str(r.tasa_cambio_bs))
@@ -89,7 +92,7 @@ def exportar_retenciones(periodo: str, db: Session = Depends(get_db), current_us
         
         # Crear la línea delimitada por pipe
         # Formato: RIF_Agente|Periodo|FechaDoc|TipoOperacion|TipoDoc|RIF_Sujeto|NumDoc|NumControl|MontoTotal|BaseImponible|MontoRetenido|DocAfectado|NumComprobante|MontoExento|Alicuota|Expediente
-        comprobante = f"{periodo_fiscal}{str(r.id).zfill(8)}" # 14-digit comprobante AAAAMMXXXXXXXX
+        comprobante = r.numero_comprobante
         line = (
             f"{rif_agente}|{periodo_fiscal}|{fecha_doc}|C|01|{rif_sujeto}|"
             f"{r.numero_factura}|{r.numero_factura}|{total_ves:.2f}|{base_ves:.2f}|"
@@ -113,10 +116,17 @@ def crear_comprobante(body: dict, db: Session = Depends(get_db), current_user: P
     if not periodo:
         raise HTTPException(status_code=400, detail="El campo 'periodo' es requerido.")
 
+    proveedor_rif = (body.get("proveedor_rif") or "").strip()
+    proveedor_nombre = (body.get("proveedor_nombre") or "").strip()
+    if not proveedor_rif or not proveedor_nombre:
+        raise HTTPException(status_code=400, detail="Los campos 'proveedor_rif' y 'proveedor_nombre' son requeridos.")
+
     alicuota_pct = body.get("alicuota")
     ret = RetencionIVA(
         tenant_id=current_user.tenant_id,
         tipo=body.get("tipo", "RECIBIDA"),
+        proveedor_rif=proveedor_rif,
+        proveedor_nombre=proveedor_nombre,
         agente_rif=body.get("agente_rif", ""),
         agente_nombre=body.get("agente_nombre", ""),
         numero_factura=body.get("numero_factura", ""),
@@ -173,8 +183,8 @@ def igtf(periodo: str, quincena: str = "1", db: Session = Depends(get_db), curre
 
     try:
         y, m = map(int, periodo.split("-"))
-    except:
-        y, m = 2026, 7
+    except Exception:
+        raise HTTPException(status_code=400, detail="periodo inválido, use YYYY-MM")
 
     query = ventas_periodo(db, current_user.tenant_id, periodo)
 
@@ -196,12 +206,13 @@ def igtf(periodo: str, quincena: str = "1", db: Session = Depends(get_db), curre
     
     for v in ventas:
         igtf_usd = to_float(v.igtf_usd)
-        tasa = to_float(v.tasa_cambio_bs) or 36.0
+        tasa = to_float(v.tasa_cambio_bs) or float(tasa_actual(db, current_user.tenant_id))
+        aplica_igtf = igtf_usd > 0 or derivar_aplica_igtf(v.metodo_pago)
         
-        if igtf_usd > 0 or v.metodo_pago in ["EFECTIVO_USD", "TRANSFERENCIA_USD", "DIVISA"]:
+        if aplica_igtf:
             count_facturas += 1
-            # Si no tiene igtf_usd guardado pero fue en divisa, se calcula el 3%
-            base_usd = to_float(v.subtotal_usd) if igtf_usd > 0 else to_float(v.total_usd)
+            # Si tiene igtf_usd guardado, la base real fue subtotal + iva (facturacion_service.py)
+            base_usd = (to_float(v.subtotal_usd) + to_float(v.iva_usd)) if igtf_usd > 0 else to_float(v.total_usd)
             base_bs = base_usd * tasa
             igtf_bs = igtf_usd * tasa if igtf_usd > 0 else base_usd * 0.03 * tasa
             
@@ -239,8 +250,8 @@ def exportar_igtf(formato: str, periodo: str, quincena: str, db: Session = Depen
 
     try:
         y, m = map(int, periodo.split("-"))
-    except:
-        y, m = 2026, 7
+    except Exception:
+        raise HTTPException(status_code=400, detail="periodo inválido, use YYYY-MM")
 
     query = ventas_periodo(db, current_user.tenant_id, periodo)
     if quincena == "1":
@@ -254,9 +265,11 @@ def exportar_igtf(formato: str, periodo: str, quincena: str, db: Session = Depen
         lines = []
         for v in ventas:
             igtf_usd = to_float(v.igtf_usd)
-            if igtf_usd > 0 or v.metodo_pago in ["EFECTIVO_USD", "TRANSFERENCIA_USD", "DIVISA"]:
-                tasa = to_float(v.tasa_cambio_bs) or 36.0
-                base_bs = to_float(v.subtotal_usd) * tasa
+            aplica_igtf = igtf_usd > 0 or derivar_aplica_igtf(v.metodo_pago)
+            if aplica_igtf:
+                tasa = to_float(v.tasa_cambio_bs) or float(tasa_actual(db, current_user.tenant_id))
+                base_usd = (to_float(v.subtotal_usd) + to_float(v.iva_usd)) if igtf_usd > 0 else to_float(v.total_usd)
+                base_bs = base_usd * tasa
                 igtf_bs = igtf_usd * tasa if igtf_usd > 0 else base_bs * 0.03
                 rif_cliente = v.cliente.rif if v.cliente and v.cliente.rif else "V-00000000-0"
                 fecha_str = v.fecha.strftime("%Y-%m-%d")
