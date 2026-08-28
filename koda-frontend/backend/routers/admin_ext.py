@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy import func
 from backend.utils.ip_utils import get_real_ip_str
 from sqlalchemy.orm import Session
+from decimal import Decimal
 
 from backend.core.database import get_db, DATABASE_URL
 from backend.core.security import get_password_hash, get_current_user
@@ -18,7 +19,10 @@ from backend.models.erp_extended import (
     NotificacionRegla,
     ImportacionJob,
     MovimientoBancario,
+    CuentaBancaria,
 )
+from backend.models.fiscal import CorrelativoFiscal
+from backend.utils.helpers import tasa_actual
 from backend.schemas.core import UserCreate, UserResponse
 from backend.services.auth import role_required
 
@@ -36,39 +40,45 @@ def _is_desarrollador(user: Profile) -> bool:
     return rol in ("desarrollador", "dev", "developer")
 
 
-def _seed_admin_defaults(db: Session):
-    """Datos iniciales para pantallas de administración cuando las tablas están vacías."""
+def _seed_admin_defaults(db: Session, tenant_id=None):
+    """Datos iniciales para pantallas de administración aislados por tenant."""
+    if not tenant_id:
+        return
+
     # 1. Numeracion
-    if not db.query(NumeracionSerie).first():
+    if not db.query(NumeracionSerie).filter(NumeracionSerie.tenant_id == tenant_id).first():
         series = [
-            NumeracionSerie(modulo="factura", prefijo="A", ultimo_numero=154, activo=True),
-            NumeracionSerie(modulo="nota_credito", prefijo="NC", ultimo_numero=28, activo=True),
-            NumeracionSerie(modulo="retencion_iva", prefijo="RIVA", ultimo_numero=42, activo=True),
-            NumeracionSerie(modulo="retencion_islr", prefijo="RISLR", ultimo_numero=15, activo=True),
+            NumeracionSerie(modulo="factura", prefijo="A", ultimo_numero=154, activo=True, tenant_id=tenant_id),
+            NumeracionSerie(modulo="nota_credito", prefijo="NC", ultimo_numero=28, activo=True, tenant_id=tenant_id),
+            NumeracionSerie(modulo="retencion_iva", prefijo="RIVA", ultimo_numero=42, activo=True, tenant_id=tenant_id),
+            NumeracionSerie(modulo="retencion_islr", prefijo="RISLR", ultimo_numero=15, activo=True, tenant_id=tenant_id),
         ]
         db.add_all(series)
         db.commit()
 
     # 2. Notificaciones
-    if not db.query(NotificacionRegla).first():
+    if not db.query(NotificacionRegla).filter(NotificacionRegla.tenant_id == tenant_id).first():
         reglas = [
-            NotificacionRegla(nombre="Stock Crítico de Inventario", canal="TELEGRAM", activa=True, plantilla="Alerta: El producto {producto} ha bajado del stock mínimo."),
-            NotificacionRegla(nombre="Facturas Vencidas por Cobrar", canal="TELEGRAM", activa=True, plantilla="Aviso: La factura {factura} del cliente {cliente} está vencida."),
-            NotificacionRegla(nombre="Cierre de Turno de Despacho", canal="TELEGRAM", activa=True, plantilla="Despacho {turno} completado por el chofer {chofer}."),
-            NotificacionRegla(nombre="Diferencias en Flujo de Caja", canal="TELEGRAM", activa=False, plantilla="Alerta: Desviación presupuestaria detectada en caja/banco."),
+            NotificacionRegla(nombre="Stock Crítico de Inventario", canal="TELEGRAM", activa=True, plantilla="Alerta: El producto {producto} ha bajado del stock mínimo.", tenant_id=tenant_id),
+            NotificacionRegla(nombre="Facturas Vencidas por Cobrar", canal="TELEGRAM", activa=True, plantilla="Aviso: La factura {factura} del cliente {cliente} está vencida.", tenant_id=tenant_id),
+            NotificacionRegla(nombre="Cierre de Turno de Despacho", canal="TELEGRAM", activa=True, plantilla="Despacho {turno} completado por el chofer {chofer}.", tenant_id=tenant_id),
+            NotificacionRegla(nombre="Diferencias en Flujo de Caja", canal="TELEGRAM", activa=False, plantilla="Alerta: Desviación presupuestaria detectada en caja/banco.", tenant_id=tenant_id),
         ]
         db.add_all(reglas)
         db.commit()
     else:
-        db.query(NotificacionRegla).filter(NotificacionRegla.canal == "EMAIL").update({"canal": "TELEGRAM"})
+        db.query(NotificacionRegla).filter(
+            NotificacionRegla.tenant_id == tenant_id,
+            NotificacionRegla.canal == "EMAIL"
+        ).update({"canal": "TELEGRAM"})
         db.commit()
 
     # 3. Importaciones
-    if not db.query(ImportacionJob).first():
+    if not db.query(ImportacionJob).filter(ImportacionJob.tenant_id == tenant_id).first():
         importaciones = [
-            ImportacionJob(tipo="Inventario", archivo="inventario_inicial_2026.xlsx", estado="COMPLETADO", registros_ok=350, registros_error=0, fecha=datetime.now(timezone.utc) - timedelta(days=5)),
-            ImportacionJob(tipo="Clientes", archivo="clientes_legacy.csv", estado="COMPLETADO", registros_ok=125, registros_error=2, fecha=datetime.now(timezone.utc) - timedelta(days=12)),
-            ImportacionJob(tipo="Proveedores", archivo="proveedores_2026.xlsx", estado="REVISION", registros_ok=45, registros_error=1, fecha=datetime.now(timezone.utc) - timedelta(hours=3)),
+            ImportacionJob(tipo="Inventario", archivo="inventario_inicial_2026.xlsx", estado="COMPLETADO", registros_ok=350, registros_error=0, fecha=datetime.now(timezone.utc) - timedelta(days=5), tenant_id=tenant_id),
+            ImportacionJob(tipo="Clientes", archivo="clientes_legacy.csv", estado="COMPLETADO", registros_ok=125, registros_error=2, fecha=datetime.now(timezone.utc) - timedelta(days=12), tenant_id=tenant_id),
+            ImportacionJob(tipo="Proveedores", archivo="proveedores_2026.xlsx", estado="REVISION", registros_ok=45, registros_error=1, fecha=datetime.now(timezone.utc) - timedelta(hours=3), tenant_id=tenant_id),
         ]
         db.add_all(importaciones)
         db.commit()
@@ -76,7 +86,7 @@ def _seed_admin_defaults(db: Session):
 
 @router.get("/dashboard")
 def admin_dashboard(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
-    _seed_admin_defaults(db)
+    _seed_admin_defaults(db, tenant_id=current_user.tenant_id)
     scoped = not _is_desarrollador(current_user)
 
     q_usuarios = db.query(func.count(Profile.id))
@@ -130,7 +140,7 @@ def listar_usuarios(db: Session = Depends(get_db), current_user: Profile = Depen
             "nombre": u.nombre,
             "email": u.email,
             "rol": u.rol,
-            "estado": "Activo",
+            "estado": "Activo" if getattr(u, "estado", 1) == 1 else "Inactivo",
             "ultimoAcceso": datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M"),
         }
         for u in usuarios
@@ -173,8 +183,28 @@ def crear_usuario(request: Request, user_in: UserCreate, db: Session = Depends(g
     # Si se marcó la casilla de vendedor comercial, crear el registro en vendedores
     if getattr(user_in, "es_vendedor", False):
         from backend.models.erp_extended import Vendedor
-        count = db.query(Vendedor).filter(Vendedor.tenant_id == current_admin.tenant_id).count()
-        codigo = f"VEN-{str(count + 1).zfill(3)}"
+        correlativo = (
+            db.query(CorrelativoFiscal)
+            .filter(
+                CorrelativoFiscal.tipo_documento == "VENDEDOR",
+                CorrelativoFiscal.tenant_id == current_admin.tenant_id,
+            )
+            .with_for_update()
+            .first()
+        )
+        if not correlativo:
+            correlativo = CorrelativoFiscal(
+                tipo_documento="VENDEDOR",
+                prefijo="VEN-",
+                siguiente_numero=1,
+                tenant_id=current_admin.tenant_id,
+            )
+            db.add(correlativo)
+            db.flush()
+
+        numero_seq = correlativo.siguiente_numero
+        correlativo.siguiente_numero += 1
+        codigo = f"{correlativo.prefijo}{str(numero_seq).zfill(3)}"
         
         nuevo_vendedor = Vendedor(
             nombre=db_user.nombre,
@@ -230,7 +260,7 @@ def sesiones_activas(db: Session = Depends(get_db), current_user: Profile = Depe
 
 @router.get("/auditoria")
 def listar_auditoria(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
-    _seed_admin_defaults(db)
+    _seed_admin_defaults(db, tenant_id=current_user.tenant_id)
     scoped = not _is_desarrollador(current_user)
 
     q_logs = db.query(AuditoriaLog)
@@ -544,7 +574,7 @@ def update_respaldos_config(
 
 @router.get("/notificaciones")
 def listar_notificaciones(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
-    _seed_admin_defaults(db)
+    _seed_admin_defaults(db, tenant_id=current_user.tenant_id)
     query = db.query(NotificacionRegla)
     if not _is_desarrollador(current_user):
         query = query.filter(NotificacionRegla.tenant_id == current_user.tenant_id)
@@ -564,7 +594,7 @@ def listar_notificaciones(db: Session = Depends(get_db), current_user: Profile =
 
 @router.get("/numeracion")
 def listar_numeracion(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
-    _seed_admin_defaults(db)
+    _seed_admin_defaults(db, tenant_id=current_user.tenant_id)
     query = db.query(NumeracionSerie)
     if not _is_desarrollador(current_user):
         query = query.filter(NumeracionSerie.tenant_id == current_user.tenant_id)
@@ -684,16 +714,26 @@ def crear_importacion(
 
     # Procesar y registrar movimientos bancarios reales si el tipo es Banco/Pagos
     if body.tipo == "Banco/Pagos" and body.filas:
-        for f in body.filas:
-            try:
-                # Limpiar y parsear el monto
-                monto_limpio = f.monto.replace('$', '').replace(',', '').strip()
-                monto = float(monto_limpio)
-            except Exception:
-                monto = 0.0
+        cuenta_default = db.query(CuentaBancaria).filter(
+            CuentaBancaria.tenant_id == current_user.tenant_id,
+            CuentaBancaria.activa == True
+        ).first()
+        if not cuenta_default:
+            raise HTTPException(status_code=400, detail="El tenant no tiene ninguna cuenta bancaria activa configurada para importar movimientos.")
 
-            # Intentar parsear la fecha en formatos habituales
-            fecha_val = datetime.now(timezone.utc)
+        tasa_bs = Decimal(str(tasa_actual(db, current_user.tenant_id)))
+        ok_count = 0
+        error_count = 0
+
+        for f in body.filas:
+            monto_val = None
+            try:
+                monto_limpio = f.monto.replace('$', '').replace(',', '').strip()
+                monto_val = float(monto_limpio)
+            except Exception:
+                monto_val = None
+
+            fecha_val = None
             for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%m/%d/%Y"):
                 try:
                     fecha_val = datetime.strptime(f.fecha.strip(), fmt).replace(tzinfo=timezone.utc)
@@ -701,18 +741,26 @@ def crear_importacion(
                 except Exception:
                     pass
 
+            if monto_val is None or fecha_val is None:
+                error_count += 1
+                continue
+
+            ok_count += 1
             mov = MovimientoBancario(
                 tenant_id=current_user.tenant_id,
-                cuenta_id=1,  # Cuenta principal por defecto
+                cuenta_id=cuenta_default.id,
                 tipo="INGRESO",
-                monto_usd=monto,
-                tasa_cambio_bs=36.5,
+                monto_usd=monto_val,
+                tasa_cambio_bs=tasa_bs,
                 concepto=f.descripcion.strip(),
                 referencia=f.referencia.strip(),
                 fecha=fecha_val,
                 estado="ACTIVO"
             )
             db.add(mov)
+
+        job.registros_ok = ok_count
+        job.registros_error = error_count
 
     db.add(AuditoriaLog(
         usuario=f"admin (ip:{real_ip})",
@@ -729,7 +777,7 @@ def crear_importacion(
 
 @router.get("/importaciones")
 def listar_importaciones(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
-    _seed_admin_defaults(db)
+    _seed_admin_defaults(db, tenant_id=current_user.tenant_id)
     query = db.query(ImportacionJob)
     if not _is_desarrollador(current_user):
         query = query.filter(ImportacionJob.tenant_id == current_user.tenant_id)
