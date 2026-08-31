@@ -13,10 +13,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from backend.core.database import get_db
-from backend.core.security import get_current_user
+from backend.core.security import get_current_user, require_role
 from backend.models.core import Profile
 from backend.models.erp_extended import Garantia
-from backend.models.operations import Producto, Venta, Cliente
+from backend.models.operations import Producto, Venta, Cliente, VentaDetalle
 
 router = APIRouter(prefix="/garantias", tags=["Garantías"])
 
@@ -104,6 +104,24 @@ def crear_garantia(
         ).first()
         if not venta:
             raise HTTPException(status_code=404, detail="Venta no encontrada")
+
+        if venta.cliente_id != payload.cliente_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"El cliente indicado (ID {payload.cliente_id}) no coincide con el cliente de la venta (ID {venta.cliente_id})."
+            )
+
+        detalle_venta = db.query(VentaDetalle).filter(
+            VentaDetalle.venta_id == payload.venta_id,
+            VentaDetalle.producto_id == payload.producto_id,
+            VentaDetalle.tenant_id == current_user.tenant_id,
+        ).first()
+        if not detalle_venta:
+            raise HTTPException(
+                status_code=400,
+                detail=f"El producto indicado (ID {payload.producto_id}) no forma parte de la venta especificada (ID {payload.venta_id})."
+            )
+
         # Si no se especifica fecha_inicio, se usa la fecha de la venta.
         if payload.fecha_inicio is None:
             fecha_inicio = venta.fecha
@@ -169,7 +187,7 @@ def actualizar_garantia(
     garantia_id: int,
     payload: GarantiaUpdate,
     db: Session = Depends(get_db),
-    current_user: Profile = Depends(get_current_user),
+    current_user: Profile = Depends(require_role(["Admin", "Gerente"])),
 ):
     garantia = db.query(Garantia).filter(
         Garantia.id == garantia_id,
