@@ -5,8 +5,9 @@ from backend.models.core import TasaCambio
 from backend.schemas.core import TasaCambioCreate, TasaCambioResponse
 from backend.core.security import require_role, get_current_user
 from backend.models.erp_extended import AuditoriaLog
-import requests # type: ignore
-import requests.exceptions # type: ignore
+from backend.utils.helpers import tasa_actual
+import requests  # type: ignore
+import requests.exceptions  # type: ignore
 from bs4 import BeautifulSoup
 import asyncio
 import logging
@@ -73,7 +74,7 @@ def get_tasa_actual(db: Session = Depends(get_db), current_user=Depends(get_curr
     if not tasa:
         tasa = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
 
-    valor_ves_num = float(getattr(tasa, "valor_ves", 757.54)) if tasa else 757.54
+    valor_ves_num = float(tasa_actual(db, tenant_id))
     result = {
         "id": getattr(tasa, "id", 1),
         "tasa": valor_ves_num,
@@ -123,10 +124,16 @@ def tasa_manual(body: dict = Body(...), db: Session = Depends(get_db), current_u
             "fecha": db_tasa.fecha,
             "fuente": db_tasa.fuente
         }
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
-        import traceback
-        error_msg = f"Error interno: {str(e)}\n{traceback.format_exc()}"
-        raise HTTPException(status_code=500, detail=error_msg)
+        db.rollback()
+        logger.exception("Error interno al actualizar la tasa de cambio: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error interno al actualizar la tasa de cambio."
+        )
 
 
 @router.post("", response_model=TasaCambioResponse, status_code=status.HTTP_201_CREATED)
@@ -140,7 +147,8 @@ def create_tasa(
     """
     db_tasa = TasaCambio(
         valor_ves=tasa_in.valor_ves,
-        fuente=tasa_in.fuente
+        fuente=tasa_in.fuente,
+        tenant_id=current_user.tenant_id
     )
     db.add(db_tasa)
     db.commit()
