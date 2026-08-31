@@ -32,12 +32,13 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from backend.core.database import get_db, current_tenant_id_var
 from backend.core.security import verify_bot_api_key
+from backend.utils.idempotency import require_idempotency
 from backend.models.operations import Cliente, Producto
 from backend.models.erp_extended import Almacen, AuditoriaLog, StockPorAlmacen, Vendedor
 from backend.services.facturacion_service import LineaFactura, procesar_emision_factura
@@ -143,7 +144,9 @@ class BotVentaRequest(BaseModel):
 
 
 @router.post("/venta", status_code=status.HTTP_201_CREATED)
+@require_idempotency
 def crear_venta_bot(
+    request: Request,
     body: BotVentaRequest,
     db: Session = Depends(get_db),
 ):
@@ -154,6 +157,14 @@ def crear_venta_bot(
     `/v1/facturacion/emitir` (web) y `/ventas/facturar`, para que impuestos,
     correlativo fiscal y asientos contables nunca diverjan entre puntos de
     entrada.
+
+    IDEMPOTENCIA (X-Idempotency-Key):
+    Protegido con `@require_idempotency`. El llamador (backend del bot de
+    Telegram) DEBE enviar obligatoriamente el encabezado `X-Idempotency-Key`
+    con un UUID válido y estable por cada mensaje/comando de compra para evitar
+    la duplicación de facturas, deducción doble de stock y asientos contables
+    ante reintentos de red. Si el encabezado falta o no es un UUID válido,
+    el endpoint responderá con HTTP 400.
 
     IMPORTANTE (deliberado): a diferencia del formulario web, aquí NUNCA se
     acepta un precio unitario enviado por el cliente de la API. El precio
