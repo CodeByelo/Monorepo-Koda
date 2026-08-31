@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Query, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime, date, timezone, timedelta
@@ -110,7 +110,7 @@ def inventario_dashboard(db: Session = Depends(get_db), current_user = Depends(g
     expiryAlerts = []
     for lote in lotes_proximos:
         prod = db.query(Producto).filter(Producto.id == lote.producto_id, Producto.tenant_id == current_user.tenant_id).first()
-        dias_restantes = (lote.fecha_vencimiento - datetime.now(timezone.utc)).days
+        dias_restantes = (_as_aware(lote.fecha_vencimiento) - datetime.now(timezone.utc)).days
         if dias_restantes < 0: dias_restantes = 0
         
         status = "CRÍTICO" if dias_restantes <= 30 else "ALERTA"
@@ -295,7 +295,7 @@ class TransferenciaCreate(BaseModel):
     origen_almacen_id: int
     destino_almacen_id: int
     producto_id: int
-    cantidad: float
+    cantidad: float = Field(gt=0, description="Cantidad a transferir (debe ser estrictamente positiva)")
 
 
 @inventario_ext_router.get("/transferencias")
@@ -329,8 +329,18 @@ def crear_transferencia(payload: TransferenciaCreate, db: Session = Depends(get_
     if not prod:
         raise HTTPException(status_code=404, detail="El producto a transferir no existe.")
     
-    if prod.stock < Decimal(str(payload.cantidad)):
-        raise HTTPException(status_code=400, detail=f"Stock insuficiente del producto en el sistema. Disponible: {prod.stock}")
+    origen_stock = db.query(StockPorAlmacen).filter(
+        StockPorAlmacen.producto_id == payload.producto_id,
+        StockPorAlmacen.almacen_id == payload.origen_almacen_id,
+        StockPorAlmacen.tenant_id == current_user.tenant_id
+    ).first()
+    stock_disponible_origen = origen_stock.cantidad if origen_stock else Decimal("0")
+
+    if stock_disponible_origen < Decimal(str(payload.cantidad)):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Stock insuficiente en el almacén de origen. Disponible: {stock_disponible_origen}, Solicitado: {payload.cantidad}"
+        )
     
     t = TransferenciaInventario(
         origen_almacen_id=payload.origen_almacen_id,
@@ -357,13 +367,17 @@ def recibir_transferencia(transfer_id: int, db: Session = Depends(get_db), curre
     if t.estado in ["COMPLETADA", "RECIBIDA"]:
         raise HTTPException(status_code=400, detail="Esta transferencia ya ha sido completada.")
 
-    # Bloqueamos la fila de stock de origen para evitar condiciones de carrera
-    # entre recepciones concurrentes de la misma transferencia/producto.
-    origen_stock = db.query(StockPorAlmacen).filter(
+    # Adquirir locks en orden canónico (ordenando por almacen_id ascendente)
+    # para prevenir deadlocks en transferencias concurrentes cruzadas (A->B y B->A).
+    almacen_ids_ordenados = sorted([t.origen_almacen_id, t.destino_almacen_id])
+    stocks_locked = db.query(StockPorAlmacen).filter(
         StockPorAlmacen.producto_id == t.producto_id,
-        StockPorAlmacen.almacen_id == t.origen_almacen_id,
+        StockPorAlmacen.almacen_id.in_(almacen_ids_ordenados),
         StockPorAlmacen.tenant_id == current_user.tenant_id
-    ).with_for_update().first()
+    ).order_by(StockPorAlmacen.almacen_id.asc()).with_for_update().all()
+
+    stocks_dict = {s.almacen_id: s for s in stocks_locked}
+    origen_stock = stocks_dict.get(t.origen_almacen_id)
 
     disponible = origen_stock.cantidad if origen_stock else Decimal("0.00")
     if disponible < t.cantidad:
@@ -372,13 +386,10 @@ def recibir_transferencia(transfer_id: int, db: Session = Depends(get_db), curre
             detail=f"Stock insuficiente en el almacén de origen para completar la transferencia. Disponible: {disponible}, Requerido: {t.cantidad}"
         )
 
-    origen_stock.cantidad -= t.cantidad
+    nueva_cant_origen = origen_stock.cantidad - t.cantidad
+    origen_stock.cantidad = nueva_cant_origen if nueva_cant_origen > Decimal("0") else Decimal("0")
 
-    destino_stock = db.query(StockPorAlmacen).filter(
-        StockPorAlmacen.producto_id == t.producto_id,
-        StockPorAlmacen.almacen_id == t.destino_almacen_id,
-        StockPorAlmacen.tenant_id == current_user.tenant_id
-    ).with_for_update().first()
+    destino_stock = stocks_dict.get(t.destino_almacen_id)
 
     if destino_stock:
         destino_stock.cantidad += t.cantidad
