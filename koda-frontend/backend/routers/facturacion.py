@@ -108,22 +108,10 @@ def emitir_factura_fiscal(
         pass
 
     if not cliente:
-        # Fallback: intentar por primer cliente registrado de ESTE tenant
-        cliente = db.query(Cliente).filter(Cliente.tenant_id == tenant_id).first()
-
-    if not cliente:
-        # Auto-crear cliente default por si la BD está completamente limpia
-        cliente = Cliente(
-            rif="J-00000000-0",
-            nombre="Consumidor Final",
-            telefono="+58 212 000-0000",
-            email="consumidor@koda.com",
-            direccion="Caracas, Venezuela",
-            es_contribuyente_especial=False,
-            tenant_id=tenant_id,
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Cliente '{cliente_id_raw}' no encontrado en su empresa.",
         )
-        db.add(cliente)
-        db.flush()
 
     aplica_igtf_solicitado = body.aplica_igtf
     moneda = body.moneda_documento
@@ -146,12 +134,13 @@ def emitir_factura_fiscal(
             if cantidad <= 0:
                 raise HTTPException(status_code=400, detail="La cantidad debe ser mayor a 0.")
 
-            # Buscar producto por SKU o ID con bloqueo (with_for_update)
+            # Buscar producto por SKU o ID con bloqueo (with_for_update) aislado por tenant
             producto = db.query(Producto).filter(
-                (Producto.sku == prod_key) | (Producto.id == prod_key if prod_key.isdigit() else False)
+                (Producto.sku == prod_key) | (Producto.id == prod_key if prod_key.isdigit() else False),
+                Producto.tenant_id == tenant_id,
             ).with_for_update().first()
 
-            if not producto or (producto.tenant_id and str(producto.tenant_id) != str(tenant_id)):
+            if not producto or str(producto.tenant_id) != str(tenant_id):
                 raise HTTPException(status_code=404, detail=f"Producto '{prod_key}' no encontrado en su inventario.")
 
             if producto.stock < cantidad:
