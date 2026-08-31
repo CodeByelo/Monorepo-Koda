@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from datetime import datetime
@@ -7,8 +7,9 @@ import hashlib
 
 from backend.core.database import get_db
 from backend.models.core import Profile
-from backend.models.erp_extended import Empresa, RetencionISLR, Compra
+from backend.models.erp_extended import Empresa, RetencionISLR, RetencionIVA
 from backend.models.operations import Proveedor
+from backend.utils.helpers import to_float
 from backend.core.security import get_current_user
 
 router = APIRouter()
@@ -31,8 +32,8 @@ def _obtener_empresa_emisor(db: Session, tenant_id) -> dict:
 
 @router.get("/arc/pdf")
 def generar_pdf_arc(
-    proveedor_id: str = "J-30123456-7",
-    anio: int = 2026,
+    proveedor_id: str = Query(...),
+    anio: int = Query(...),
     db: Session = Depends(get_db),
     current_user: Profile = Depends(get_current_user)
 ):
@@ -175,9 +176,9 @@ def generar_pdf_arc(
 
 @router.get("/retencion-iva/pdf")
 def generar_pdf_retencion_iva(
-    proveedor_id: str = "J-30123456-7",
-    periodo: str = "202605",  # Formato YYYYMM
-    correlativo: str = "20260500000001",
+    proveedor_id: str = Query(...),
+    periodo: str = Query(...),  # Formato YYYYMM o YYYY-MM
+    correlativo: str = Query(...),
     db: Session = Depends(get_db),
     current_user: Profile = Depends(get_current_user)
 ):
@@ -255,22 +256,27 @@ def generar_pdf_retencion_iva(
     c.line(ancho / 2, alto - 180, ancho / 2, alto - 130)
     
     # --- 3. TABLA DE FACTURAS (Formato SENIAT) ---
-    from sqlalchemy import extract
+    # Consultamos los registros reales de RetencionIVA correspondientes al proveedor y periodo
+    # Acepta tanto formato YYYYMM como YYYY-MM en el filtro
+    periodos_posibles = [periodo]
+    if len(periodo) == 6 and periodo.isdigit():
+        periodos_posibles.append(f"{periodo[:4]}-{periodo[4:]}")
+    elif len(periodo) == 7 and "-" in periodo:
+        periodos_posibles.append(periodo.replace("-", ""))
 
-    try:
-        anio = int(periodo[:4])
-        mes = int(periodo[4:])
-    except:
-        anio, mes = datetime.now().year, datetime.now().month
+    query_retenciones = db.query(RetencionIVA).filter(
+        RetencionIVA.proveedor_rif == proveedor_id,
+        RetencionIVA.periodo.in_(periodos_posibles),
+        RetencionIVA.tenant_id == current_user.tenant_id,
+    )
 
-    # Buscamos compras reales de este proveedor en el periodo dado que tengan IVA > 0
-    compras_reales = db.query(Compra).filter(
-        Compra.proveedor_rif == proveedor_id,
-        extract('year', Compra.fecha) == anio,
-        extract('month', Compra.fecha) == mes,
-        Compra.estado != "ANULADA",
-        Compra.tenant_id == current_user.tenant_id,
-    ).all()
+    # Si hay registros específicos para este número de comprobante, filtramos por él;
+    # de lo contrario, incluimos las del período para el proveedor
+    retenciones_comprobante = query_retenciones.all()
+    if correlativo:
+        ret_con_correlativo = [r for r in retenciones_comprobante if r.numero_comprobante == correlativo]
+        if ret_con_correlativo:
+            retenciones_comprobante = ret_con_correlativo
 
     # Cabeceras requeridas legalmente
     data = [
@@ -282,34 +288,39 @@ def generar_pdf_retencion_iva(
     total_iva = 0.0
     total_ret = 0.0
     
-    for c_compra in compras_reales:
-        from backend.utils.helpers import to_float
-        base = to_float(c_compra.base_imponible)
-        iva = to_float(c_compra.iva)
-        total = to_float(c_compra.monto_total)
-        ret = iva * 0.75 # Retención estándar del 75%
+    for r in retenciones_comprobante:
+        base = to_float(r.base_usd)
+        ret = to_float(r.monto_usd)
+        alicuota_ret = float(r.alicuota)  # Ej. 0.75 para 75%, 1.0 para 100%
+        alicuota_ret_pct = alicuota_ret * 100 if alicuota_ret <= 1.0 else alicuota_ret
+        
+        # IVA de la operación (16% estándar sobre la base imponible)
+        iva = base * 0.16
+        total = base + iva
         
         total_compras += total
         total_base += base
         total_iva += iva
         total_ret += ret
         
+        fecha_doc_str = r.fecha_comprobante.strftime("%d/%m/%Y") if r.fecha_comprobante else datetime.now().strftime("%d/%m/%Y")
+        
         data.append([
             "01 - Reg",
-            c_compra.fecha.strftime("%d/%m/%Y"),
-            c_compra.numero_factura or "S/N",
-            c_compra.numero_control or "S/N",
+            fecha_doc_str,
+            r.numero_factura or "S/N",
+            r.numero_comprobante or "S/N",
             f"{total:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
             "0,00",
             f"{base:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
             "16%",
             f"{iva:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
-            "75%",
+            f"{alicuota_ret_pct:.0f}%",
             f"{ret:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
         ])
         
-    if not compras_reales:
-        data.append(["No hay compras", "-", "-", "-", "0,00", "0,00", "0,00", "16%", "0,00", "75%", "0,00"])
+    if not retenciones_comprobante:
+        data.append(["No hay retenciones", "-", "-", "-", "0,00", "0,00", "0,00", "16%", "0,00", "0%", "0,00"])
         
     # Totales
     data.append([
