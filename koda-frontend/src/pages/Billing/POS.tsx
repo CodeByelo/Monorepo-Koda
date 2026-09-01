@@ -198,6 +198,31 @@ const POS = () => {
     });
   };
 
+  const handleCartQtyInputChange = (id: number, value: string) => {
+    // Mientras el usuario borra el campo para escribir un número nuevo,
+    // value puede quedar vacío momentáneamente — no tocamos el carrito en
+    // ese instante, dejamos que termine de escribir.
+    if (value.trim() === '') return;
+
+    const parsed = parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return;
+
+    setCart((prevCart) => {
+      const item = prevCart.find((i) => i.id === id);
+      if (!item) return prevCart;
+
+      if (parsed <= 0) {
+        // Escribir 0 o un número negativo se comporta igual que eliminar la línea.
+        return prevCart.filter((i) => i.id !== id);
+      }
+      if (parsed > item.stock) {
+        showToast(`No hay suficiente stock para ${item.name}. Stock: ${item.stock}`);
+        return prevCart.map((i) => (i.id === id ? { ...i, qty: item.stock } : i));
+      }
+      return prevCart.map((i) => (i.id === id ? { ...i, qty: parsed } : i));
+    });
+  };
+
   const handleVaciarTicket = () => {
     if (cart.length === 0) return;
     setCart([]);
@@ -740,7 +765,15 @@ const POS = () => {
                              >
                                <Minus size={10} />
                              </button>
-                             <span>{item.qty} x $</span>
+                             <input
+                               type="number"
+                               min="1"
+                               value={item.qty}
+                               onChange={(e) => handleCartQtyInputChange(item.id, e.target.value)}
+                               title="Cantidad — editable directamente"
+                               className="w-12 px-1 py-0.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-800 text-center focus:outline-none focus:border-[#0b5156]/50"
+                             />
+                             <span>x $</span>
                              <button
                                type="button"
                                onClick={() => handleCartQtyChange(item.id, 1)}
