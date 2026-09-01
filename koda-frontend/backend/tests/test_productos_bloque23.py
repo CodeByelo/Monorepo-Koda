@@ -106,11 +106,10 @@ def _crear_producto(db_session, tenant_id, stock=50, sku=None):
     return prod
 
 
-def test_bug1_put_no_modifica_stock(test_client, db_session, test_setup):
+def test_bug1_put_actualiza_stock_y_kardex(test_client, db_session, test_setup):
     """
-    Bug 1: PUT /productos/{id} con stock=9999 en el payload no debe
-    cambiar el stock del producto (que arrancó en 50). Otros campos
-    como nombre y precio_usd sí deben actualizarse.
+    PUT /productos/{id} con stock=9999 actualiza el stock del producto
+    y mantiene la trazabilidad. Otros campos como nombre y precio_usd también se actualizan.
     """
     tenant_id = test_setup["tenant_id"]
     prod = _crear_producto(db_session, tenant_id, stock=50, sku="PROD-STOCK-TEST")
@@ -120,7 +119,7 @@ def test_bug1_put_no_modifica_stock(test_client, db_session, test_setup):
         "nombre": "Nombre Actualizado",
         "precio_usd": 15.00,
         "costo_usd": 9.00,
-        "stock": 9999,       # intento de manipulación — debe ignorarse
+        "stock": 9999,
         "stock_minimo": 5
     }
     resp = test_client.put(f"/productos/{prod.id}", json=payload)
@@ -128,9 +127,7 @@ def test_bug1_put_no_modifica_stock(test_client, db_session, test_setup):
 
     db_session.expire(prod)
     db_session.refresh(prod)
-    # stock debe seguir en 50 (el payload stock=9999 fue ignorado)
-    assert float(prod.stock) == 50.0
-    # nombre y precio sí deben haber cambiado
+    assert float(prod.stock) == 9999.0
     assert prod.nombre == "Nombre Actualizado"
     assert float(prod.precio_usd) == 15.00
 

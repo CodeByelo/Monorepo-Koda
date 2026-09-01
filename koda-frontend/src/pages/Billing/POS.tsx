@@ -181,16 +181,45 @@ const POS = () => {
     setCart((prevCart) => prevCart.filter((item) => item.id !== id));
   };
 
+  const handleCartQtyDirectChange = (id: number, value: string) => {
+    if (value === '') {
+      setCart((prevCart) => prevCart.map((item) =>
+        item.id === id ? { ...item, qty: '' as any } : item
+      ));
+      return;
+    }
+    const parsed = parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return;
+
+    setCart((prevCart) => prevCart.map((item) => {
+      if (item.id !== id) return item;
+      if (item.stock !== undefined && item.stock > 0 && parsed > item.stock) {
+        showToast(`Stock máximo disponible para ${item.name}: ${item.stock}`);
+        return { ...item, qty: item.stock };
+      }
+      return { ...item, qty: Math.max(1, parsed) };
+    }));
+  };
+
+  const handleCartQtyBlur = (id: number) => {
+    setCart((prevCart) => prevCart.map((item) => {
+      if (item.id !== id) return item;
+      const validQty = Number(item.qty);
+      return { ...item, qty: (!validQty || validQty <= 0) ? 1 : validQty };
+    }));
+  };
+
   const handleCartQtyChange = (id: number, delta: number) => {
     setCart((prevCart) => {
       const item = prevCart.find((i) => i.id === id);
       if (!item) return prevCart;
-      const nuevaQty = item.qty + delta;
+      const currentQty = Number(item.qty) || 0;
+      const nuevaQty = currentQty + delta;
       if (nuevaQty <= 0) {
         // Si la cantidad llega a 0, se comporta igual que eliminar la línea.
         return prevCart.filter((i) => i.id !== id);
       }
-      if (delta > 0 && nuevaQty > item.stock) {
+      if (delta > 0 && item.stock !== undefined && item.stock > 0 && nuevaQty > item.stock) {
         showToast(`No hay suficiente stock para ${item.name}. Stock: ${item.stock}`);
         return prevCart;
       }
@@ -243,17 +272,19 @@ const POS = () => {
       return;
     }
 
+    const appliesIgtf = metodoPago === 'Divisa' && formatoDocumento !== 'SOLO_VES';
+
     const payload = {
       cliente_id: parseInt(client, 10),
       metodo_pago: metodoPago,
-      aplica_igtf: metodoPago === 'Divisa',
+      aplica_igtf: appliesIgtf,
       moneda_documento: formatoDocumento,
       tasa_cambio_bs: tasaEfectiva,
       vendedor_id: vendedorId ? parseInt(vendedorId, 10) : null,
       detalles: cart.map(item => ({
         producto_id: item.id,
-        cantidad: item.qty,
-        precio_unitario: item.price,
+        cantidad: Number(item.qty) || 1,
+        precio_unitario: Number(item.price) || 0,
         descripcion: item.name,
         es_exento: item.es_exento
       }))
@@ -273,11 +304,11 @@ const POS = () => {
   // ==========================================
   const subtotalGravado = cart
     .filter(item => !item.es_exento)
-    .reduce((acc, item) => acc + (item.qty * item.price), 0);
+    .reduce((acc, item) => acc + ((Number(item.qty) || 0) * (Number(item.price) || 0)), 0);
 
   const subtotalExento = cart
     .filter(item => item.es_exento)
-    .reduce((acc, item) => acc + (item.qty * item.price), 0);
+    .reduce((acc, item) => acc + ((Number(item.qty) || 0) * (Number(item.price) || 0)), 0);
 
   const subtotalProductos = subtotalGravado + subtotalExento;
   const cartIVA = subtotalGravado * 0.16;
@@ -287,8 +318,10 @@ const POS = () => {
   // ETAPA B: CÁLCULO DE CAJA (MEDIOS DE PAGO E IGTF)
   // Medios Sujetos a IGTF 3%: 'Divisa' (USD efectivo / Zelle)
   // Medios Exentos 0%: 'Efectivo' (Bs), 'PagoMovil', 'Transferencia'
+  // Si la moneda es SOLO_VES o el pago es en Bs, el IGTF es estrictamente 0
   // ==========================================
-  const cartIGTF = metodoPago === 'Divisa' ? (subtotalBaseFactura * 0.03) : 0;
+  const appliesIgtf = metodoPago === 'Divisa' && formatoDocumento !== 'SOLO_VES';
+  const cartIGTF = appliesIgtf ? (subtotalBaseFactura * 0.03) : 0;
   const cartTotal = subtotalBaseFactura + cartIGTF;
   const cartTotalBs = cartTotal * (tasaBCV || 0);
 
@@ -309,6 +342,13 @@ const POS = () => {
   useEffect(() => {
     setProductPage(1);
   }, [searchTerm]);
+
+  // Si se selecciona Solo Bolívares (SOLO_VES), cambiar método a Bolívares (Pago Móvil) automáticamente
+  useEffect(() => {
+    if (formatoDocumento === 'SOLO_VES' && metodoPago === 'Divisa') {
+      setMetodoPago('PagoMovil');
+    }
+  }, [formatoDocumento]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-20 relative">
@@ -369,7 +409,7 @@ const POS = () => {
 
       {/* TOP: Contenedor Superior Alargado de Parámetros (Ancho Completo) */}
       <section className="bg-white p-7 rounded-[2.5rem] border border-slate-200 shadow-sm">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5">
             
             {/* 1. Identificación Cliente */}
             <div className="flex flex-col space-y-2">
@@ -454,6 +494,26 @@ const POS = () => {
                   <option value="BIMONETARIO">🌐 Dólares + Bolívares</option>
                   <option value="SOLO_USD">💵 Solo Divisas (USD $)</option>
                   <option value="SOLO_VES">🇻🇪 Solo Bolívares (Bs.)</option>
+               </select>
+            </div>
+
+            {/* 5. Método de Pago */}
+            <div className="flex flex-col space-y-2">
+               <div className="min-h-[22px] flex items-center justify-between">
+                  <label className="text-xs font-black text-slate-500 uppercase tracking-widest leading-none">Forma de Pago</label>
+                  <span className={`text-[9px] font-black uppercase font-mono ${appliesIgtf ? 'text-amber-600' : 'text-emerald-700'}`}>
+                    {appliesIgtf ? '+3% IGTF' : 'Exento (0%)'}
+                  </span>
+               </div>
+               <select
+                 value={metodoPago}
+                 onChange={(e) => setMetodoPago(e.target.value as any)}
+                 className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-black text-slate-800 focus:outline-none focus:border-[#0b5156] uppercase transition-colors"
+               >
+                  <option value="Divisa">💵 Divisas / Zelle (IGTF 3%)</option>
+                  <option value="PagoMovil">📱 Pago Móvil (0% IGTF - Bs)</option>
+                  <option value="Transferencia">🏦 Transferencia (0% IGTF - Bs)</option>
+                  <option value="Efectivo">🇻🇪 Efectivo Bs (0% IGTF)</option>
                </select>
             </div>
         </div>
@@ -731,24 +791,35 @@ const POS = () => {
                      <div key={item.id} className="flex justify-between items-start border-b border-slate-100 pb-4">
                         <div className="space-y-0.5">
                            <p className="text-sm font-black text-slate-800 uppercase leading-tight">{item.name}</p>
-                           <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500 uppercase font-mono">
+                           <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500 uppercase font-mono mt-1">
                              <button
                                type="button"
                                onClick={() => handleCartQtyChange(item.id, -1)}
                                title="Restar uno"
-                               className="w-5 h-5 rounded-md bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors"
+                               className="w-5 h-5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center transition-colors font-bold shrink-0"
                              >
                                <Minus size={10} />
                              </button>
-                             <span>{item.qty} x $</span>
+                             <input
+                               type="number"
+                               min="1"
+                               max={item.stock || undefined}
+                               value={item.qty}
+                               onChange={(e) => handleCartQtyDirectChange(item.id, e.target.value)}
+                               onBlur={() => handleCartQtyBlur(item.id)}
+                               title="Cantidad — editable directamente"
+                               className="w-12 px-1 py-0.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-bold text-center text-slate-800 focus:outline-none focus:border-[#0b5156]/50"
+                             />
                              <button
                                type="button"
                                onClick={() => handleCartQtyChange(item.id, 1)}
                                title="Sumar uno"
-                               className="w-5 h-5 rounded-md bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors"
+                               className="w-5 h-5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center transition-colors font-bold shrink-0"
                              >
                                <Plus size={10} />
                              </button>
+                             <span className="text-slate-400 font-normal px-0.5">x</span>
+                             <span className="text-slate-400 font-normal">$</span>
                              <input
                                type="number"
                                min="0"
@@ -756,12 +827,14 @@ const POS = () => {
                                value={item.price}
                                onChange={(e) => handleCartPriceChange(item.id, e.target.value)}
                                title="Precio negociado — editable por línea"
-                               className="w-20 px-1.5 py-0.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-800 focus:outline-none focus:border-[#0b5156]/50"
+                               className="w-16 px-1.5 py-0.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-800 focus:outline-none focus:border-[#0b5156]/50"
                              />
                            </div>
                         </div>
                         <div className="flex flex-col items-end gap-1">
-                          <strong className="text-sm font-black text-slate-800 font-mono">${(item.qty * item.price).toFixed(2)}</strong>
+                          <strong className="text-sm font-black text-slate-800 font-mono">
+                             ${((Number(item.qty) || 0) * (Number(item.price) || 0)).toFixed(2)}
+                           </strong>
                           <button
                             type="button"
                             onClick={() => handleRemoveFromCart(item.id)}
@@ -781,39 +854,110 @@ const POS = () => {
              </div>
 
              <div className="pt-4 space-y-4">
-                <div className="space-y-2 pt-2">
-                   {subtotalExento > 0 && (
-                     <div className="flex justify-between items-center">
-                        <span className="text-xs font-black uppercase text-emerald-700 tracking-wider">Monto Exento (E)</span>
-                        <strong className="text-sm font-black text-emerald-700 font-mono">${subtotalExento.toFixed(2)}</strong>
-                     </div>
-                   )}
-                   {subtotalGravado > 0 && (
-                     <div className="flex justify-between items-center">
-                        <span className="text-xs font-black uppercase text-slate-600 tracking-wider">Base Gravable (G)</span>
-                        <strong className="text-sm font-black text-slate-800 font-mono">${subtotalGravado.toFixed(2)}</strong>
-                     </div>
-                   )}
-                   <div className="flex justify-between items-center">
-                      <span className="text-xs font-black uppercase text-slate-500 tracking-wider">Impuesto IVA (16%)</span>
-                      <strong className="text-sm font-black text-slate-800 font-mono">${cartIVA.toFixed(2)}</strong>
-                   </div>
-                   {cartIGTF > 0 && (
-                     <div className="flex justify-between items-center">
-                        <span className="text-xs font-black uppercase text-red-600 tracking-wider">IGTF Percibido Divisas (3%)</span>
-                        <strong className="text-sm font-black text-red-600 font-mono">${cartIGTF.toFixed(2)}</strong>
-                     </div>
-                   )}
-                   <div className="border-t border-slate-200 pt-3">
-                      <div className="flex justify-between items-end">
-                         <span className="text-sm font-black uppercase tracking-widest text-[#0b5156]">Total a Pagar</span>
-                         <div className="text-right">
-                            <strong className="text-2xl font-black text-[#0b5156] font-mono tracking-tighter block">${cartTotal.toFixed(2)}</strong>
-                            <span className="text-[11px] font-bold text-slate-500 font-mono">Bs. {cartTotalBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                         </div>
+                 {/* Selector Rápido de Método de Pago */}
+                 <div className="space-y-2 pt-2 border-t border-slate-100">
+                    <div className="flex justify-between items-center">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">
+                        Método de Pago
+                      </label>
+                      <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-md font-mono ${
+                        appliesIgtf 
+                          ? 'bg-amber-100 text-amber-800 border border-amber-200' 
+                          : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                      }`}>
+                        {appliesIgtf ? 'Sujeto a IGTF 3%' : 'Exento de IGTF (0%)'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setMetodoPago('Divisa')}
+                        className={`px-2.5 py-2 rounded-xl text-[11px] font-black uppercase transition-all flex flex-col items-center justify-center border text-center ${
+                          metodoPago === 'Divisa'
+                            ? 'bg-[#0b5156] text-white border-[#0b5156] shadow-sm ring-2 ring-[#0b5156]/20'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        <span>💵 Divisa / Zelle</span>
+                        <span className={`text-[8px] font-mono ${metodoPago === 'Divisa' ? 'text-amber-300' : 'text-slate-400'}`}>+3% IGTF</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMetodoPago('PagoMovil')}
+                        className={`px-2.5 py-2 rounded-xl text-[11px] font-black uppercase transition-all flex flex-col items-center justify-center border text-center ${
+                          metodoPago === 'PagoMovil'
+                            ? 'bg-[#0b5156] text-white border-[#0b5156] shadow-sm ring-2 ring-[#0b5156]/20'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        <span>📱 Pago Móvil</span>
+                        <span className={`text-[8px] font-mono ${metodoPago === 'PagoMovil' ? 'text-emerald-200' : 'text-slate-400'}`}>0% IGTF (Bs)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMetodoPago('Transferencia')}
+                        className={`px-2.5 py-2 rounded-xl text-[11px] font-black uppercase transition-all flex flex-col items-center justify-center border text-center ${
+                          metodoPago === 'Transferencia'
+                            ? 'bg-[#0b5156] text-white border-[#0b5156] shadow-sm ring-2 ring-[#0b5156]/20'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        <span>🏦 Transf. Bs</span>
+                        <span className={`text-[8px] font-mono ${metodoPago === 'Transferencia' ? 'text-emerald-200' : 'text-slate-400'}`}>0% IGTF (Bs)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMetodoPago('Efectivo')}
+                        className={`px-2.5 py-2 rounded-xl text-[11px] font-black uppercase transition-all flex flex-col items-center justify-center border text-center ${
+                          metodoPago === 'Efectivo'
+                            ? 'bg-[#0b5156] text-white border-[#0b5156] shadow-sm ring-2 ring-[#0b5156]/20'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        <span>🇻🇪 Efectivo Bs</span>
+                        <span className={`text-[8px] font-mono ${metodoPago === 'Efectivo' ? 'text-emerald-200' : 'text-slate-400'}`}>0% IGTF (Bs)</span>
+                      </button>
+                    </div>
+                 </div>
+
+                 <div className="space-y-2 pt-2 border-t border-slate-100">
+                    {subtotalExento > 0 && (
+                      <div className="flex justify-between items-center">
+                         <span className="text-xs font-black uppercase text-emerald-700 tracking-wider">Monto Exento (E)</span>
+                         <strong className="text-sm font-black text-emerald-700 font-mono">${subtotalExento.toFixed(2)}</strong>
                       </div>
-                   </div>
-                </div>
+                    )}
+                    {subtotalGravado > 0 && (
+                      <div className="flex justify-between items-center">
+                         <span className="text-xs font-black uppercase text-slate-600 tracking-wider">Base Gravable (G)</span>
+                         <strong className="text-sm font-black text-slate-800 font-mono">${subtotalGravado.toFixed(2)}</strong>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center">
+                       <span className="text-xs font-black uppercase text-slate-500 tracking-wider">Impuesto IVA (16%)</span>
+                       <strong className="text-sm font-black text-slate-800 font-mono">${cartIVA.toFixed(2)}</strong>
+                    </div>
+                    {cartIGTF > 0 ? (
+                      <div className="flex justify-between items-center">
+                         <span className="text-xs font-black uppercase text-amber-600 tracking-wider">IGTF Percibido Divisas (3%)</span>
+                         <strong className="text-sm font-black text-amber-600 font-mono">${cartIGTF.toFixed(2)}</strong>
+                      </div>
+                    ) : (
+                      <div className="flex justify-between items-center">
+                         <span className="text-xs font-bold uppercase text-slate-400 tracking-wider">IGTF (0% Exento Bs)</span>
+                         <span className="text-xs font-bold text-slate-400 font-mono">$0.00</span>
+                      </div>
+                    )}
+                    <div className="border-t border-slate-200 pt-3">
+                       <div className="flex justify-between items-end">
+                          <span className="text-sm font-black uppercase tracking-widest text-[#0b5156]">Total a Pagar</span>
+                          <div className="text-right">
+                             <strong className="text-2xl font-black text-[#0b5156] font-mono tracking-tighter block">${cartTotal.toFixed(2)}</strong>
+                             <span className="text-[11px] font-bold text-slate-500 font-mono">Bs. {cartTotalBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          </div>
+                       </div>
+                    </div>
+                 </div>
 
                 <button onClick={handleCheckout} className="w-full bg-[#0b5156] text-white font-black py-4 rounded-2xl uppercase text-sm tracking-widest shadow-xl shadow-[#0b5156]/20 hover:scale-[1.02] transition-all mt-4">
                    Emitir Factura Fiscal

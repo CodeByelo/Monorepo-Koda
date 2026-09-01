@@ -307,15 +307,17 @@ export const ProductEditModal = ({
             )}
           </div>
           <div>
-            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Stock Inicial</label>
+            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
+              {product ? 'Stock Disponible / Actual' : 'Stock Inicial'}
+            </label>
             <input 
               type="number" 
+              min="0"
               value={stock}
               onChange={(e) => setStock(e.target.value)}
               required
-              disabled={!!product}
               placeholder="0"
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-[#0b5156] disabled:opacity-50"
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-[#0b5156]"
             />
             {product && (
               <button
@@ -323,7 +325,7 @@ export const ProductEditModal = ({
                 onClick={() => navigate(`/inventario/ajustes?producto_id=${product.id}`)}
                 className="mt-1.5 flex items-center gap-1 text-[10px] font-black text-[#0b5156] hover:text-[#093e42] uppercase tracking-widest transition-colors"
               >
-                Ajustar Stock <ArrowRightCircle size={12} />
+                O registrar ajuste formal con justificación <ArrowRightCircle size={12} />
               </button>
             )}
           </div>

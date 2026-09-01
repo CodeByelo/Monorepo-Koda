@@ -1,5 +1,6 @@
 import os
 import uuid
+from decimal import Decimal
 
 import requests
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -10,8 +11,9 @@ from typing import List
 from backend.core.database import get_db
 from backend.core.security import get_current_user
 from backend.models.core import Profile
-from backend.models.operations import Producto
+from backend.models.operations import Producto, KardexMovimiento
 from backend.schemas.operations import ProductoCreate, ProductoResponse
+from backend.utils.helpers import get_almacen_principal_id
 
 router = APIRouter(prefix="/productos", tags=["Productos"])
 
@@ -93,11 +95,29 @@ def actualizar_producto(producto_id: int, producto_update: ProductoCreate, db: S
         raise HTTPException(status_code=400, detail="El SKU ya está en uso por otro producto")
 
     datos = producto_update.model_dump()
-    # Bug 1 fix: excluir 'stock' del bucle setattr — el stock solo puede
-    # cambiar a través del flujo de ajuste de inventario con trazabilidad
-    # completa (KardexMovimiento). Modificarlo directamente desde aquí
-    # rompería el sistema anti-robos del ERP.
-    datos.pop("stock", None)
+    
+    # Manejo de stock con trazabilidad forense: si el usuario ajusta el stock
+    # directamente desde la edición del producto, se actualiza el stock y se registra
+    # el movimiento en KardexMovimiento para no romper el libro mayor de inventario.
+    nuevo_stock = datos.pop("stock", None)
+    if nuevo_stock is not None:
+        stock_antiguo = float(producto.stock or 0)
+        stock_nuevo = float(nuevo_stock)
+        delta = stock_nuevo - stock_antiguo
+        if delta != 0:
+            producto.stock = stock_nuevo
+            tipo_mov = "Ajuste_Entrada" if delta > 0 else "Ajuste_Salida"
+            movimiento = KardexMovimiento(
+                producto_id=producto.id,
+                tipo_movimiento=tipo_mov,
+                cantidad=Decimal(str(delta)),
+                documento_referencia=f"EDICION-PROD-{producto.id}",
+                estado="ACTIVO",
+                tenant_id=current_user.tenant_id,
+                almacen_id=get_almacen_principal_id(db, current_user.tenant_id),
+            )
+            db.add(movimiento)
+
     if datos.get("precio_detal") is None:
         datos["precio_detal"] = datos["precio_usd"]
     for key, value in datos.items():
