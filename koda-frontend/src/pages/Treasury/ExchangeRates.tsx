@@ -19,6 +19,8 @@ import { api } from '@/api/client';
 const ExchangeRates = () => {
   const [bcvRate, setBcvRate] = useState<number>(0);
   const [refRate, setRefRate] = useState<number>(0);
+  const [bcvRateRaw, setBcvRateRaw] = useState<string>('');
+  const [refRateRaw, setRefRateRaw] = useState<string>('');
   const [history, setHistory] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -27,6 +29,11 @@ const ExchangeRates = () => {
   const showNotification = (message: string, type: 'success' | 'error') => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 4000);
+  };
+
+  const tieneCuatroDecimales = (valorTexto: string): boolean => {
+    const partes = (valorTexto || '').split('.');
+    return partes.length === 2 && partes[1].length === 4;
   };
   
   // Table state
@@ -56,8 +63,13 @@ const ExchangeRates = () => {
         console.error(e);
       }
 
-      setBcvRate(Number(tasaActual?.tasa || tasaActual?.valor_ves || 0));
-      setRefRate(Number(tasaActual?.tasa_referencial || (tasaActual?.tasa || tasaActual?.valor_ves ? Number(tasaActual.tasa || tasaActual.valor_ves) * 1.15 : 0)));
+      const numBcv = Number(tasaActual?.tasa || tasaActual?.valor_ves || 0);
+      const numRef = Number(tasaActual?.tasa_referencial || (tasaActual?.tasa || tasaActual?.valor_ves ? Number(tasaActual.tasa || tasaActual.valor_ves) * 1.15 : 0));
+
+      setBcvRate(numBcv);
+      setRefRate(numRef);
+      setBcvRateRaw(numBcv.toFixed(4));
+      setRefRateRaw(numRef.toFixed(4));
       
       const historyWithVariacion = (tasaHistorial || []).map((t: any, index: number, arr: any[]) => {
          const currentRate = Number(t.valor_ves || t.tasa || 0);
@@ -95,6 +107,12 @@ const ExchangeRates = () => {
   };
 
   const handleSaveManual = async (rateToSave: number, isRef: boolean = false) => {
+    const rawValue = isRef ? refRateRaw : bcvRateRaw;
+    if (!tieneCuatroDecimales(rawValue)) {
+      showNotification("Recuerda: la tasa debe llevar cuatro decimales (ej: 218.9550) 🔢", 'error');
+      return;
+    }
+
     try {
       setIsSaving(true);
       const payload = isRef ? { tasa_referencial: rateToSave } : { tasa: rateToSave };
@@ -217,9 +235,12 @@ const ExchangeRates = () => {
                   <Calculator size={14} className="absolute left-3 top-3 text-slate-400" />
                   <input 
                     type="number" 
-                    step="0.01" 
-                    value={bcvRate} 
-                    onChange={(e) => setBcvRate(Number(e.target.value))}
+                    step="0.0001" 
+                    value={bcvRateRaw !== '' ? bcvRateRaw : bcvRate} 
+                    onChange={(e) => {
+                      setBcvRate(Number(e.target.value));
+                      setBcvRateRaw(e.target.value);
+                    }}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm font-black text-[#0b5156] outline-none focus:border-[#0b5156] font-mono"
                   />
                </div>
@@ -253,9 +274,12 @@ const ExchangeRates = () => {
                   <TrendingUp size={14} className="absolute left-3 top-3 text-slate-400" />
                   <input 
                     type="number" 
-                    step="0.01" 
-                    value={refRate} 
-                    onChange={(e) => setRefRate(Number(e.target.value))}
+                    step="0.0001" 
+                    value={refRateRaw !== '' ? refRateRaw : refRate} 
+                    onChange={(e) => {
+                      setRefRate(Number(e.target.value));
+                      setRefRateRaw(e.target.value);
+                    }}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm font-black text-[#0b5156] outline-none focus:border-[#726555] font-mono"
                   />
                </div>
