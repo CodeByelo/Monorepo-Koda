@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { X, Image as ImageIcon } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { X, Image as ImageIcon, ArrowRightCircle } from 'lucide-react';
 import { api } from '@/api/client';
 
 export interface Producto {
@@ -29,6 +30,7 @@ export const ProductEditModal = ({
   onClose,
   onSaved
 }: ProductEditModalProps) => {
+  const navigate = useNavigate();
   // Form states
   const [sku, setSku] = useState('');
   const [nombre, setNombre] = useState('');
@@ -315,6 +317,15 @@ export const ProductEditModal = ({
               placeholder="0"
               className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-[#0b5156] disabled:opacity-50"
             />
+            {product && (
+              <button
+                type="button"
+                onClick={() => navigate(`/inventario/ajustes?producto_id=${product.id}`)}
+                className="mt-1.5 flex items-center gap-1 text-[10px] font-black text-[#0b5156] hover:text-[#093e42] uppercase tracking-widest transition-colors"
+              >
+                Ajustar Stock <ArrowRightCircle size={12} />
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-2 pt-2">
             <input 
