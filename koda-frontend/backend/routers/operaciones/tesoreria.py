@@ -555,18 +555,6 @@ def cerrar_conciliacion_periodo(body: dict, db: Session = Depends(get_db), curre
 
 @tesoreria_router.get("/caja-chica")
 def caja_chica(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    # Seed default fund if none exists for the tenant
-    if db.query(FondoCajaChica).filter(FondoCajaChica.tenant_id == current_user.tenant_id).count() == 0:
-        default_fondo = FondoCajaChica(
-            nombre="Caja Chica Operativa",
-            responsable="Administración",
-            asignado_usd=500.00,
-            disponible_usd=500.00,
-            tenant_id=current_user.tenant_id
-        )
-        db.add(default_fondo)
-        db.commit()
-
     fondos = db.query(FondoCajaChica).filter(FondoCajaChica.tenant_id == current_user.tenant_id).all()
     gastos = db.query(GastoCajaChica).join(FondoCajaChica).filter(
         FondoCajaChica.tenant_id == current_user.tenant_id
@@ -677,52 +665,36 @@ def registrar_fondo_caja_chica(body: dict, db: Session = Depends(get_db), curren
     return {"ok": True, "id": nuevo_fondo.id}
 
 
+@tesoreria_router.delete("/caja-chica/fondos/{fondo_id}")
+def eliminar_fondo_caja_chica(fondo_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    fondo = db.query(FondoCajaChica).filter(
+        FondoCajaChica.id == fondo_id,
+        FondoCajaChica.tenant_id == current_user.tenant_id
+    ).first()
+    if not fondo:
+        raise HTTPException(status_code=404, detail="Fondo de caja chica no encontrado")
+
+    tiene_gastos = db.query(GastoCajaChica).filter(GastoCajaChica.fondo_id == fondo.id).count() > 0
+    nunca_usado = float(fondo.disponible_usd) == float(fondo.asignado_usd)
+
+    if not tiene_gastos and nunca_usado:
+        db.delete(fondo)
+        db.commit()
+        return {"ok": True, "accion": "eliminado"}
+    else:
+        # Tiene historial real (gastos registrados o saldo ya movido) — no se
+        # borra para no perder trazabilidad financiera, se desactiva.
+        fondo.estado = "INACTIVO"
+        db.commit()
+        return {"ok": True, "accion": "desactivado"}
+
+
 @tesoreria_router.get("/arqueo")
 def arqueo_caja(fecha: str, caja: str = "Caja Principal USD", db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    # Seed default cash accounts if they do not exist for the tenant
-    caja_usd = db.query(CuentaBancaria).filter(
-        CuentaBancaria.banco == "Caja Principal USD",
-        CuentaBancaria.tenant_id == current_user.tenant_id
-    ).first()
-    if not caja_usd:
-        caja_usd = CuentaBancaria(
-            banco="Caja Principal USD",
-            numero_cuenta="1234-CAJA-USD-01",
-            moneda="USD",
-            saldo_actual_usd=1500.00,
-            tenant_id=current_user.tenant_id
-        )
-        db.add(caja_usd)
-        
-    caja_ventas = db.query(CuentaBancaria).filter(
-        CuentaBancaria.banco == "Caja Chica Ventas",
-        CuentaBancaria.tenant_id == current_user.tenant_id
-    ).first()
-    if not caja_ventas:
-        caja_ventas = CuentaBancaria(
-            banco="Caja Chica Ventas",
-            numero_cuenta="1234-CAJA-USD-02",
-            moneda="USD",
-            saldo_actual_usd=350.00,
-            tenant_id=current_user.tenant_id
-        )
-        db.add(caja_ventas)
-
     caja_ves = db.query(CuentaBancaria).filter(
         CuentaBancaria.banco == "Caja Principal VES",
         CuentaBancaria.tenant_id == current_user.tenant_id
     ).first()
-    if not caja_ves:
-        caja_ves = CuentaBancaria(
-            banco="Caja Principal VES",
-            numero_cuenta="1234-CAJA-VES-01",
-            moneda="VES",
-            saldo_actual_usd=25000.00,
-            tenant_id=current_user.tenant_id
-        )
-        db.add(caja_ves)
-        
-    db.commit()
 
     # Get balance of selected cash account
     selected = db.query(CuentaBancaria).filter(

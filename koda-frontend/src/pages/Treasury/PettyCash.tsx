@@ -7,7 +7,8 @@ import {
   Filter,
   Camera,
   User,
-  TrendingDown
+  TrendingDown,
+  Trash2
 } from 'lucide-react';
 import { api } from '@/api/client';
 import { useNavigate } from 'react-router-dom';
@@ -66,6 +67,34 @@ const PettyCash = () => {
     } catch (error) {
       console.error("Error al reponer caja chica:", error);
       showToast("Error al procesar la reposición de fondos.");
+    }
+  };
+
+  const handleDeleteFund = async (fundIdStr: string, fundNameStr: string) => {
+    const cleanId = fundIdStr.replace("FD-", "").replace(/^0+/, "") || "0";
+    const numericId = parseInt(cleanId, 10);
+    if (isNaN(numericId) || numericId <= 0) {
+      showToast("ID de fondo inválido.");
+      return;
+    }
+
+    if (!window.confirm(`¿Está seguro de eliminar el fondo "${fundNameStr || fundIdStr}"?`)) {
+      return;
+    }
+
+    try {
+      const resp = await api.delete<any>(`/tesoreria/caja-chica/fondos/${numericId}`);
+      if (resp?.accion === "eliminado") {
+        showToast("Fondo eliminado.");
+      } else if (resp?.accion === "desactivado") {
+        showToast("Fondo desactivado (tenía historial).");
+      } else {
+        showToast("Operación realizada con éxito.");
+      }
+      fetchData();
+    } catch (error: any) {
+      console.error("Error al eliminar fondo:", error);
+      showToast(error?.response?.data?.detail || "Error al eliminar el fondo de caja chica.");
     }
   };
 
@@ -189,12 +218,13 @@ const PettyCash = () => {
                     <th className="py-2.5 px-4 text-right">ASIGNADO</th>
                     <th className="py-2.5 px-4 text-right">DISPONIBLE</th>
                     <th className="py-2.5 px-4 text-center">ESTADO</th>
+                    <th className="py-2.5 px-4 text-center">ACCIONES</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50 text-xs">
                   {isLoading ? (
                     <tr>
-                      <td colSpan={5} className="py-10 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                      <td colSpan={6} className="py-10 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                         Cargando fondos...
                       </td>
                     </tr>
@@ -219,10 +249,20 @@ const PettyCash = () => {
                           {row.status || row.estado}
                         </span>
                       </td>
+                      <td className="py-2.5 px-4 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteFund(row.id, row.name || row.nombre)}
+                          title="Eliminar o desactivar fondo"
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
                     </tr>
                   )) : (
                     <tr>
-                      <td colSpan={5} className="py-10 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                      <td colSpan={6} className="py-10 text-center text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                         No hay fondos registrados
                       </td>
                     </tr>
