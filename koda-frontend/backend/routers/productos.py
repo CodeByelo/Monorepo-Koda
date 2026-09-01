@@ -4,6 +4,7 @@ import uuid
 import requests
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from typing import List
 
 from backend.core.database import get_db
@@ -92,6 +93,11 @@ def actualizar_producto(producto_id: int, producto_update: ProductoCreate, db: S
         raise HTTPException(status_code=400, detail="El SKU ya está en uso por otro producto")
 
     datos = producto_update.model_dump()
+    # Bug 1 fix: excluir 'stock' del bucle setattr — el stock solo puede
+    # cambiar a través del flujo de ajuste de inventario con trazabilidad
+    # completa (KardexMovimiento). Modificarlo directamente desde aquí
+    # rompería el sistema anti-robos del ERP.
+    datos.pop("stock", None)
     if datos.get("precio_detal") is None:
         datos["precio_detal"] = datos["precio_usd"]
     for key, value in datos.items():
@@ -108,8 +114,15 @@ def eliminar_producto(producto_id: int, db: Session = Depends(get_db), current_u
     ).first()
     if not producto:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
-    db.delete(producto)
-    db.commit()
+    try:
+        db.delete(producto)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="No se puede eliminar el producto: tiene ventas o movimientos de inventario asociados."
+        )
     return {"message": "Producto eliminado exitosamente"}
 
 
