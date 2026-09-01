@@ -23,7 +23,9 @@ import {
   Wallet,
   ChevronLeft,
   ChevronRight,
-  Pencil
+  Pencil,
+  Trash2,
+  Minus
 } from 'lucide-react';
 
 // Cantidad de productos mostrados por página en la grilla del POS — antes
@@ -173,6 +175,32 @@ const POS = () => {
     setCart((prevCart) => prevCart.map((item) =>
       item.id === id ? { ...item, price: Number.isFinite(newPrice) ? newPrice : 0 } : item
     ));
+  };
+
+  const handleRemoveFromCart = (id: number) => {
+    setCart((prevCart) => prevCart.filter((item) => item.id !== id));
+  };
+
+  const handleCartQtyChange = (id: number, delta: number) => {
+    setCart((prevCart) => {
+      const item = prevCart.find((i) => i.id === id);
+      if (!item) return prevCart;
+      const nuevaQty = item.qty + delta;
+      if (nuevaQty <= 0) {
+        // Si la cantidad llega a 0, se comporta igual que eliminar la línea.
+        return prevCart.filter((i) => i.id !== id);
+      }
+      if (delta > 0 && nuevaQty > item.stock) {
+        showToast(`No hay suficiente stock para ${item.name}. Stock: ${item.stock}`);
+        return prevCart;
+      }
+      return prevCart.map((i) => (i.id === id ? { ...i, qty: nuevaQty } : i));
+    });
+  };
+
+  const handleVaciarTicket = () => {
+    if (cart.length === 0) return;
+    setCart([]);
   };
 
   const handleClienteCreated = (cliente: any) => {
@@ -681,9 +709,20 @@ const POS = () => {
 
         <aside className="space-y-6 lg:pt-1">
           <section className="bg-white p-8 rounded-3xl border border-[#0b5156]/20 shadow-sm space-y-6">
-             <div className="space-y-1">
-                <h3 className="text-lg font-black uppercase tracking-tight text-[#0b5156] font-mono">Ticket Actual</h3>
-                <p className="text-sm font-bold text-slate-500 uppercase tracking-widest font-mono">ID: NUEVO TICKET</p>
+             <div className="flex justify-between items-start">
+                <div className="space-y-1">
+                   <h3 className="text-lg font-black uppercase tracking-tight text-[#0b5156] font-mono">Ticket Actual</h3>
+                   <p className="text-sm font-bold text-slate-500 uppercase tracking-widest font-mono">ID: NUEVO TICKET</p>
+                </div>
+                {cart.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleVaciarTicket}
+                    className="text-[10px] font-black uppercase tracking-widest text-rose-500 hover:text-rose-700 transition-colors"
+                  >
+                    Vaciar Ticket
+                  </button>
+                )}
              </div>
              
              <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
@@ -693,7 +732,23 @@ const POS = () => {
                         <div className="space-y-0.5">
                            <p className="text-sm font-black text-slate-800 uppercase leading-tight">{item.name}</p>
                            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500 uppercase font-mono">
+                             <button
+                               type="button"
+                               onClick={() => handleCartQtyChange(item.id, -1)}
+                               title="Restar uno"
+                               className="w-5 h-5 rounded-md bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors"
+                             >
+                               <Minus size={10} />
+                             </button>
                              <span>{item.qty} x $</span>
+                             <button
+                               type="button"
+                               onClick={() => handleCartQtyChange(item.id, 1)}
+                               title="Sumar uno"
+                               className="w-5 h-5 rounded-md bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors"
+                             >
+                               <Plus size={10} />
+                             </button>
                              <input
                                type="number"
                                min="0"
@@ -705,7 +760,17 @@ const POS = () => {
                              />
                            </div>
                         </div>
-                        <strong className="text-sm font-black text-slate-800 font-mono">${(item.qty * item.price).toFixed(2)}</strong>
+                        <div className="flex flex-col items-end gap-1">
+                          <strong className="text-sm font-black text-slate-800 font-mono">${(item.qty * item.price).toFixed(2)}</strong>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveFromCart(item.id)}
+                            title="Eliminar del ticket"
+                            className="text-rose-400 hover:text-rose-600 transition-colors"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                      </div>
                   ))
                 ) : (
