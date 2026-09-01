@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { 
   Search, 
   Plus, 
@@ -35,6 +36,7 @@ interface AjusteInventario {
 }
 
 const InventoryAdjustments = () => {
+  const [searchParams] = useSearchParams();
   const [adjustments, setAdjustments] = useState<AjusteInventario[]>([]);
   const [productos, setProductos] = useState<Producto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,6 +80,19 @@ const InventoryAdjustments = () => {
   useEffect(() => {
     fetchData();
   }, []);
+
+  useEffect(() => {
+    const productoIdParam = searchParams.get('producto_id');
+    if (productoIdParam && productos.length > 0) {
+      const id = Number(productoIdParam);
+      const existe = productos.some(p => p.id === id);
+      if (existe) {
+        setSelectedProductoId(id);
+        setIsModalOpen(true);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productos, searchParams]);
 
   const handleProposeAdjustment = async (e: React.FormEvent) => {
     e.preventDefault();
