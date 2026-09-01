@@ -773,7 +773,6 @@ const POS = () => {
                                title="Cantidad — editable directamente"
                                className="w-12 px-1 py-0.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-800 text-center focus:outline-none focus:border-[#0b5156]/50"
                              />
-                             <span>x $</span>
                              <button
                                type="button"
                                onClick={() => handleCartQtyChange(item.id, 1)}
@@ -782,6 +781,7 @@ const POS = () => {
                              >
                                <Plus size={10} />
                              </button>
+                             <span>x $</span>
                              <input
                                type="number"
                                min="0"
