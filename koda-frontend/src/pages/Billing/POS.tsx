@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { api } from '@/api/client';
 import { useAuth } from '@/providers/AuthProvider';
 import { QuickCreateClienteModal } from '@/components/customers/QuickCreateClienteModal';
+import { CuentasPorCobrarModal } from '@/components/collections/CuentasPorCobrarModal';
 import {
   Search,
   Banknote,
@@ -17,8 +18,16 @@ import {
   UserPlus,
   FileText,
   Truck,
-  Receipt
+  Receipt,
+  Wallet,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
+
+// Cantidad de productos mostrados por página en la grilla del POS — antes
+// se renderizaban los 129+ productos de una sola vez y la página quedaba
+// interminable. El cliente pidió que no haga falta scrollear sin fin.
+const PRODUCTS_PER_PAGE = 12;
 
 // Tarifa de negocio usada como punto de partida al agregar un producto al
 // carrito. Solo autocompleta el precio de la línea; sigue siendo editable
@@ -55,6 +64,8 @@ const POS = () => {
   const [tasaPersonalizada, setTasaPersonalizada] = useState<string>('');
   const [toast, setToast] = useState<{message: string, type: 'error' | 'success'} | null>(null);
   const [isQuickCreateOpen, setIsQuickCreateOpen] = useState(false);
+  const [isCxCOpen, setIsCxCOpen] = useState(false);
+  const [productPage, setProductPage] = useState(1);
 
   const showToast = (message: string, type: 'error' | 'success' = 'error') => {
     setToast({ message, type });
@@ -250,10 +261,23 @@ const POS = () => {
   const cartTotal = subtotalBaseFactura + cartIGTF;
   const cartTotalBs = cartTotal * (tasaBCV || 0);
 
-  const filteredProducts = productos.filter(p => 
-    p.nombre.toLowerCase().includes(searchTerm.toLowerCase()) || 
+  const filteredProducts = productos.filter(p =>
+    p.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
     p.sku.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const totalProductPages = Math.max(1, Math.ceil(filteredProducts.length / PRODUCTS_PER_PAGE));
+  const currentProductPage = Math.min(productPage, totalProductPages);
+  const paginatedProducts = filteredProducts.slice(
+    (currentProductPage - 1) * PRODUCTS_PER_PAGE,
+    currentProductPage * PRODUCTS_PER_PAGE
+  );
+
+  // Cada vez que cambia la búsqueda o la lista de productos, volvemos a la
+  // página 1 — si no, se puede quedar "atascado" en una página vacía.
+  useEffect(() => {
+    setProductPage(1);
+  }, [searchTerm]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-20 relative">
@@ -284,6 +308,10 @@ const POS = () => {
              <Link to="/historial" className="bg-white text-slate-500 px-6 py-2.5 rounded-xl text-sm font-black uppercase tracking-widest border border-slate-200 hover:bg-slate-50 transition-all flex items-center">
                 Facturas Emitidas
              </Link>
+             <button onClick={() => setIsCxCOpen(true)} className="bg-white text-[#0b5156] px-6 py-2.5 rounded-xl text-sm font-black uppercase tracking-widest border border-[#0b5156]/20 hover:bg-[#0b5156]/5 transition-all flex items-center gap-2">
+                <Wallet size={16} />
+                Quién Me Debe
+             </button>
              <button onClick={handleCheckout} className="bg-[#0b5156] text-white px-8 py-2.5 rounded-xl text-sm font-black uppercase tracking-widest shadow-lg shadow-[#0b5156]/20 hover:scale-105 transition-all">
                 Cobrar Ticket Actual
              </button>
@@ -440,8 +468,8 @@ const POS = () => {
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
-               {filteredProducts.length > 0 ? (
-                 filteredProducts.map((p) => {
+               {paginatedProducts.length > 0 ? (
+                 paginatedProducts.map((p) => {
                    const precioActual = resolveTierPrice(p, tarifa);
                    const tieneStock = Number(p.stock) > 0;
                    return (
@@ -500,6 +528,37 @@ const POS = () => {
                  </div>
                )}
             </div>
+
+            {filteredProducts.length > PRODUCTS_PER_PAGE && (
+              <div className="flex items-center justify-between pt-2">
+                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                   Página {currentProductPage} de {totalProductPages} — mostrando {paginatedProducts.length} de {filteredProducts.length} productos
+                 </p>
+                 <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setProductPage((p) => Math.max(1, p - 1))}
+                      disabled={currentProductPage <= 1}
+                      className="h-9 w-9 flex items-center justify-center bg-slate-50 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 rounded-xl border border-slate-200 transition-colors"
+                      aria-label="Página anterior"
+                    >
+                      <ChevronLeft size={16} />
+                    </button>
+                    <span className="min-w-[2.5rem] text-center text-xs font-black text-slate-800 font-mono">
+                      {currentProductPage}/{totalProductPages}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setProductPage((p) => Math.min(totalProductPages, p + 1))}
+                      disabled={currentProductPage >= totalProductPages}
+                      className="h-9 w-9 flex items-center justify-center bg-slate-50 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 rounded-xl border border-slate-200 transition-colors"
+                      aria-label="Página siguiente"
+                    >
+                      <ChevronRight size={16} />
+                    </button>
+                 </div>
+              </div>
+            )}
           </section>
 
           <section className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
@@ -717,6 +776,11 @@ const POS = () => {
         isOpen={isQuickCreateOpen}
         onClose={() => setIsQuickCreateOpen(false)}
         onCreated={handleClienteCreated}
+      />
+
+      <CuentasPorCobrarModal
+        isOpen={isCxCOpen}
+        onClose={() => setIsCxCOpen(false)}
       />
     </div>
   );
