@@ -135,9 +135,19 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         # Validamos token rápido antes de aceptar
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = payload.get("sub")
+        tenant_id = payload.get("tenant_id")
 
-        # Verificar Blacklist inicial
+        # Verificar Blacklist inicial — nivel usuario
         if redis_client.exists(f"blacklist:user:{user_id}"):
+            await websocket.close(code=1008)
+            return
+
+        # Bug 2 fix: verificar blacklist a nivel de tenant.
+        # update_tenant_license() escribe blacklist:tenant:{tenant_id} al
+        # suspender/expirar un tenant. El lado REST ya lo verifica en
+        # auth.py:90; el WebSocket debe hacer lo mismo para que la
+        # suspensión de licencia aplique en ambas mitades del sistema.
+        if tenant_id and redis_client.exists(f"blacklist:tenant:{tenant_id}"):
             await websocket.close(code=1008)
             return
 

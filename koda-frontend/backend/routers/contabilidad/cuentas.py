@@ -6,7 +6,7 @@ from typing import Optional
 from backend.core.database import get_db
 from backend.models.accounting import AsientoContable, AsientoDetalle
 from backend.models.erp_extended import CuentaContable
-from backend.core.security import get_current_user
+from backend.core.security import get_current_user, require_role
 
 router = APIRouter()
 
@@ -68,7 +68,7 @@ class CuentaUpdate(BaseModel):
 
 
 @router.put("/cuentas/{id}")
-def actualizar_cuenta(id: int, body: CuentaUpdate, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+def actualizar_cuenta(id: int, body: CuentaUpdate, db: Session = Depends(get_db), current_user = Depends(require_role(["Admin", "Gerente"]))):
     cuenta = db.query(CuentaContable).filter(
         CuentaContable.id == id,
         CuentaContable.tenant_id == current_user.tenant_id
@@ -98,7 +98,7 @@ def actualizar_cuenta(id: int, body: CuentaUpdate, db: Session = Depends(get_db)
 
 
 @router.delete("/cuentas/{id}")
-def eliminar_cuenta(id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+def eliminar_cuenta(id: int, db: Session = Depends(get_db), current_user = Depends(require_role(["Admin", "Gerente"]))):
     cuenta = db.query(CuentaContable).filter(
         CuentaContable.id == id,
         CuentaContable.tenant_id == current_user.tenant_id
@@ -232,7 +232,7 @@ PLAN_INDUSTRIAL = [
 
 
 @router.post("/cuentas/importar-plantilla")
-def importar_plantilla(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+def importar_plantilla(body: dict, db: Session = Depends(get_db), current_user = Depends(require_role(["Admin", "Gerente"]))):
     plantilla = body.get("plantilla", "Comercial")
     
     if plantilla == "Servicios":

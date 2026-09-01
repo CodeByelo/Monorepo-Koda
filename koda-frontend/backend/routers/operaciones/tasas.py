@@ -31,9 +31,13 @@ tasas_router = APIRouter(prefix="/tasas", tags=["Tasas"], dependencies=[Depends(
 
 
 @tasas_router.get("/bcv")
-def tasa_bcv_alias(db: Session = Depends(get_db)):
-    tasa = db.query(TasaCambio).order_by(TasaCambio.fecha.desc()).first()
-    return {"valor": float(tasa.valor_ves) if tasa else 36.52, "fuente": tasa.fuente if tasa else "BCV"}
+def tasa_bcv_alias(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    # Bug 3 fix: usar el helper canónico tasa_actual() en vez de reimplementar
+    # la consulta sin filtro de tenant. Esto:
+    # 1. Acota la búsqueda al tenant del usuario (evita devolver la tasa de otro tenant).
+    # 2. Usa el fallback correcto del proyecto (784.66, no el 36.52 obsoleto).
+    # 3. Garantiza consistencia con el resto del sistema fiscal que ya usa tasa_actual().
+    return {"valor": tasa_actual(db, current_user.tenant_id), "fuente": "BCV"}
 
 
 # --- CLIENTES SEGMENTOS ---
