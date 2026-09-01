@@ -110,10 +110,18 @@ def export_ledger_for_audit(
     # Consulta real a la base de datos de contabilidad, filtrando estrictamente
     # por el rango de fechas (auditor_session.start_date a end_date).
     
-    # Nos aseguramos de cruzar el encabezado del asiento con sus detalles
+    # Nos aseguramos de cruzar el encabezado del asiento con sus detalles,
+    # filtrando estrictamente por el tenant_id de la sesión de auditoría y rango de fechas.
+    import uuid as _uuid_lib
+    try:
+        tenant_uuid = _uuid_lib.UUID(str(auditor_session.tenant_id))
+    except (ValueError, AttributeError, TypeError):
+        tenant_uuid = auditor_session.tenant_id
+
     query = db.query(AsientoContable, AsientoDetalle).join(
         AsientoDetalle, AsientoContable.id == AsientoDetalle.asiento_id
     ).filter(
+        AsientoContable.tenant_id == tenant_uuid,
         AsientoContable.fecha >= auditor_session.start_date,
         AsientoContable.fecha <= auditor_session.end_date
     ).order_by(AsientoContable.fecha.asc()).all()

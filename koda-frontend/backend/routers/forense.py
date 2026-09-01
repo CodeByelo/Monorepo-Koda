@@ -97,7 +97,6 @@ def get_forensic_timeline(
                 cast(AuditoriaLog.detalle, String).ilike(search_term),
                 cast(AuditoriaLog.accion, String).ilike(search_term),
                 cast(AuditoriaLog.modulo, String).ilike(search_term),
-                cast(AuditoriaLog.usuario, String).ilike(search_term),
                 cast(AuditoriaLog.ip, String).ilike(search_term),
             ),
         )
