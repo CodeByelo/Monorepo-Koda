@@ -5,6 +5,7 @@ import { api } from '@/api/client';
 import { useAuth } from '@/providers/AuthProvider';
 import { QuickCreateClienteModal } from '@/components/customers/QuickCreateClienteModal';
 import { CuentasPorCobrarModal } from '@/components/collections/CuentasPorCobrarModal';
+import { ProductEditModal } from '@/components/products/ProductEditModal';
 import {
   Search,
   Banknote,
@@ -21,7 +22,8 @@ import {
   Receipt,
   Wallet,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Pencil
 } from 'lucide-react';
 
 // Cantidad de productos mostrados por página en la grilla del POS — antes
@@ -65,6 +67,7 @@ const POS = () => {
   const [toast, setToast] = useState<{message: string, type: 'error' | 'success'} | null>(null);
   const [isQuickCreateOpen, setIsQuickCreateOpen] = useState(false);
   const [isCxCOpen, setIsCxCOpen] = useState(false);
+  const [editingProducto, setEditingProducto] = useState<any | null>(null);
   const [productPage, setProductPage] = useState(1);
 
   const showToast = (message: string, type: 'error' | 'success' = 'error') => {
@@ -487,9 +490,27 @@ const POS = () => {
                              <span className="text-[10px] font-black text-[#0b5156] tracking-wider uppercase font-mono bg-white px-2 py-0.5 rounded-md border border-slate-200 shadow-xs">
                                {p.sku}
                              </span>
-                             <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${tieneStock ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
-                               Stock: {p.stock}
-                             </span>
+                             <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    try {
+                                      const full = await api.get(`/productos/${p.id}`);
+                                      setEditingProducto(full);
+                                    } catch (err: any) {
+                                      showToast(err.message || 'Error al cargar datos del producto', 'error');
+                                    }
+                                  }}
+                                  title="Editar producto"
+                                  className="w-5 h-5 rounded-md bg-white border border-slate-200 text-slate-400 hover:text-[#0b5156] hover:border-[#0b5156] flex items-center justify-center transition-colors shadow-xs"
+                                >
+                                  <Pencil size={11} />
+                                </button>
+                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${tieneStock ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                                  Stock: {p.stock}
+                                </span>
+                             </div>
                            </div>
                            <h4 className="text-xs font-black text-slate-800 uppercase leading-snug line-clamp-2" title={p.nombre}>
                              {p.nombre}
@@ -781,6 +802,16 @@ const POS = () => {
       <CuentasPorCobrarModal
         isOpen={isCxCOpen}
         onClose={() => setIsCxCOpen(false)}
+      />
+
+      <ProductEditModal
+        product={editingProducto}
+        isOpen={!!editingProducto}
+        onClose={() => setEditingProducto(null)}
+        onSaved={() => {
+          setEditingProducto(null);
+          fetchContext();
+        }}
       />
     </div>
   );
