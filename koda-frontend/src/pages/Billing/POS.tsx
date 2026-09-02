@@ -72,6 +72,7 @@ const POS = () => {
   const [editingProducto, setEditingProducto] = useState<any | null>(null);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [eximirIva, setEximirIva] = useState(false);
+  const [eximirIgtf, setEximirIgtf] = useState(false);
   const [productPage, setProductPage] = useState(1);
 
   const showToast = (message: string, type: 'error' | 'success' = 'error') => {
@@ -274,12 +275,14 @@ const POS = () => {
       return;
     }
 
-    const appliesIgtf = metodoPago === 'Divisa' && formatoDocumento !== 'SOLO_VES';
+    const appliesIgtfBase = metodoPago === 'Divisa' && formatoDocumento !== 'SOLO_VES';
+    const appliesIgtf = appliesIgtfBase && !eximirIgtf;
 
     const payload = {
       cliente_id: parseInt(client, 10),
       metodo_pago: metodoPago,
       aplica_igtf: appliesIgtf,
+      eximir_igtf: eximirIgtf,
       aplica_iva: !eximirIva,
       eximir_iva: eximirIva,
       moneda_documento: formatoDocumento,
@@ -324,11 +327,11 @@ const POS = () => {
 
   // ==========================================
   // ETAPA B: CÁLCULO DE CAJA (MEDIOS DE PAGO E IGTF)
-  // Medios Sujetos a IGTF 3%: 'Divisa' (USD efectivo / Zelle)
-  // Medios Exentos 0%: 'Efectivo' (Bs), 'PagoMovil', 'Transferencia'
-  // Si la moneda es SOLO_VES o el pago es en Bs, el IGTF es estrictamente 0
+  // Medios Sujetos a IGTF 3%: 'Divisa' (USD efectivo / Zelle) cuando no está eximido
+  // Medios Exentos 0%: 'Efectivo' (Bs), 'PagoMovil', 'Transferencia' o cuando eximirIgtf está activo
   // ==========================================
-  const appliesIgtf = metodoPago === 'Divisa' && formatoDocumento !== 'SOLO_VES';
+  const appliesIgtfBase = metodoPago === 'Divisa' && formatoDocumento !== 'SOLO_VES';
+  const appliesIgtf = appliesIgtfBase && !eximirIgtf;
   const cartIGTF = appliesIgtf ? (subtotalBaseFactura * 0.03) : 0;
   const cartTotal = subtotalBaseFactura + cartIGTF;
   const cartTotalBs = cartTotal * (tasaBCV || 0);
@@ -942,27 +945,55 @@ const POS = () => {
                     </div>
                  </div>
 
-                 {/* Toggle Eximir IVA */}
-                 <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200/80 rounded-2xl">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        id="eximirIvaTicket"
-                        checked={eximirIva}
-                        onChange={(e) => setEximirIva(e.target.checked)}
-                        className="w-4 h-4 text-[#0b5156] focus:ring-[#0b5156] border-slate-300 rounded cursor-pointer"
-                      />
-                      <label htmlFor="eximirIvaTicket" className="text-xs font-black text-slate-700 uppercase tracking-tight cursor-pointer select-none">
-                        Eximir IVA (0% IVA)
-                      </label>
+                 {/* Controles Fiscales: Eximir IVA y Eximir IGTF */}
+                 <div className="space-y-2 pt-2 border-t border-slate-100">
+                    <div className="grid grid-cols-1 gap-2">
+                       {/* Toggle Eximir IVA */}
+                       <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              id="eximirIvaTicket"
+                              checked={eximirIva}
+                              onChange={(e) => setEximirIva(e.target.checked)}
+                              className="w-4 h-4 text-[#0b5156] focus:ring-[#0b5156] border-slate-300 rounded cursor-pointer"
+                            />
+                            <label htmlFor="eximirIvaTicket" className="text-xs font-black text-slate-700 uppercase tracking-tight cursor-pointer select-none">
+                              Eximir IVA (0% IVA)
+                            </label>
+                          </div>
+                          <span className={`text-[9px] font-black uppercase font-mono px-2 py-0.5 rounded-md ${
+                            eximirIva 
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
+                              : 'bg-slate-200 text-slate-600'
+                          }`}>
+                            {eximirIva ? 'FACTURA EXENTA' : 'IVA 16%'}
+                          </span>
+                       </div>
+
+                       {/* Toggle Eximir IGTF */}
+                       <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              id="eximirIgtfTicket"
+                              checked={eximirIgtf}
+                              onChange={(e) => setEximirIgtf(e.target.checked)}
+                              className="w-4 h-4 text-[#0b5156] focus:ring-[#0b5156] border-slate-300 rounded cursor-pointer"
+                            />
+                            <label htmlFor="eximirIgtfTicket" className="text-xs font-black text-slate-700 uppercase tracking-tight cursor-pointer select-none">
+                              Eximir IGTF (0% IGTF)
+                            </label>
+                          </div>
+                          <span className={`text-[9px] font-black uppercase font-mono px-2 py-0.5 rounded-md ${
+                            eximirIgtf || !appliesIgtfBase
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
+                              : 'bg-amber-100 text-amber-800 border border-amber-200'
+                          }`}>
+                            {eximirIgtf ? 'IGTF EXIMIDO' : (!appliesIgtfBase ? 'EXENTO BS' : 'IGTF 3%')}
+                          </span>
+                       </div>
                     </div>
-                    <span className={`text-[9px] font-black uppercase font-mono px-2 py-0.5 rounded-md ${
-                      eximirIva 
-                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
-                        : 'bg-slate-200 text-slate-600'
-                    }`}>
-                      {eximirIva ? 'FACTURA EXENTA' : 'IVA 16%'}
-                    </span>
                  </div>
 
                  <div className="space-y-2 pt-2 border-t border-slate-100">
@@ -995,7 +1026,9 @@ const POS = () => {
                       </div>
                     ) : (
                       <div className="flex justify-between items-center">
-                         <span className="text-xs font-bold uppercase text-slate-400 tracking-wider">IGTF (0% Exento Bs)</span>
+                         <span className="text-xs font-bold uppercase text-slate-400 tracking-wider">
+                           {eximirIgtf ? 'IGTF (0% Eximido)' : 'IGTF (0% Exento Bs)'}
+                         </span>
                          <span className="text-xs font-bold text-slate-400 font-mono">$0.00</span>
                       </div>
                     )}

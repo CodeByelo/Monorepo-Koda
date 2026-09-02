@@ -145,6 +145,7 @@ def procesar_emision_factura(
     vendedor_id: Optional[int] = None,
     tasa_personalizada: Optional[Decimal] = None,
     almacen_id: Optional[int] = None,
+    aplica_igtf_override: Optional[bool] = None,
 ) -> ResultadoFactura:
     if not lineas:
         raise ValueError("La factura debe tener al menos un detalle.")
@@ -173,8 +174,12 @@ def procesar_emision_factura(
     subtotal_total = subtotal_gravado + subtotal_exento
     monto_iva = subtotal_gravado * tasa_iva
 
-    # --- IGTF: derivado en el servidor, nunca confiado del cliente ---
-    aplica_igtf = derivar_aplica_igtf(metodo_pago, moneda_documento)
+    # --- IGTF: derivado en el servidor, con soporte para exención/inclusión explícita ---
+    if aplica_igtf_override is not None:
+        aplica_igtf = bool(aplica_igtf_override)
+    else:
+        aplica_igtf = derivar_aplica_igtf(metodo_pago, moneda_documento)
+
     monto_igtf = (subtotal_total + monto_iva) * tasa_igtf if aplica_igtf else Decimal("0.00")
 
     retencion_iva = (

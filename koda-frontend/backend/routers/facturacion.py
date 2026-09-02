@@ -170,7 +170,14 @@ def emitir_factura_fiscal(
                 es_exento=es_exento_linea,
             ))
 
-        # --- 4. Calcular impuestos, correlativo, persistencia y asientos contables ---
+        # --- 4. Determinar IGTF (respetando exención solicitada si aplica) ---
+        aplica_igtf_override = None
+        if getattr(body, "eximir_igtf", False) or (getattr(body, "aplica_igtf", None) is False):
+            aplica_igtf_override = False
+        elif getattr(body, "aplica_igtf", None) is True:
+            aplica_igtf_override = True
+
+        # --- Calcular impuestos, correlativo, persistencia y asientos contables ---
         resultado = procesar_emision_factura(
             db=db,
             current_user=current_user,
@@ -182,6 +189,7 @@ def emitir_factura_fiscal(
             vendedor_id=body.vendedor_id,
             tasa_personalizada=body.tasa_cambio_bs,
             almacen_id=almacen_venta_id,
+            aplica_igtf_override=aplica_igtf_override,
         )
 
         now = resultado.venta.fecha
