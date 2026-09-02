@@ -70,6 +70,8 @@ const POS = () => {
   const [isQuickCreateOpen, setIsQuickCreateOpen] = useState(false);
   const [isCxCOpen, setIsCxCOpen] = useState(false);
   const [editingProducto, setEditingProducto] = useState<any | null>(null);
+  const [isProductModalOpen, setIsProductModalOpen] = useState(false);
+  const [eximirIva, setEximirIva] = useState(false);
   const [productPage, setProductPage] = useState(1);
 
   const showToast = (message: string, type: 'error' | 'success' = 'error') => {
@@ -278,6 +280,8 @@ const POS = () => {
       cliente_id: parseInt(client, 10),
       metodo_pago: metodoPago,
       aplica_igtf: appliesIgtf,
+      aplica_iva: !eximirIva,
+      eximir_iva: eximirIva,
       moneda_documento: formatoDocumento,
       tasa_cambio_bs: tasaEfectiva,
       vendedor_id: vendedorId ? parseInt(vendedorId, 10) : null,
@@ -286,7 +290,7 @@ const POS = () => {
         cantidad: Number(item.qty) || 1,
         precio_unitario: Number(item.price) || 0,
         descripcion: item.name,
-        es_exento: item.es_exento
+        es_exento: eximirIva ? true : Boolean(item.es_exento)
       }))
     };
     api.post<any>('/v1/facturacion/emitir', payload).then((res) => {
@@ -302,16 +306,20 @@ const POS = () => {
   // ==========================================
   // ETAPA A: CÁLCULO DEL CARRITO (PRODUCTOS)
   // ==========================================
-  const subtotalGravado = cart
-    .filter(item => !item.es_exento)
-    .reduce((acc, item) => acc + ((Number(item.qty) || 0) * (Number(item.price) || 0)), 0);
+  const subtotalGravado = eximirIva
+    ? 0
+    : cart
+        .filter(item => !item.es_exento)
+        .reduce((acc, item) => acc + ((Number(item.qty) || 0) * (Number(item.price) || 0)), 0);
 
-  const subtotalExento = cart
-    .filter(item => item.es_exento)
-    .reduce((acc, item) => acc + ((Number(item.qty) || 0) * (Number(item.price) || 0)), 0);
+  const subtotalExento = eximirIva
+    ? cart.reduce((acc, item) => acc + ((Number(item.qty) || 0) * (Number(item.price) || 0)), 0)
+    : cart
+        .filter(item => item.es_exento)
+        .reduce((acc, item) => acc + ((Number(item.qty) || 0) * (Number(item.price) || 0)), 0);
 
   const subtotalProductos = subtotalGravado + subtotalExento;
-  const cartIVA = subtotalGravado * 0.16;
+  const cartIVA = eximirIva ? 0 : subtotalGravado * 0.16;
   const subtotalBaseFactura = subtotalProductos + cartIVA;
 
   // ==========================================
@@ -527,15 +535,29 @@ const POS = () => {
           
           <section className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
             <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
-               <div className="flex items-center gap-3">
-                 <h3 className="text-xl font-black uppercase tracking-tight text-slate-800 font-mono">Productos del Almacén</h3>
-                 <span className="bg-[#0b5156]/10 text-[#0b5156] text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider font-mono">
-                   {filteredProducts.length} disponibles
-                 </span>
+               <div className="flex flex-wrap items-center gap-3">
+                 <div className="flex items-center gap-3">
+                   <h3 className="text-xl font-black uppercase tracking-tight text-slate-800 font-mono">Productos del Almacén</h3>
+                   <span className="bg-[#0b5156]/10 text-[#0b5156] text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider font-mono">
+                     {filteredProducts.length} disponibles
+                   </span>
+                 </div>
+                 <button
+                   type="button"
+                   onClick={() => {
+                     setEditingProducto(null);
+                     setIsProductModalOpen(true);
+                   }}
+                   className="h-9 px-3.5 bg-[#0b5156] hover:bg-[#093e42] text-white rounded-xl text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
+                   title="Cargar nuevo producto al inventario"
+                 >
+                   <Plus size={14} />
+                   <span>+ Nuevo Producto</span>
+                 </button>
                </div>
                
                {/* BUSCADOR DENTRO DEL CUADRO DE PRODUCTOS */}
-               <div className="flex items-center gap-2 w-full md:w-80">
+               <div className="flex items-center gap-2 w-full md:w-72">
                  <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                     <input 
@@ -920,10 +942,35 @@ const POS = () => {
                     </div>
                  </div>
 
+                 {/* Toggle Eximir IVA */}
+                 <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="eximirIvaTicket"
+                        checked={eximirIva}
+                        onChange={(e) => setEximirIva(e.target.checked)}
+                        className="w-4 h-4 text-[#0b5156] focus:ring-[#0b5156] border-slate-300 rounded cursor-pointer"
+                      />
+                      <label htmlFor="eximirIvaTicket" className="text-xs font-black text-slate-700 uppercase tracking-tight cursor-pointer select-none">
+                        Eximir IVA (0% IVA)
+                      </label>
+                    </div>
+                    <span className={`text-[9px] font-black uppercase font-mono px-2 py-0.5 rounded-md ${
+                      eximirIva 
+                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
+                        : 'bg-slate-200 text-slate-600'
+                    }`}>
+                      {eximirIva ? 'FACTURA EXENTA' : 'IVA 16%'}
+                    </span>
+                 </div>
+
                  <div className="space-y-2 pt-2 border-t border-slate-100">
                     {subtotalExento > 0 && (
                       <div className="flex justify-between items-center">
-                         <span className="text-xs font-black uppercase text-emerald-700 tracking-wider">Monto Exento (E)</span>
+                         <span className="text-xs font-black uppercase text-emerald-700 tracking-wider">
+                           {eximirIva ? 'Total Exento de IVA (E)' : 'Monto Exento (E)'}
+                         </span>
                          <strong className="text-sm font-black text-emerald-700 font-mono">${subtotalExento.toFixed(2)}</strong>
                       </div>
                     )}
@@ -934,8 +981,12 @@ const POS = () => {
                       </div>
                     )}
                     <div className="flex justify-between items-center">
-                       <span className="text-xs font-black uppercase text-slate-500 tracking-wider">Impuesto IVA (16%)</span>
-                       <strong className="text-sm font-black text-slate-800 font-mono">${cartIVA.toFixed(2)}</strong>
+                       <span className="text-xs font-black uppercase text-slate-500 tracking-wider">
+                         {eximirIva ? 'Impuesto IVA (0% Exento)' : 'Impuesto IVA (16%)'}
+                       </span>
+                       <strong className={`text-sm font-black font-mono ${eximirIva ? 'text-slate-400' : 'text-slate-800'}`}>
+                         ${cartIVA.toFixed(2)}
+                       </strong>
                     </div>
                     {cartIGTF > 0 ? (
                       <div className="flex justify-between items-center">
@@ -1015,11 +1066,17 @@ const POS = () => {
 
       <ProductEditModal
         product={editingProducto}
-        isOpen={!!editingProducto}
-        onClose={() => setEditingProducto(null)}
-        onSaved={() => {
+        isOpen={!!editingProducto || isProductModalOpen}
+        onClose={() => {
           setEditingProducto(null);
+          setIsProductModalOpen(false);
+        }}
+        onSaved={() => {
+          const wasEditing = !!editingProducto;
+          setEditingProducto(null);
+          setIsProductModalOpen(false);
           fetchContext();
+          showToast(wasEditing ? 'Producto actualizado' : 'Producto creado exitosamente', 'success');
         }}
       />
     </div>

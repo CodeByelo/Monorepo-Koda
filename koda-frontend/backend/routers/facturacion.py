@@ -152,6 +152,13 @@ def emitir_factura_fiscal(
             producto.stock -= cantidad
             descontar_stock_almacen(db, tenant_id, producto.id, almacen_venta_id, cantidad)
 
+            # Si el producto es exento en catálogo, o si la línea/factura fue marcada como exenta (0% IVA)
+            es_exento_linea = bool(producto.es_exento)
+            if getattr(det, 'es_exento', None) is not None:
+                es_exento_linea = bool(det.es_exento)
+            if getattr(body, 'eximir_iva', False) or (getattr(body, 'aplica_iva', True) is False):
+                es_exento_linea = True
+
             lineas.append(LineaFactura(
                 producto_id=producto.id,
                 cantidad=cantidad,
@@ -160,7 +167,7 @@ def emitir_factura_fiscal(
                 # de lo contrario cualquiera podría emitir una factura fiscal
                 # válida ante el SENIAT por un monto arbitrario editando el body.
                 precio_unitario=resolver_precio_unitario(producto),
-                es_exento=bool(producto.es_exento),
+                es_exento=es_exento_linea,
             ))
 
         # --- 4. Calcular impuestos, correlativo, persistencia y asientos contables ---
