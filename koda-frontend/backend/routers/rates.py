@@ -117,6 +117,13 @@ def tasa_manual(body: dict = Body(...), db: Session = Depends(get_db), current_u
         
         db.commit()
         db.refresh(db_tasa)
+
+        # Limpiar la caché de /tasa/actual: si no, la próxima consulta puede devolver
+        # el valor cacheado anterior hasta por 60 segundos, dando la impresión de que
+        # la tasa manual "no se guardó" (mismo patrón que ya usa _perform_bcv_sync).
+        global _tasa_cache
+        _tasa_cache.clear()
+
         return {
             "id": db_tasa.id,
             "tasa": float(db_tasa.valor_ves),
