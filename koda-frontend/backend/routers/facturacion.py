@@ -127,6 +127,7 @@ def emitir_factura_fiscal(
         almacen_venta_id = resolver_almacen_venta(db, tenant_id)
 
         lineas = []
+        precios_negociados = []  # para el log de auditoría
         for det in detalles_in:
             prod_key = str(det.producto_id)
             cantidad = Decimal(str(det.cantidad))
@@ -159,14 +160,17 @@ def emitir_factura_fiscal(
             if getattr(body, 'eximir_iva', False) or (getattr(body, 'aplica_iva', True) is False):
                 es_exento_linea = True
 
+            precio_catalogo = Decimal(str(producto.precio_usd))
+            precio_final = resolver_precio_unitario(producto, det.precio_unitario)
+            if precio_final != precio_catalogo:
+                precios_negociados.append(
+                    f"{producto.sku} ({producto.nombre}): catálogo ${precio_catalogo} → negociado ${precio_final}"
+                )
+
             lineas.append(LineaFactura(
                 producto_id=producto.id,
                 cantidad=cantidad,
-                # Precio SIEMPRE tomado del catálogo real (Producto.precio_usd),
-                # nunca del `precio_unitario` que el cliente envía en el request:
-                # de lo contrario cualquiera podría emitir una factura fiscal
-                # válida ante el SENIAT por un monto arbitrario editando el body.
-                precio_unitario=resolver_precio_unitario(producto),
+                precio_unitario=precio_final,
                 es_exento=es_exento_linea,
             ))
 
@@ -214,12 +218,19 @@ def emitir_factura_fiscal(
                 f"el servidor determinó {resultado.aplica_igtf} y prevaleció el valor del servidor."
             )
 
+        precio_note = ""
+        if precios_negociados:
+            precio_note = (
+                f" | Precio negociado por {current_user.email} en {len(precios_negociados)} línea(s): "
+                + "; ".join(precios_negociados)
+            )
+
         log_detalle = (
             f"Factura Fiscal emitida: {resultado.numero_factura} | "
             f"Control: {resultado.numero_control} | "
             f"Cliente: {cliente.nombre} ({cliente.rif}) | "
             f"Total: {moneda} {resultado.monto_total} | "
-            f"Hash: {hash_integridad[:16]}...{igtf_note}"
+            f"Hash: {hash_integridad[:16]}...{igtf_note}{precio_note}"
         )
         db.add(AuditoriaLog(
             usuario=f"{current_user.email} (ID:{current_user.id})",
