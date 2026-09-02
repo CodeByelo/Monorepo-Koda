@@ -66,19 +66,29 @@ class ResultadoFactura:
     comision_usd: Decimal
 
 
-def resolver_precio_unitario(producto) -> Decimal:
+def resolver_precio_unitario(producto, precio_solicitado: Optional[Decimal] = None) -> Decimal:
     """
-    Deriva el precio unitario de una línea de factura EXCLUSIVAMENTE desde el
-    catálogo del servidor (`Producto.precio_usd`), nunca desde el precio que
-    el cliente envía en el request. Aplica el mismo principio que
-    `derivar_aplica_igtf`: nunca confiar en un valor del cliente para un dato
-    que determina impuestos y montos legales de la factura.
+    Deriva el precio unitario de una línea de factura. Por defecto (o si el precio
+    solicitado no es válido) usa el precio de catálogo (`Producto.precio_usd`).
 
-    Punto único usado por todos los routers que arman `LineaFactura`
-    (`sales.py`, `facturacion.py`) para que ninguno pueda divergir y volver a
-    confiar en un precio enviado por el cliente.
+    Si se pasa `precio_solicitado` (el "precio negociado" que el operador ajustó en el
+    Ticket Actual del POS) y es un valor positivo, se usa ese precio en su lugar, para que
+    el total de la factura emitida coincida con el total que el operador vio en pantalla
+    antes de cobrar. Toda desviación respecto al precio de catálogo queda registrada en el
+    log de auditoría por el router que llama a esta función (ver `routers/facturacion.py`),
+    así que esto NO reabre el hueco de "precio arbitrario silencioso": el precio usado queda
+    trazado con usuario, catálogo y precio negociado.
     """
-    return Decimal(str(producto.precio_usd))
+    precio_catalogo = Decimal(str(producto.precio_usd))
+    if precio_solicitado is None:
+        return precio_catalogo
+    try:
+        precio = Decimal(str(precio_solicitado))
+    except Exception:
+        return precio_catalogo
+    if precio <= 0:
+        return precio_catalogo
+    return precio
 
 
 def derivar_aplica_igtf(metodo_pago: str, moneda: Optional[str] = None) -> bool:
