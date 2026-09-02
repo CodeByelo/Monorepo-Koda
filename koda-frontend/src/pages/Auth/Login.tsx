@@ -82,7 +82,7 @@ const Login = () => {
                 inteligente y segura
               </span>
             </h1>
-            <p className="text-slate-400 text-sm leading-relaxed font-medium max-w-md">
+            <p className="text-teal-100/80 text-sm leading-relaxed font-medium max-w-md">
               Facturación fiscal, inventario en tiempo real, contabilidad automatizada y analítica avanzada — todo en una sola plataforma.
             </p>
           </div>
@@ -126,7 +126,7 @@ const Login = () => {
                 </div>
                 <div>
                   <h4 className="text-white text-xs font-black uppercase tracking-wider mb-0.5">{f.title}</h4>
-                  <p className="text-slate-400 text-[11px] font-medium leading-relaxed">{f.desc}</p>
+                  <p className="text-teal-200/70 text-[11px] font-medium leading-relaxed">{f.desc}</p>
                 </div>
               </div>
             ))}
@@ -134,7 +134,7 @@ const Login = () => {
 
           {/* Footer */}
           <div className="mt-14 pt-6 border-t border-white/5">
-            <p className="text-slate-600 text-[10px] font-bold uppercase tracking-widest">
+            <p className="text-teal-300/40 text-[10px] font-bold uppercase tracking-widest">
               © 2024-2026 KODA ERP · Powered by Omni 360 Engine
             </p>
           </div>
