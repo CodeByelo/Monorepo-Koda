@@ -545,6 +545,7 @@ async def _handle_venta_command(command_text: str, chat_id: int, session_row, co
         "cantidad": cantidad,
         "rif_cliente": rif_cliente,
         "chat_id": chat_id,
+        "idempotency_key": str(uuid.uuid4()),
     })
 
     alerta_stock = "\n⚠️ Este producto está por debajo del stock mínimo." if bajo_minimo else ""
@@ -712,7 +713,7 @@ def _botones_confirmacion(token: str, pending: Optional[dict] = None) -> dict:
     }
 
 
-async def _handle_callback_query(callback_query: TelegramCallbackQuery) -> dict:
+async def _handle_callback_query(callback_query: TelegramCallbackQuery, conn) -> dict:
     """Procesa la respuesta del usuario a los botones inline Confirmar/Cancelar/Selección/Cantidad/Pago."""
     data = callback_query.data or ""
     chat_id = callback_query.message.chat.id if callback_query.message else None
@@ -789,6 +790,7 @@ async def _handle_callback_query(callback_query: TelegramCallbackQuery) -> dict:
             "cantidad": 1,
             "metodo_pago": "DIVISA",
             "rif_cliente": None,
+            "idempotency_key": str(uuid.uuid4()),
         })
         await _save_pending_venta(token, pending)
         if message_id:
@@ -833,6 +835,7 @@ async def _handle_callback_query(callback_query: TelegramCallbackQuery) -> dict:
             lineas=[{"sku": pending["sku"], "cantidad": pending["cantidad"]}],
             metodo_pago=pending.get("metodo_pago", "DIVISA"),
             moneda_documento="USD",
+            idempotency_key=pending.get("idempotency_key") or str(uuid.uuid4()),
         )
     except BotApiError as e:
         await send_telegram_message(target_chat_id, f"❌ No se pudo registrar la venta: {e}")
@@ -863,8 +866,8 @@ async def _handle_callback_query(callback_query: TelegramCallbackQuery) -> dict:
             )
             if row_t and row_t["valor_ves"]:
                 tasa_val = float(row_t["valor_ves"])
-        except Exception:
-            pass
+        except Exception as tasa_err:
+            logger.warning(f"[TELEGRAM] No se pudo obtener tasa BCV de respaldo: {tasa_err}")
         if tasa_val < 50:
             tasa_val = 784.6633
 
@@ -1007,7 +1010,7 @@ async def telegram_webhook(
         raise HTTPException(status_code=401, detail="Invalid webhook secret token")
 
     if update.callback_query:
-        return await _handle_callback_query(update.callback_query)
+        return await _handle_callback_query(update.callback_query, conn)
 
     if not update.message:
         return {"status": "ignored", "detail": "No message in update"}
@@ -1154,13 +1157,15 @@ async def telegram_webhook(
 
         # 3.1 Comandos de negocio propios del bot (/venta, /stock, /comprar), evaluados
         #     antes que el catálogo genérico de bot_commands.
-        if command_text.startswith("/venta"):
+        primer_token = command_text.split()[0] if command_text.split() else ""
+
+        if primer_token == "/venta":
             return await _handle_venta_command(command_text, chat_id, session_row, conn)
 
-        if command_text.startswith("/stock"):
+        if primer_token == "/stock":
             return await _handle_stock_command(command_text, chat_id, session_row)
 
-        if command_text.startswith("/comprar"):
+        if primer_token == "/comprar":
             return await _handle_comprar_command(command_text, chat_id, session_row, conn)
 
         # 4. Buscar si el comando coincide con algún trigger_command del tenant.

@@ -111,6 +111,7 @@ async def registrar_venta(
     lineas: list,
     metodo_pago: str,
     moneda_documento: str,
+    idempotency_key: str,
 ) -> dict:
     """POST {KODA_FRONTEND_API_URL}/bot/venta"""
     payload = {
@@ -121,4 +122,9 @@ async def registrar_venta(
         "metodo_pago": metodo_pago,
         "moneda_documento": moneda_documento,
     }
-    return await _request("POST", "/bot/venta", json=payload)
+    return await _request(
+        "POST",
+        "/bot/venta",
+        json=payload,
+        headers={"X-Idempotency-Key": idempotency_key},
+    )

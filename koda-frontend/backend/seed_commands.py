@@ -228,24 +228,36 @@ def seed_telegram_commands():
         ]
 
         inserted_count = 0
-        # Primero limpiar comandos existentes para poblar el set limpio completo
-        db.query(TelegramCommand).delete()
-        db.commit()
+        updated_count = 0
 
         for tenant in tenants:
             for cmd in command_list:
-                new_cmd = TelegramCommand(
-                    trigger_command=cmd["trigger_command"],
-                    response_text=cmd["response_text"],
-                    internal_action=cmd["internal_action"],
-                    is_active=True,
-                    tenant_id=tenant.id
+                existente = (
+                    db.query(TelegramCommand)
+                    .filter(
+                        TelegramCommand.tenant_id == tenant.id,
+                        TelegramCommand.trigger_command == cmd["trigger_command"],
+                    )
+                    .first()
                 )
-                db.add(new_cmd)
-                inserted_count += 1
+                if existente:
+                    existente.response_text = cmd["response_text"]
+                    existente.internal_action = cmd["internal_action"]
+                    existente.is_active = True
+                    updated_count += 1
+                else:
+                    new_cmd = TelegramCommand(
+                        trigger_command=cmd["trigger_command"],
+                        response_text=cmd["response_text"],
+                        internal_action=cmd["internal_action"],
+                        is_active=True,
+                        tenant_id=tenant.id
+                    )
+                    db.add(new_cmd)
+                    inserted_count += 1
 
         db.commit()
-        print(f"Éxito: Se registraron {inserted_count} comandos predeterminados de Telegram (cobertura total de 15 módulos).")
+        print(f"Éxito: {inserted_count} comandos nuevos insertados, {updated_count} actualizados (cobertura total de 15 módulos).")
 
     except Exception as e:
         db.rollback()
