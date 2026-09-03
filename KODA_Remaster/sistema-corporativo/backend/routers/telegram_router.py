@@ -348,7 +348,7 @@ async def _get_vendedor_for_user(conn, tenant_id: str, user_id: str) -> Optional
                 SELECT id, nombre, porcentaje_comision
                 FROM vendedores
                 WHERE id = $1
-                  AND (tenant_id = $2::uuid OR tenant_id IS NULL)
+                  AND tenant_id = $2::uuid
                   AND activo = true
                 """,
                 int(user_id), uuid.UUID(tenant_id)
@@ -366,7 +366,7 @@ async def _get_vendedor_for_user(conn, tenant_id: str, user_id: str) -> Optional
             SELECT id, nombre, porcentaje_comision
             FROM vendedores
             WHERE user_id = $1
-              AND (tenant_id = $2::uuid OR tenant_id IS NULL)
+              AND tenant_id = $2::uuid
               AND activo = true
             """,
             u_uuid, uuid.UUID(tenant_id)
@@ -385,7 +385,7 @@ async def _get_vendedor_for_user(conn, tenant_id: str, user_id: str) -> Optional
             """
             SELECT id, nombre, porcentaje_comision
             FROM vendedores
-            WHERE (tenant_id = $1::uuid OR tenant_id IS NULL)
+            WHERE tenant_id = $1::uuid
               AND activo = true
             """,
             uuid.UUID(tenant_id)
