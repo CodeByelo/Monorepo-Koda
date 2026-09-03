@@ -734,26 +734,25 @@ def arqueo_caja(fecha: str, caja: str = "Caja Principal USD", db: Session = Depe
         total_v_usd = to_float(v.total_usd or v.total or 0)
         tasa_v = to_float(v.tasa_cambio_bs) if to_float(v.tasa_cambio_bs) > 0 else 1.0
 
+        # Si es Divisa Física (Efectivo USD / Dólares en gaveta):
         if metodo in ("DIVISA", "DIVISAS", "USD", "DOLARES", "CASH_USD"):
             saldo_usd += total_v_usd
-        elif metodo in ("EFECTIVO", "EFECTIVO_BS", "EFECTIVO BS", "VES", "BOLIVARES"):
-            saldo_ves += total_v_usd * tasa_v
-        elif metodo in ("PAGOMOVIL", "PAGO_MOVIL", "PAGO MOVIL", "TRANSFERENCIA", "PUNTO", "DEBITO", "CREDITO"):
-            # Dinero bancario electrónico — se contabiliza aparte, NO en la gaveta física
-            saldo_bancos_usd += total_v_usd
         else:
-            # Si el documento se emitió explícitamente en Bolívares
-            if getattr(v, "moneda_documento", None) == "SOLO_VES":
-                saldo_ves += total_v_usd * tasa_v
-            else:
-                saldo_usd += total_v_usd
+            # Todo lo demás es en BOLÍVARES (Efectivo Bs, Pago Móvil, Transferencia nacional):
+            # Se acumula en Bolívares para que cuadre la Caja en Bolívares
+            saldo_ves += total_v_usd * tasa_v
+
+    # Tasa promedio del día para mostrar relación Bs <-> USD
+    tasa_referencia = (saldo_ves / (sum(to_float(v.total_usd or v.total or 0) for v in ventas_del_dia) - saldo_usd)) if (sum(to_float(v.total_usd or v.total or 0) for v in ventas_del_dia) - saldo_usd) > 0 else 1.0
+    ves_en_usd = round(saldo_ves / tasa_referencia, 2) if tasa_referencia > 0 else 0.0
 
     return {
         "fecha": fecha,
         "caja": caja,
         "saldo_sistema_usd": round(saldo_usd, 2),
         "saldo_sistema_ves": round(saldo_ves, 2),
-        "saldo_bancos_usd": round(saldo_bancos_usd, 2),
+        "saldo_ves_equiv_usd": ves_en_usd,
+        "total_general_usd": round(saldo_usd + ves_en_usd, 2),
         "ventas_count": len(ventas_del_dia),
     }
 

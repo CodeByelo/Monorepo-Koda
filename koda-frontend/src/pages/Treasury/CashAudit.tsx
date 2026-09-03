@@ -31,6 +31,7 @@ const CashAudit = () => {
   
   const [systemTotalUsd, setSystemTotalUsd] = useState(0);
   const [systemTotalVes, setSystemTotalVes] = useState(0);
+  const [systemVesEquivUsd, setSystemVesEquivUsd] = useState(0);
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -43,6 +44,7 @@ const CashAudit = () => {
         const data = await api.get<any>(`/tesoreria/arqueo?fecha=${selectedDate}&caja=${encodeURIComponent(selectedCaja)}`);
         setSystemTotalUsd(Number(data?.saldo_usd || data?.saldo_sistema_usd || 0));
         setSystemTotalVes(Number(data?.saldo_ves || data?.saldo_sistema_ves || 0));
+        setSystemVesEquivUsd(Number(data?.saldo_ves_equiv_usd || 0));
       } catch (error) {
         console.error("Error fetching arqueo data:", error);
       } finally {
@@ -378,9 +380,16 @@ const CashAudit = () => {
                 <div className="p-3 bg-slate-50 rounded-xl space-y-2 border border-slate-100">
                    <div className="flex justify-between items-center text-xs">
                       <span className="font-bold text-slate-400 uppercase tracking-widest">Sistema (VES):</span>
-                      <strong className="font-black text-[#726555] font-mono">
-                        {isLoading ? '...' : `Bs. ${systemTotalVes.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`}
-                      </strong>
+                      <div className="text-right">
+                        <strong className="font-black text-[#726555] font-mono block">
+                          {isLoading ? '...' : `Bs. ${systemTotalVes.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`}
+                        </strong>
+                        {systemVesEquivUsd > 0 && (
+                          <span className="text-[10px] font-bold text-slate-400 font-mono">
+                            ≈ ${systemVesEquivUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+                          </span>
+                        )}
+                      </div>
                    </div>
                    <div className="flex justify-between items-center text-xs">
                       <span className="font-bold text-slate-400 uppercase tracking-widest">Contado (VES):</span>
