@@ -46,8 +46,9 @@ const CustomerStatement = () => {
       api.get<any[]>('/productos').catch(() => [])
     ]).then(([c, rateRes, productsRes]) => {
       setClientes(c || []);
-      const defaultId = queryClienteId ? Number(queryClienteId) : (c?.length ? c[0].id : null);
-      if (defaultId) setClienteId(defaultId);
+      // No autoseleccionar "el primer cliente de la lista": eso mostraba el saldo/facturas
+      // de un cliente cualquiera cuando se llegaba a esta pantalla sin elegir uno.
+      if (queryClienteId) setClienteId(Number(queryClienteId));
       if (rateRes) {
         setCurrentRate(Number(rateRes.valor_ves || rateRes.tasa || 38.50));
       }
@@ -135,8 +136,9 @@ const CustomerStatement = () => {
               <select
                 className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3.5 text-xs font-black text-slate-700 outline-none focus:border-[#0b5156] transition-colors"
                 value={clienteId ?? ''}
-                onChange={(e) => setClienteId(Number(e.target.value))}
+                onChange={(e) => setClienteId(e.target.value ? Number(e.target.value) : null)}
               >
+                 <option value="" disabled>-- Seleccione un cliente --</option>
                  {clientes.map((c) => (
                    <option key={c.id} value={c.id}>{c.nombre} ({c.rif})</option>
                  ))}
