@@ -702,7 +702,7 @@ def arqueo_caja(fecha: str, caja: str = "Caja Principal USD", db: Session = Depe
     Anteriormente leía un saldo estático de CuentaBancaria que NO se
     actualizaba automáticamente con las ventas, causando saldos fantasma.
     """
-    # --- Saldo USD: ventas reales del día ---
+    # --- Ventas reales del día por método de pago ---
     try:
         fecha_dt = datetime.strptime(fecha, "%Y-%m-%d")
     except (ValueError, TypeError):
@@ -718,20 +718,32 @@ def arqueo_caja(fecha: str, caja: str = "Caja Principal USD", db: Session = Depe
         Venta.fecha < fin_dia,
     ).all()
 
-    saldo_usd = sum(to_float(v.total_usd or v.total or 0) for v in ventas_del_dia)
+    # Desglose según método de pago:
+    # Divisas / Efectivo USD vs Bolívares (Efectivo Bs, Pago Móvil, etc.)
+    saldo_usd = 0.0
+    saldo_ves = 0.0
 
-    # --- Saldo VES: leer de CuentaBancaria (referencia para bolívares) ---
-    caja_ves = db.query(CuentaBancaria).filter(
-        CuentaBancaria.banco == "Caja Principal VES",
-        CuentaBancaria.tenant_id == current_user.tenant_id
-    ).first()
-    saldo_ves = to_float(caja_ves.saldo_actual_usd) if caja_ves else 0.0
+    for v in ventas_del_dia:
+        metodo = (v.metodo_pago or "").strip().upper()
+        total_v_usd = to_float(v.total_usd or v.total or 0)
+        tasa_v = to_float(v.tasa_cambio_bs) if to_float(v.tasa_cambio_bs) > 0 else 1.0
+
+        if metodo in ("DIVISA", "DIVISAS", "USD", "DOLARES", "CASH_USD"):
+            saldo_usd += total_v_usd
+        elif metodo in ("EFECTIVO", "EFECTIVO_BS", "EFECTIVO BS", "VES", "BOLIVARES"):
+            saldo_ves += total_v_usd * tasa_v
+        else:
+            # Otros métodos mixtos o generales: si la moneda de documento es SOLO_VES o el método es Bs
+            if getattr(v, "moneda_documento", None) == "SOLO_VES":
+                saldo_ves += total_v_usd * tasa_v
+            else:
+                saldo_usd += total_v_usd
 
     return {
         "fecha": fecha,
         "caja": caja,
-        "saldo_sistema_usd": saldo_usd,
-        "saldo_sistema_ves": saldo_ves,
+        "saldo_sistema_usd": round(saldo_usd, 2),
+        "saldo_sistema_ves": round(saldo_ves, 2),
         "ventas_count": len(ventas_del_dia),
     }
 

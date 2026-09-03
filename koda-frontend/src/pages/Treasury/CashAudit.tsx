@@ -55,9 +55,19 @@ const CashAudit = () => {
   const totalVesPhysical = vesTotal;
   
   const diffUsd = totalUsdPhysical - systemTotalUsd;
-  const absDiff = Math.abs(diffUsd);
-  const isPerfect = absDiff === 0;
-  const isCritical = absDiff > CRITICAL_THRESHOLD;
+  const absDiffUsd = Math.abs(diffUsd);
+
+  const diffVes = totalVesPhysical - systemTotalVes;
+  const absDiffVes = Math.abs(diffVes);
+
+  const isPerfectUsd = absDiffUsd === 0;
+  const isPerfectVes = absDiffVes === 0;
+  const isPerfect = isPerfectUsd && isPerfectVes;
+
+  const isCriticalUsd = absDiffUsd > CRITICAL_THRESHOLD;
+  const isCriticalVes = absDiffVes > (CRITICAL_THRESHOLD * 50); // umbral proporcional en Bs
+  const isCritical = isCriticalUsd || isCriticalVes;
+
   const hasInput = totalUsdPhysical > 0 || totalVesPhysical > 0;
 
   const handleUsdChange = (denom: string, val: string) => {
@@ -267,14 +277,37 @@ const CashAudit = () => {
             'bg-amber-50 border-amber-500'
           }`}>
              <span className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Diferencia Detectada</span>
-             <div className={`text-5xl font-black font-mono tracking-tighter ${
-               !hasInput ? 'text-slate-300' :
-               isPerfect ? 'text-green-600' :
-               isCritical ? 'text-red-600' :
-               'text-amber-600'
-             }`}>
-               {!hasInput ? '--' : `${diffUsd >= 0 ? '+' : '-'}$${absDiff.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+             
+             {/* Diferencia USD */}
+             <div className="space-y-1">
+               <div className={`text-4xl font-black font-mono tracking-tighter ${
+                 !hasInput ? 'text-slate-300' :
+                 isPerfectUsd ? 'text-green-600' :
+                 isCriticalUsd ? 'text-red-600' :
+                 'text-amber-600'
+               }`}>
+                 {!hasInput ? '--' : `${diffUsd >= 0 ? '+' : '-'}$${absDiffUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+               </div>
+               <p className="text-[10px] font-black uppercase text-slate-400 font-mono">
+                 Dólares: {isPerfectUsd ? 'Cuadrado ($0.00)' : diffUsd > 0 ? 'Sobrante USD' : 'Faltante USD'}
+               </p>
              </div>
+
+             {/* Diferencia VES */}
+             <div className="pt-3 border-t border-slate-200/60 space-y-1">
+               <div className={`text-2xl font-black font-mono tracking-tighter ${
+                 !hasInput ? 'text-slate-300' :
+                 isPerfectVes ? 'text-green-600' :
+                 isCriticalVes ? 'text-red-600' :
+                 'text-amber-600'
+               }`}>
+                 {!hasInput ? '--' : `${diffVes >= 0 ? '+' : '-'}Bs. ${absDiffVes.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`}
+               </div>
+               <p className="text-[10px] font-black uppercase text-slate-400 font-mono">
+                 Bolívares: {isPerfectVes ? 'Cuadrado (Bs. 0.00)' : diffVes > 0 ? 'Sobrante VES' : 'Faltante VES'}
+               </p>
+             </div>
+
              <p className={`text-xs font-bold uppercase ${
                !hasInput ? 'text-slate-400' :
                isPerfect ? 'text-green-700' :
@@ -282,7 +315,7 @@ const CashAudit = () => {
                'text-amber-700'
              }`}>
                {!hasInput ? 'Ingrese el conteo para comparar.' :
-                isPerfect ? 'Caja cuadrada perfectamente.' :
+                isPerfect ? 'Caja bimonetaria cuadrada perfectamente.' :
                 isCritical ? 'Diferencia crítica detectada.' :
                 'Diferencia aceptable. Requiere ajuste.'}
              </p>
@@ -294,7 +327,7 @@ const CashAudit = () => {
                         <strong className="text-xs uppercase font-black tracking-tight text-white !text-white">Alerta Crítica</strong>
                      </div>
                      <p className="text-[10px] font-bold uppercase leading-relaxed text-white !text-white opacity-100">
-                        La diferencia excede el umbral ($50.00). Requiere justificación obligatoria y nombre del auditor para proceder.
+                        La diferencia excede el umbral de seguridad. Requiere justificación obligatoria y nombre del auditor para proceder.
                      </p>
                   </div>
                )}
@@ -302,27 +335,54 @@ const CashAudit = () => {
 
           {/* Summary Card */}
           <article className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-             <h3 className="text-lg font-black text-[#0b5156] uppercase tracking-tighter">Resumen de Cuadre</h3>
+             <h3 className="text-lg font-black text-[#0b5156] uppercase tracking-tighter">Resumen de Cuadre Bimonetario</h3>
              <div className="space-y-4">
-                <div className="flex justify-between items-center text-xs">
-                   <span className="font-bold text-slate-400 uppercase tracking-widest">Saldo Sistema (USD):</span>
-                   <strong className="font-black text-[#0b5156] font-mono">
-                     {isLoading ? 'Cargando...' : `$${systemTotalUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
-                   </strong>
+                {/* Cuadre USD */}
+                <div className="p-3 bg-slate-50 rounded-xl space-y-2 border border-slate-100">
+                   <div className="flex justify-between items-center text-xs">
+                      <span className="font-bold text-slate-400 uppercase tracking-widest">Sistema (USD):</span>
+                      <strong className="font-black text-[#0b5156] font-mono">
+                        {isLoading ? '...' : `$${systemTotalUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}`}
+                      </strong>
+                   </div>
+                   <div className="flex justify-between items-center text-xs">
+                      <span className="font-bold text-slate-400 uppercase tracking-widest">Contado (USD):</span>
+                      <strong className="font-black text-[#0b5156] font-mono">${totalUsdPhysical.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong>
+                   </div>
+                   <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-200/50">
+                      <span className="font-bold text-slate-400 uppercase tracking-widest">Diferencia $:</span>
+                      <span className={`px-2 py-0.5 rounded font-black uppercase text-[10px] ${
+                        isPerfectUsd ? 'bg-green-100 text-green-700' :
+                        diffUsd > 0 ? 'bg-blue-100 text-blue-700' :
+                        'bg-amber-100 text-amber-700'
+                      }`}>
+                        {isPerfectUsd ? 'Cuadrado' : `${diffUsd >= 0 ? '+' : '-'}$${absDiffUsd.toFixed(2)}`}
+                      </span>
+                   </div>
                 </div>
-                <div className="flex justify-between items-center text-xs">
-                   <span className="font-bold text-slate-400 uppercase tracking-widest">Total Contado (USD):</span>
-                   <strong className="font-black text-[#0b5156] font-mono">${totalUsdPhysical.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong>
-                </div>
-                <div className="pt-4 border-t border-slate-100 flex justify-between items-center text-xs">
-                   <span className="font-bold text-slate-400 uppercase tracking-widest">Ajuste Sugerido:</span>
-                   <span className={`px-2 py-0.5 rounded font-black uppercase text-[10px] ${
-                     isPerfect ? 'bg-green-100 text-green-700' :
-                     diffUsd > 0 ? 'bg-blue-100 text-blue-700' :
-                     'bg-amber-100 text-amber-700'
-                   }`}>
-                     {!hasInput ? '-' : isPerfect ? 'Cuadrado' : diffUsd > 0 ? 'Sobrante' : 'Faltante'}
-                   </span>
+
+                {/* Cuadre VES */}
+                <div className="p-3 bg-slate-50 rounded-xl space-y-2 border border-slate-100">
+                   <div className="flex justify-between items-center text-xs">
+                      <span className="font-bold text-slate-400 uppercase tracking-widest">Sistema (VES):</span>
+                      <strong className="font-black text-[#726555] font-mono">
+                        {isLoading ? '...' : `Bs. ${systemTotalVes.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`}
+                      </strong>
+                   </div>
+                   <div className="flex justify-between items-center text-xs">
+                      <span className="font-bold text-slate-400 uppercase tracking-widest">Contado (VES):</span>
+                      <strong className="font-black text-[#726555] font-mono">Bs. {totalVesPhysical.toLocaleString('es-VE', { minimumFractionDigits: 2 })}</strong>
+                   </div>
+                   <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-200/50">
+                      <span className="font-bold text-slate-400 uppercase tracking-widest">Diferencia Bs:</span>
+                      <span className={`px-2 py-0.5 rounded font-black uppercase text-[10px] ${
+                        isPerfectVes ? 'bg-green-100 text-green-700' :
+                        diffVes > 0 ? 'bg-blue-100 text-blue-700' :
+                        'bg-amber-100 text-amber-700'
+                      }`}>
+                        {isPerfectVes ? 'Cuadrado' : `${diffVes >= 0 ? '+' : '-'}Bs. ${absDiffVes.toFixed(2)}`}
+                      </span>
+                   </div>
                 </div>
              </div>
           </article>
@@ -365,9 +425,9 @@ const CashAudit = () => {
               </div>
               <div className="p-8 space-y-6">
                  <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 text-center space-y-1">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Monto a Ajustar:</span>
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Monto a Ajustar (USD):</span>
                     <h2 className={`text-xl font-black font-mono ${diffUsd > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {diffUsd >= 0 ? '+' : '-'}${absDiff.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                      {diffUsd >= 0 ? '+' : '-'}${absDiffUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </h2>
                  </div>
 
