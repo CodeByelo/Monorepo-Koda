@@ -30,6 +30,8 @@ from backend.routers.operaciones._shared import _as_aware, ISLR_WITHHOLDING_TABL
 
 tesoreria_router = APIRouter(prefix="/tesoreria", tags=["Tesorería"], dependencies=[Depends(get_current_user)])
 
+VE_OFFSET = timedelta(hours=4)  # Venezuela = UTC-4, fijo (no tiene horario de verano)
+
 
 @tesoreria_router.get("/dashboard")
 def tesoreria_dashboard(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
@@ -703,22 +705,25 @@ def arqueo_caja(fecha: str, caja: str = "Caja Principal USD", db: Session = Depe
     actualizaba automáticamente con las ventas, causando saldos fantasma.
     """
     # --- Ventas reales del día por método de pago ---
-    from sqlalchemy import or_, cast, Date
     try:
         target_date = datetime.strptime(fecha, "%Y-%m-%d").date()
     except (ValueError, TypeError):
-        target_date = datetime.now(timezone.utc).date()
+        # "hoy" en hora de Venezuela (UTC-4), no en UTC del servidor: si no, el
+        # corte de día ocurre a las 8pm hora Venezuela en vez de medianoche real.
+        target_date = (datetime.now(timezone.utc) - VE_OFFSET).date()
 
-    dt_start = datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0)
-    dt_end = dt_start + timedelta(days=2) # ventana de 48h para cubrir cualquier desfase UTC vs hora local
+    # El día calendario D en Venezuela va desde D 00:00 VET (= D 04:00 UTC) hasta
+    # D+1 00:00 VET (= D+1 04:00 UTC). `Venta.fecha` se guarda en UTC
+    # (datetime.now(timezone.utc), naive en la BD), así que la ventana debe
+    # construirse desplazada +4h, no asumiendo que la medianoche del string ya es UTC.
+    dt_start = datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0) + VE_OFFSET
+    dt_end = dt_start + timedelta(days=1)
 
     ventas_del_dia = db.query(Venta).filter(
         Venta.estado == "ACTIVA",
         Venta.tenant_id == current_user.tenant_id,
-        or_(
-            cast(Venta.fecha, Date) == target_date,
-            (Venta.fecha >= dt_start) & (Venta.fecha < dt_end)
-        )
+        Venta.fecha >= dt_start,
+        Venta.fecha < dt_end,
     ).all()
 
     # Desglose estricto para ARQUEO FÍSICO DE GAVETA:
