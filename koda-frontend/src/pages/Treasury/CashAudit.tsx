@@ -1,4 +1,11 @@
 import { useState, useEffect } from 'react';
+
+// Venezuela es UTC-4 fijo. new Date().toISOString() siempre da la fecha en UTC,
+// así que a partir de las 8pm hora Venezuela ya "cruza" al día siguiente en UTC.
+// Usamos Intl con el timezone real para obtener el día calendario correcto.
+const getFechaVenezuela = (): string => {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Caracas' }).format(new Date());
+};
 import { 
   Calculator, 
   Printer, 
@@ -32,7 +39,7 @@ const CashAudit = () => {
   const [systemTotalUsd, setSystemTotalUsd] = useState(0);
   const [systemTotalVes, setSystemTotalVes] = useState(0);
   const [systemVesEquivUsd, setSystemVesEquivUsd] = useState(0);
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(() => getFechaVenezuela());
   const [isLoading, setIsLoading] = useState(true);
 
   const CRITICAL_THRESHOLD = 50.00;
@@ -114,7 +121,7 @@ const CashAudit = () => {
       showToast('Cierre y Ajuste Procesado Exitosamente');
       setShowResModal(false);
       // Refresh data after close
-      const today = new Date().toISOString().split('T')[0];
+      const today = getFechaVenezuela();
       const data = await api.get<any>(`/tesoreria/arqueo?fecha=${today}&caja=${encodeURIComponent(selectedCaja)}`);
       setSystemTotalUsd(Number(data?.saldo_usd || data?.saldo_sistema_usd || 0));
       setSystemTotalVes(Number(data?.saldo_ves || data?.saldo_sistema_ves || 0));
