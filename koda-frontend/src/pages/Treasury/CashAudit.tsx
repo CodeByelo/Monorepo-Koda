@@ -7,7 +7,8 @@ import {
   X, 
   DollarSign,
   Lock,
-  HelpCircle
+  HelpCircle,
+  Calendar
 } from 'lucide-react';
 import { api } from '@/api/client';
 
@@ -30,6 +31,7 @@ const CashAudit = () => {
   
   const [systemTotalUsd, setSystemTotalUsd] = useState(0);
   const [systemTotalVes, setSystemTotalVes] = useState(0);
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [isLoading, setIsLoading] = useState(true);
 
   const CRITICAL_THRESHOLD = 50.00;
@@ -38,8 +40,7 @@ const CashAudit = () => {
     const fetchArqueoData = async () => {
       setIsLoading(true);
       try {
-        const today = new Date().toISOString().split('T')[0];
-        const data = await api.get<any>(`/tesoreria/arqueo?fecha=${today}&caja=${encodeURIComponent(selectedCaja)}`);
+        const data = await api.get<any>(`/tesoreria/arqueo?fecha=${selectedDate}&caja=${encodeURIComponent(selectedCaja)}`);
         setSystemTotalUsd(Number(data?.saldo_usd || data?.saldo_sistema_usd || 0));
         setSystemTotalVes(Number(data?.saldo_ves || data?.saldo_sistema_ves || 0));
       } catch (error) {
@@ -49,7 +50,7 @@ const CashAudit = () => {
       }
     };
     fetchArqueoData();
-  }, [selectedCaja]);
+  }, [selectedCaja, selectedDate]);
 
   const totalUsdPhysical = Object.entries(usdDenoms).reduce((acc, [denom, qty]) => acc + (Number(denom) * qty), 0);
   const totalVesPhysical = vesTotal;
@@ -164,16 +165,26 @@ const CashAudit = () => {
             <h1 className="text-xl font-black text-[#0b5156] tracking-tighter uppercase">Arqueo Físico de Caja</h1>
             <p className="text-slate-500 text-xs font-bold uppercase tracking-tight">Validación de existencias físicas contra saldos lógicos del sistema.</p>
           </div>
-          <div className="flex gap-3">
-             <button onClick={() => setShowManualModal(true)} className="bg-slate-50 text-slate-600 px-6 py-2.5 rounded-xl text-xs font-black uppercase border border-slate-200 hover:bg-white transition-all flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-3">
+             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-[#0b5156]">
+                <Calendar size={14} className="text-slate-400" />
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Fecha Arqueo:</span>
+                <input 
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className="bg-transparent font-black font-mono outline-none text-[#0b5156] cursor-pointer"
+                />
+             </div>
+             <button onClick={() => setShowManualModal(true)} className="bg-slate-50 text-slate-600 px-4 py-2 rounded-xl text-xs font-black uppercase border border-slate-200 hover:bg-white transition-all flex items-center gap-2">
                 <HelpCircle size={14} /> Manual
              </button>
-             <button onClick={handlePrintActa} className="bg-slate-50 text-slate-600 px-6 py-2.5 rounded-xl text-xs font-black uppercase border border-slate-200 hover:bg-white transition-all flex items-center gap-2">
+             <button onClick={handlePrintActa} className="bg-slate-50 text-slate-600 px-4 py-2 rounded-xl text-xs font-black uppercase border border-slate-200 hover:bg-white transition-all flex items-center gap-2">
                 <Printer size={14} /> Acta de Arqueo
              </button>
               <button 
                 onClick={handleExecuteCierreClick}
-                className="bg-[#0b5156] text-white shadow-green-900/20 hover:bg-[#083a3d] px-6 py-2.5 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-lg hover:scale-[1.02]"
+                className="bg-[#0b5156] text-white shadow-green-900/20 hover:bg-[#083a3d] px-5 py-2 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-lg hover:scale-[1.02]"
               >
                  <Lock size={14} /> Ejecutar Cierre
               </button>
