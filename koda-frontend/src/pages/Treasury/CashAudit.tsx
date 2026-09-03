@@ -81,7 +81,7 @@ const CashAudit = () => {
 
   const handlePrintActa = async () => {
     const query = new URLSearchParams({
-      fecha: new Date().toISOString().split('T')[0],
+      fecha: selectedDate,
       caja: selectedCaja,
       justificacion: justification,
       fisico_ves: vesTotal.toString(),
@@ -90,7 +90,7 @@ const CashAudit = () => {
     
     try {
       showToast('Generando Acta de Arqueo...');
-      await api.download(`/tesoreria/arqueo/pdf?${query}`, `Acta-Arqueo-${new Date().toISOString().split('T')[0]}.pdf`);
+      await api.download(`/tesoreria/arqueo/pdf?${query}`, `Acta-Arqueo-${selectedDate}.pdf`);
     } catch (err: any) {
       showToast(err?.message || 'Error al generar el acta de arqueo.');
     }
@@ -134,21 +134,15 @@ const CashAudit = () => {
   const handleExecuteCierreClick = () => {
     if (isLoading) return;
     if (!hasInput) {
-      showToast("Por favor, ingrese el conteo físico de la caja antes de ejecutar el cierre.");
-      return;
-    }
-    if (!declared) {
-      showToast("Debe declarar bajo juramento que la información ingresada es veraz y auditable (marque la casilla al final del panel de Justificación).");
-      return;
-    }
-    if (isCritical && !justification.trim()) {
-      showToast("La diferencia detectada es crítica (mayor a $50.00). Debe escribir una justificación en el panel correspondiente antes de ejecutar el cierre.");
+      showToast("Por favor, ingrese el conteo físico de billetes o efectivo antes de cerrar.");
       return;
     }
     
-    if (diffUsd !== 0) {
+    // Si la caja no está perfectamente cuadrada, abrir siempre la ventana de resolución
+    if (diffUsd !== 0 || (hasVesInput && diffVes !== 0)) {
       setShowResModal(true);
     } else {
+      // Si está exactamente cuadrada, procesar el cierre directamente
       handleCloseCashRegister();
     }
   };

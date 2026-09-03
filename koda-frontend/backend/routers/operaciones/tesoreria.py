@@ -831,18 +831,10 @@ def exportar_arqueo_pdf(
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     import io
 
-    # Retrieve system totals
-    selected = db.query(CuentaBancaria).filter(
-        CuentaBancaria.banco == caja,
-        CuentaBancaria.tenant_id == current_user.tenant_id
-    ).first()
-    system_usd = to_float(selected.saldo_actual_usd) if selected else 0.0
-
-    caja_ves = db.query(CuentaBancaria).filter(
-        CuentaBancaria.banco == "Caja Principal VES",
-        CuentaBancaria.tenant_id == current_user.tenant_id
-    ).first()
-    system_ves = to_float(caja_ves.saldo_actual_usd) if caja_ves else 0.0
+    # Obtener totales reales calculados de las ventas del turno
+    arqueo_info = arqueo_caja(fecha=fecha, caja=caja, db=db, current_user=current_user)
+    system_usd = arqueo_info.get("saldo_sistema_usd", 0.0)
+    system_ves = arqueo_info.get("saldo_sistema_ves", 0.0)
 
     denoms = {
         "100": denom_100,
