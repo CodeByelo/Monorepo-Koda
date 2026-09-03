@@ -81,7 +81,13 @@ def guardar_borrador_iva(payload: DeclaracionIVAPayload, db: Session = Depends(g
             tenant_id=current_user.tenant_id,
         )
         db.add(decl)
-    decl.retenciones = payload.retenciones
+    # BUGFIX: `payload.retenciones` viene del formulario en Bs. (el campo del
+    # frontend está rotulado "Bs." — ver IVADeclaration.tsx), pero la columna
+    # es `retenciones_usd`. Antes se guardaba el valor en Bs directo en una
+    # columna "_usd", lo que dejaba el dato mal etiquetado. Se divide por la
+    # tasa congelada de esta declaración para que la columna sí sea USD.
+    tasa_decl = float(decl.tasa_cambio_bs or 0)
+    decl.retenciones = float(payload.retenciones) / tasa_decl if tasa_decl else 0.0
     decl.estado = "BORRADOR"
     db.commit()
     return {"ok": True}
@@ -102,9 +108,19 @@ def finalizar_iva(payload: DeclaracionIVAPayload, db: Session = Depends(get_db),
             tenant_id=current_user.tenant_id,
         )
         db.add(decl)
-    decl.debito_fiscal = data["debito_fiscal"]
-    decl.credito_fiscal_mes = data["credito_fiscal_mes"]
-    decl.retenciones = payload.retenciones
+    # BUGFIX: `data["debito_fiscal"]` / `data["credito_fiscal_mes"]` que
+    # devuelve declaracion_iva() ya vienen convertidos a Bs (para que el
+    # dashboard los muestre tal cual con el prefijo "Bs."). Guardarlos
+    # directo en debito_fiscal_usd/credito_fiscal_mes_usd dejaba un valor en
+    # bolívares en una columna "_usd". Se dividen por la misma tasa con la
+    # que se calcularon para que la columna guarde el monto real en USD;
+    # generar_pdf_declaracion_iva() ya hace la conversión inversa (usd *
+    # tasa_cambio_bs) al momento de mostrar el PDF, así que el monto en Bs.
+    # que ve el usuario final no cambia — solo se corrige cómo se guarda.
+    tasa_decl = float(decl.tasa_cambio_bs or 0)
+    decl.debito_fiscal = data["debito_fiscal"] / tasa_decl if tasa_decl else 0.0
+    decl.credito_fiscal_mes = data["credito_fiscal_mes"] / tasa_decl if tasa_decl else 0.0
+    decl.retenciones = float(payload.retenciones) / tasa_decl if tasa_decl else 0.0
     decl.estado = "FINALIZADA"
     # NOTA: el modelo DeclaracionIVA no tiene columna `fecha_presentacion`
     # (solo `fecha_cierre`) — asignar el nombre viejo no fallaba porque
@@ -141,9 +157,14 @@ def generar_pdf_declaracion_iva(
     rif = empresa.rif if empresa else "N/A"
     razon_social = empresa.razon_social if empresa else "N/A"
 
-    debito = to_float(decl.debito_fiscal_usd)
-    credito = to_float(decl.credito_fiscal_mes_usd)
-    retenciones = to_float(decl.retenciones_usd)
+    # debito_fiscal_usd/credito_fiscal_mes_usd/retenciones_usd ahora guardan
+    # el monto real en USD (ver BUGFIX en finalizar_iva); el PDF se presenta
+    # en bolívares, así que se reconvierte con la tasa congelada de esta
+    # declaración — la misma tasa con la que se calcularon originalmente.
+    tasa_decl = to_float(decl.tasa_cambio_bs)
+    debito = to_float(decl.debito_fiscal_usd) * tasa_decl
+    credito = to_float(decl.credito_fiscal_mes_usd) * tasa_decl
+    retenciones = to_float(decl.retenciones_usd) * tasa_decl
     total_a_pagar = max(debito - credito - retenciones, 0)
 
     buffer = io.BytesIO()
