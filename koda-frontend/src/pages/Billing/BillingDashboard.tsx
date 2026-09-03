@@ -9,7 +9,9 @@ import {
   Maximize2,
   Minimize2,
   Receipt,
-  Truck
+  Truck,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '@/api/client';
@@ -90,6 +92,8 @@ const BillingDashboard = () => {
 
   const [filterEstado, setFilterEstado] = useState<'TODOS' | 'ACTIVA' | 'ANULADA'>('TODOS');
   const [filterFecha, setFilterFecha] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const filtered = useMemo(() => {
     return invoices.filter((inv) => {
@@ -111,6 +115,17 @@ const BillingDashboard = () => {
       return matchText && matchEstado && matchFecha;
     });
   }, [invoices, searchTerm, filterEstado, filterFecha]);
+
+  // Reset a la página 1 cuando cambia algún filtro
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterEstado, filterFecha, pageSize]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paginatedInvoices = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, currentPage, pageSize]);
 
   const kpis = [
     { t: 'Total Facturado', v: fmt(reporte?.total_acumulado_usd || 0), desc: 'Acumulado USD', c: 'text-[#0b5156]' },
@@ -277,7 +292,7 @@ const BillingDashboard = () => {
             <tbody className="divide-y divide-slate-50">
               {filtered.length === 0 ? (
                 <tr><td colSpan={10} className="py-12 text-center text-slate-400 text-xs font-bold uppercase">Sin facturas registradas</td></tr>
-              ) : filtered.map((inv, i) => (
+              ) : paginatedInvoices.map((inv, i) => (
                 <tr key={i} className="group hover:bg-slate-50/80 transition-colors">
                   <td className="py-5 px-6 text-xs font-bold text-slate-500 uppercase">{inv.date}</td>
                   <td className="py-5 px-6 text-xs font-bold text-slate-400 tracking-widest">{inv.control}</td>
@@ -300,7 +315,9 @@ const BillingDashboard = () => {
                   <td className="py-5 px-6 text-right">
                     <div className="flex flex-col items-end">
                       <span className="font-black text-slate-800 text-sm">{inv.total}</span>
-                      <span className="text-[10px] font-bold text-[#0b5156] font-mono">{inv.totalBs}</span>
+                      {inv.totalBs && (
+                        <span className="text-[10px] font-bold text-[#0b5156] font-mono">{inv.totalBs}</span>
+                      )}
                     </div>
                   </td>
                   <td className="py-5 px-6 text-center">
@@ -344,8 +361,56 @@ const BillingDashboard = () => {
         </div>
         )}
 
-        <div className="p-6 bg-slate-50/50 border-t border-slate-100 flex justify-between items-center">
-           <span className="text-xs font-bold text-slate-400 uppercase">Mostrando {filtered.length} documentos</span>
+        <div className="p-4 bg-slate-50/50 border-t border-slate-100 flex flex-wrap justify-between items-center gap-4">
+           <div className="flex items-center gap-4">
+             <span className="text-xs font-bold text-slate-500 uppercase">
+               Mostrando {filtered.length > 0 ? (currentPage - 1) * pageSize + 1 : 0} - {Math.min(currentPage * pageSize, filtered.length)} de {filtered.length} documentos
+             </span>
+             <div className="flex items-center gap-1.5 text-xs text-slate-500">
+               <span className="text-[10px] font-bold uppercase tracking-wider">Filas:</span>
+               <select 
+                 value={pageSize}
+                 onChange={(e) => setPageSize(Number(e.target.value))}
+                 className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-black text-[#0b5156] outline-none cursor-pointer"
+               >
+                 <option value={10}>10</option>
+                 <option value={20}>20</option>
+                 <option value={50}>50</option>
+                 <option value={100}>100</option>
+               </select>
+             </div>
+           </div>
+
+           {/* Botones de Paginación */}
+           <div className="flex items-center gap-2">
+             <button
+               onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+               disabled={currentPage === 1}
+               className={`p-2 rounded-xl border flex items-center gap-1 text-xs font-black uppercase transition-all ${
+                 currentPage === 1
+                   ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed'
+                   : 'bg-white border-slate-200 text-[#0b5156] hover:bg-slate-50 shadow-xs'
+               }`}
+             >
+               <ChevronLeft size={14} /> Anterior
+             </button>
+
+             <span className="px-3 py-1 bg-white border border-slate-200 rounded-xl text-xs font-black text-[#0b5156] font-mono shadow-xs">
+               {currentPage} / {totalPages}
+             </span>
+
+             <button
+               onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+               disabled={currentPage === totalPages}
+               className={`p-2 rounded-xl border flex items-center gap-1 text-xs font-black uppercase transition-all ${
+                 currentPage === totalPages
+                   ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed'
+                   : 'bg-white border-slate-200 text-[#0b5156] hover:bg-slate-50 shadow-xs'
+               }`}
+             >
+               Siguiente <ChevronRight size={14} />
+             </button>
+           </div>
         </div>
       </section>
     </div>
