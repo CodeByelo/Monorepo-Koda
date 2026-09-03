@@ -60,15 +60,17 @@ const CashAudit = () => {
   const diffVes = totalVesPhysical - systemTotalVes;
   const absDiffVes = Math.abs(diffVes);
 
-  const isPerfectUsd = absDiffUsd === 0;
-  const isPerfectVes = absDiffVes === 0;
-  const isPerfect = isPerfectUsd && isPerfectVes;
+  const hasUsdInput = totalUsdPhysical > 0;
+  const hasVesInput = totalVesPhysical > 0;
+  const hasInput = hasUsdInput || hasVesInput;
+
+  const isPerfectUsd = hasUsdInput && absDiffUsd === 0;
+  const isPerfectVes = hasVesInput && absDiffVes === 0;
+  const isPerfect = isPerfectUsd && (systemTotalVes === 0 || isPerfectVes);
 
   const isCriticalUsd = absDiffUsd > CRITICAL_THRESHOLD;
   const isCriticalVes = absDiffVes > (CRITICAL_THRESHOLD * 50); // umbral proporcional en Bs
-  const isCritical = isCriticalUsd || isCriticalVes;
-
-  const hasInput = totalUsdPhysical > 0 || totalVesPhysical > 0;
+  const isCritical = (hasUsdInput && isCriticalUsd) || (hasVesInput && isCriticalVes);
 
   const handleUsdChange = (denom: string, val: string) => {
     setUsdDenoms(prev => ({ ...prev, [denom]: Math.max(0, parseInt(val) || 0) }));
@@ -296,15 +298,15 @@ const CashAudit = () => {
              {/* Diferencia VES */}
              <div className="pt-3 border-t border-slate-200/60 space-y-1">
                <div className={`text-2xl font-black font-mono tracking-tighter ${
-                 !hasInput ? 'text-slate-300' :
+                 !hasVesInput ? 'text-slate-300' :
                  isPerfectVes ? 'text-green-600' :
                  isCriticalVes ? 'text-red-600' :
                  'text-amber-600'
                }`}>
-                 {!hasInput ? '--' : `${diffVes >= 0 ? '+' : '-'}Bs. ${absDiffVes.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`}
+                 {!hasVesInput ? '--' : `${diffVes >= 0 ? '+' : '-'}Bs. ${absDiffVes.toLocaleString('es-VE', { minimumFractionDigits: 2 })}`}
                </div>
                <p className="text-[10px] font-black uppercase text-slate-400 font-mono">
-                 Bolívares: {isPerfectVes ? 'Cuadrado (Bs. 0.00)' : diffVes > 0 ? 'Sobrante VES' : 'Faltante VES'}
+                 Bolívares: {!hasVesInput ? 'Sin conteo ingresado' : isPerfectVes ? 'Cuadrado (Bs. 0.00)' : diffVes > 0 ? 'Sobrante VES' : 'Faltante VES'}
                </p>
              </div>
 
@@ -376,11 +378,12 @@ const CashAudit = () => {
                    <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-200/50">
                       <span className="font-bold text-slate-400 uppercase tracking-widest">Diferencia Bs:</span>
                       <span className={`px-2 py-0.5 rounded font-black uppercase text-[10px] ${
+                        !hasVesInput ? 'bg-slate-100 text-slate-500' :
                         isPerfectVes ? 'bg-green-100 text-green-700' :
                         diffVes > 0 ? 'bg-blue-100 text-blue-700' :
                         'bg-amber-100 text-amber-700'
                       }`}>
-                        {isPerfectVes ? 'Cuadrado' : `${diffVes >= 0 ? '+' : '-'}Bs. ${absDiffVes.toFixed(2)}`}
+                        {!hasVesInput ? 'Pendiente' : isPerfectVes ? 'Cuadrado' : `${diffVes >= 0 ? '+' : '-'}Bs. ${absDiffVes.toFixed(2)}`}
                       </span>
                    </div>
                 </div>
