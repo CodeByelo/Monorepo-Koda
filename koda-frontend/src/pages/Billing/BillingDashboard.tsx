@@ -25,6 +25,8 @@ interface VentaRow {
   iva?: number | string;
   total?: number | string;
   tasa_cambio_bs?: number | string;
+  metodo_pago?: string;
+  moneda_documento?: string;
   estado: string;
   cliente?: {
     nombre: string;
@@ -79,6 +81,8 @@ const BillingDashboard = () => {
       total: fmt(v.total_usd || v.total || 0),
       totalBs: `Bs. ${((Number(v.total_usd || v.total || 0)) * (Number(v.tasa_cambio_bs) || 0)).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
       tasa: Number(v.tasa_cambio_bs) || 0,
+      metodo: v.metodo_pago || 'Divisa',
+      monedaDoc: v.moneda_documento || 'BIMONETARIO',
       status: v.estado === 'ACTIVA' ? 'Activa' : v.estado,
       statusColor: v.estado === 'ACTIVA' ? 'bg-green-100 text-green-700' : 'bg-white text-slate-400',
     };
@@ -265,13 +269,14 @@ const BillingDashboard = () => {
                 <th className="py-4 px-6 text-right">Base Imp.</th>
                 <th className="py-4 px-6 text-right">Impuesto</th>
                 <th className="py-4 px-6 text-right">Total ($ / Bs.)</th>
+                <th className="py-4 px-6 text-center">Forma de Pago</th>
                 <th className="py-4 px-6 text-center">Estado</th>
                 <th className="py-4 px-6 text-right">Acción</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
               {filtered.length === 0 ? (
-                <tr><td colSpan={9} className="py-12 text-center text-slate-400 text-xs font-bold uppercase">Sin facturas registradas</td></tr>
+                <tr><td colSpan={10} className="py-12 text-center text-slate-400 text-xs font-bold uppercase">Sin facturas registradas</td></tr>
               ) : filtered.map((inv, i) => (
                 <tr key={i} className="group hover:bg-slate-50/80 transition-colors">
                   <td className="py-5 px-6 text-xs font-bold text-slate-500 uppercase">{inv.date}</td>
@@ -297,6 +302,17 @@ const BillingDashboard = () => {
                       <span className="font-black text-slate-800 text-sm">{inv.total}</span>
                       <span className="text-[10px] font-bold text-[#0b5156] font-mono">{inv.totalBs}</span>
                     </div>
+                  </td>
+                  <td className="py-5 px-6 text-center">
+                    <span className={`text-[10px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider font-mono ${
+                      inv.metodo === 'Divisa' 
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                        : inv.metodo === 'Efectivo'
+                        ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                        : 'bg-blue-50 text-blue-700 border border-blue-200'
+                    }`}>
+                      {inv.metodo === 'Divisa' ? '💵 Divisas' : inv.metodo === 'Efectivo' ? '🇻🇪 Efectivo Bs' : inv.metodo === 'PagoMovil' ? '📱 Pago Móvil' : inv.metodo}
+                    </span>
                   </td>
                   <td className="py-5 px-6 text-center">
                     <span className={`${inv.statusColor} text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-tighter`}>{inv.status}</span>
