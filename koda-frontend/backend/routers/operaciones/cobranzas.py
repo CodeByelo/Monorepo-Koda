@@ -696,13 +696,19 @@ def enviar_estado_cuenta(body: dict, db: Session = Depends(get_db), current_user
 
 @cobranzas_router.get("/estado-cuenta")
 def estado_cuenta_cliente(cliente_id: int = Query(None), rif: str = Query(None), db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    # No se permite consultar el estado de cuenta "del primero que aparezca": sin un
+    # cliente explícito (por id o RIF) no hay forma segura de saber a quién pertenece
+    # la información que se va a mostrar (saldo, facturas, movimientos).
+    if not cliente_id and not rif:
+        raise HTTPException(
+            status_code=400,
+            detail="Debe especificar un cliente (cliente_id o rif) para consultar su estado de cuenta.",
+        )
     cli = None
     if cliente_id:
         cli = db.query(Cliente).filter(Cliente.id == cliente_id, Cliente.tenant_id == current_user.tenant_id).first()
     elif rif:
         cli = db.query(Cliente).filter(Cliente.rif == rif, Cliente.tenant_id == current_user.tenant_id).first()
-    else:
-        cli = db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).first()
     if not cli:
         return {"cliente": None, "kpis": [], "movimientos": []}
 
