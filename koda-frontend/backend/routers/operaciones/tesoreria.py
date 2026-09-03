@@ -703,19 +703,16 @@ def arqueo_caja(fecha: str, caja: str = "Caja Principal USD", db: Session = Depe
     actualizaba automáticamente con las ventas, causando saldos fantasma.
     """
     # --- Ventas reales del día por método de pago ---
+    from sqlalchemy import cast, Date
     try:
-        fecha_dt = datetime.strptime(fecha, "%Y-%m-%d")
+        target_date = datetime.strptime(fecha, "%Y-%m-%d").date()
     except (ValueError, TypeError):
-        fecha_dt = datetime.now(timezone.utc)
-
-    inicio_dia = fecha_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-    fin_dia = inicio_dia + timedelta(days=1)
+        target_date = datetime.now(timezone.utc).date()
 
     ventas_del_dia = db.query(Venta).filter(
         Venta.estado == "ACTIVA",
         Venta.tenant_id == current_user.tenant_id,
-        Venta.fecha >= inicio_dia,
-        Venta.fecha < fin_dia,
+        cast(Venta.fecha, Date) == target_date,
     ).all()
 
     # Desglose según método de pago:
