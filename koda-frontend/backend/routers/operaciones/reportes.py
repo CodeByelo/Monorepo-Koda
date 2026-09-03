@@ -217,7 +217,7 @@ def reportes_dashboard(db: Session = Depends(get_db), current_user = Depends(get
         },
         {
             "name": "Fuerza de Ventas y Comisiones",
-            "desc": "Rendimiento comercial de vendedores y comisiones liquidadas por cobro efectivo.",
+            "desc": "Rendimiento comercial de vendedores y comisiones congeladas al momento de facturar.",
             "area": "Comercial",
             "freq": "Mensual",
             "status": "Listo",

@@ -2,6 +2,7 @@ import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from backend.core.database import get_db
 from backend.core.security import get_current_user
@@ -95,6 +96,22 @@ def eliminar_cliente(cliente_id: int, db: Session = Depends(get_db), current_use
     ).first()
     if not cliente:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
-    db.delete(cliente)
-    db.commit()
+    try:
+        db.delete(cliente)
+        db.commit()
+    except IntegrityError:
+        # El cliente tiene facturas, cuentas por cobrar u otros documentos
+        # asociados (frecuente en clientes en mora): la BD bloquea el borrado
+        # para no perder ese historial. Antes esto se colaba como un 500 con
+        # un mensaje generico; ahora se explica con claridad.
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No se puede eliminar este cliente: tiene facturas, cuentas por "
+                "cobrar u otros documentos asociados. Si esta en mora, cobra o "
+                "gestiona la deuda primero; el sistema no elimina clientes con "
+                "historial para no perder la trazabilidad financiera."
+            ),
+        )
     return {"message": "Cliente eliminado exitosamente"}
