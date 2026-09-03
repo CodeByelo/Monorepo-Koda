@@ -691,26 +691,48 @@ def eliminar_fondo_caja_chica(fondo_id: int, db: Session = Depends(get_db), curr
 
 @tesoreria_router.get("/arqueo")
 def arqueo_caja(fecha: str, caja: str = "Caja Principal USD", db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    """
+    Calcula el saldo del sistema para el arqueo físico de caja.
+
+    El saldo USD se calcula DINÁMICAMENTE sumando el total de todas las
+    ventas ACTIVAS del día (fecha solicitada) del tenant, independientemente
+    del método de pago. Esto refleja lo que realmente debería haber en caja
+    según las operaciones del día.
+
+    Anteriormente leía un saldo estático de CuentaBancaria que NO se
+    actualizaba automáticamente con las ventas, causando saldos fantasma.
+    """
+    # --- Saldo USD: ventas reales del día ---
+    try:
+        fecha_dt = datetime.strptime(fecha, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        fecha_dt = datetime.now(timezone.utc)
+
+    inicio_dia = fecha_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    fin_dia = inicio_dia + timedelta(days=1)
+
+    ventas_del_dia = db.query(Venta).filter(
+        Venta.estado == "ACTIVA",
+        Venta.tenant_id == current_user.tenant_id,
+        Venta.fecha >= inicio_dia,
+        Venta.fecha < fin_dia,
+    ).all()
+
+    saldo_usd = sum(to_float(v.total_usd or v.total or 0) for v in ventas_del_dia)
+
+    # --- Saldo VES: leer de CuentaBancaria (referencia para bolívares) ---
     caja_ves = db.query(CuentaBancaria).filter(
         CuentaBancaria.banco == "Caja Principal VES",
         CuentaBancaria.tenant_id == current_user.tenant_id
     ).first()
-
-    # Get balance of selected cash account
-    selected = db.query(CuentaBancaria).filter(
-        CuentaBancaria.banco == caja,
-        CuentaBancaria.tenant_id == current_user.tenant_id
-    ).first()
-    saldo_usd = to_float(selected.saldo_actual_usd) if selected else 0.0
-
-    # Get balance of VES cash account
     saldo_ves = to_float(caja_ves.saldo_actual_usd) if caja_ves else 0.0
 
     return {
         "fecha": fecha,
         "caja": caja,
         "saldo_sistema_usd": saldo_usd,
-        "saldo_sistema_ves": saldo_ves
+        "saldo_sistema_ves": saldo_ves,
+        "ventas_count": len(ventas_del_dia),
     }
 
 

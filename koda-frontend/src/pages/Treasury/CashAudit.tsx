@@ -64,7 +64,7 @@ const CashAudit = () => {
     setUsdDenoms(prev => ({ ...prev, [denom]: Math.max(0, parseInt(val) || 0) }));
   };
 
-  const handlePrintActa = () => {
+  const handlePrintActa = async () => {
     const query = new URLSearchParams({
       fecha: new Date().toISOString().split('T')[0],
       caja: selectedCaja,
@@ -73,16 +73,12 @@ const CashAudit = () => {
       ...Object.entries(usdDenoms).reduce((acc, [k, v]) => ({ ...acc, [`denom_${k}`]: v.toString() }), {})
     }).toString();
     
-    let baseUrl = (import.meta as any).env?.VITE_API_URL || (
-      window.location.hostname.includes('cloudflare') || window.location.hostname.includes('.ts.net')
-        ? '/api-facturacion'
-        : '/api'
-    );
-    if (baseUrl && !baseUrl.startsWith('http://') && !baseUrl.startsWith('https://') && !baseUrl.startsWith('/')) {
-      baseUrl = '/' + baseUrl;
+    try {
+      showToast('Generando Acta de Arqueo...');
+      await api.download(`/tesoreria/arqueo/pdf?${query}`, `Acta-Arqueo-${new Date().toISOString().split('T')[0]}.pdf`);
+    } catch (err: any) {
+      showToast(err?.message || 'Error al generar el acta de arqueo.');
     }
-    
-    window.open(`${baseUrl}/tesoreria/arqueo/pdf?${query}`, '_blank');
   };
 
   const handleCloseCashRegister = async () => {
@@ -107,10 +103,16 @@ const CashAudit = () => {
       const data = await api.get<any>(`/tesoreria/arqueo?fecha=${today}&caja=${encodeURIComponent(selectedCaja)}`);
       setSystemTotalUsd(Number(data?.saldo_usd || data?.saldo_sistema_usd || 0));
       setSystemTotalVes(Number(data?.saldo_ves || data?.saldo_sistema_ves || 0));
-      // Optional: reset form or navigate
-    } catch (error) {
+      // Reset form after successful close
+      setUsdDenoms({ '100': 0, '50': 0, '20': 0, '10': 0, '5': 0, '1': 0 });
+      setVesTotal(0);
+      setDeterioratedUsd(0);
+      setJustification('');
+      setDeclared(false);
+      setAuditorName('');
+    } catch (error: any) {
       console.error("Error al cerrar caja:", error);
-      showToast('Error al procesar el cierre de caja.');
+      showToast(error?.message || 'Error al procesar el cierre de caja.');
     }
   };
 
@@ -120,12 +122,12 @@ const CashAudit = () => {
       showToast("Por favor, ingrese el conteo físico de la caja antes de ejecutar el cierre.");
       return;
     }
-    if (isCritical && !justification.trim()) {
-      showToast("La diferencia detectada es crítica (mayor a $50.00). Debe escribir una justificación en el panel correspondiente antes de ejecutar el cierre.");
-      return;
-    }
     if (!declared) {
       showToast("Debe declarar bajo juramento que la información ingresada es veraz y auditable (marque la casilla al final del panel de Justificación).");
+      return;
+    }
+    if (isCritical && !justification.trim()) {
+      showToast("La diferencia detectada es crítica (mayor a $50.00). Debe escribir una justificación en el panel correspondiente antes de ejecutar el cierre.");
       return;
     }
     
@@ -286,16 +288,16 @@ const CashAudit = () => {
              </p>
 
               {hasInput && isCritical && (
-                 <div className="bg-red-600 text-white p-4 rounded-2xl space-y-2 mt-4 text-left">
-                    <div className="flex items-center gap-2">
-                       <ShieldAlert size={16} className="text-white !text-white" />
-                       <strong className="text-xs uppercase font-black tracking-tight text-white !text-white">Alerta Crítica</strong>
-                    </div>
-                    <p className="text-[10px] font-bold uppercase leading-relaxed text-white !text-white opacity-100">
-                       La diferencia excede el umbral ($50.00). El cierre ha sido bloqueado y se ha notificado a Auditoría General.
-                    </p>
-                 </div>
-              )}
+                  <div className="bg-red-600 text-white p-4 rounded-2xl space-y-2 mt-4 text-left">
+                     <div className="flex items-center gap-2">
+                        <ShieldAlert size={16} className="text-white !text-white" />
+                        <strong className="text-xs uppercase font-black tracking-tight text-white !text-white">Alerta Crítica</strong>
+                     </div>
+                     <p className="text-[10px] font-bold uppercase leading-relaxed text-white !text-white opacity-100">
+                        La diferencia excede el umbral ($50.00). Requiere justificación obligatoria y nombre del auditor para proceder.
+                     </p>
+                  </div>
+               )}
           </article>
 
           {/* Summary Card */}

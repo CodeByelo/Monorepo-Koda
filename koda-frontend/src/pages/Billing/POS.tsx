@@ -25,7 +25,8 @@ import {
   ChevronRight,
   Pencil,
   Trash2,
-  Minus
+  Minus,
+  Lock
 } from 'lucide-react';
 
 // Cantidad de productos mostrados por página en la grilla del POS — antes
@@ -397,6 +398,10 @@ const POS = () => {
              <button onClick={handleCheckout} className="bg-[#0b5156] text-white px-8 py-2.5 rounded-xl text-sm font-black uppercase tracking-widest shadow-lg shadow-[#0b5156]/20 hover:scale-105 transition-all">
                 Cobrar Ticket Actual
              </button>
+             <Link to="/tesoreria/arqueo" className="bg-amber-600 text-white px-6 py-2.5 rounded-xl text-sm font-black uppercase tracking-widest shadow-lg shadow-amber-600/20 hover:scale-105 transition-all flex items-center gap-2">
+                <Lock size={16} />
+                Cierre de Caja
+             </Link>
           </div>
         </div>
       </header>
