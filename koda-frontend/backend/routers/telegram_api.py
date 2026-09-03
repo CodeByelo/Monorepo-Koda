@@ -223,7 +223,12 @@ async def _sync_command_to_remaster(method: str, endpoint: str, tenant_id: str, 
 @router.get("/commands", response_model=List[TelegramCommandResponse])
 def list_commands(db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     """Obtiene la lista de comandos dinámicos del bot de Telegram para el tenant activo."""
-    return db.query(TelegramCommand).order_by(TelegramCommand.id).all()
+    return (
+        db.query(TelegramCommand)
+        .filter(TelegramCommand.tenant_id == current_user.tenant_id)
+        .order_by(TelegramCommand.id)
+        .all()
+    )
 
 @router.post("/commands", response_model=TelegramCommandResponse, status_code=status.HTTP_201_CREATED)
 async def create_command(request: Request, cmd_in: TelegramCommandCreate, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
@@ -234,7 +239,10 @@ async def create_command(request: Request, cmd_in: TelegramCommandCreate, db: Se
         raise HTTPException(status_code=400, detail="El comando debe iniciar con '/'")
 
     # Check duplicate trigger for tenant
-    duplicate = db.query(TelegramCommand).filter(TelegramCommand.trigger_command == trigger).first()
+    duplicate = db.query(TelegramCommand).filter(
+        TelegramCommand.trigger_command == trigger,
+        TelegramCommand.tenant_id == current_user.tenant_id,
+    ).first()
     if duplicate:
         raise HTTPException(status_code=400, detail="El comando ya está registrado en este tenant")
 
@@ -294,7 +302,10 @@ async def create_command(request: Request, cmd_in: TelegramCommandCreate, db: Se
 @router.delete("/commands/{cmd_id}")
 async def delete_command(request: Request, cmd_id: int, db: Session = Depends(get_db), current_user: Profile = Depends(get_current_user)):
     """Elimina un comando dinámico de Telegram y lo remueve en KODA_Remaster."""
-    cmd = db.query(TelegramCommand).filter(TelegramCommand.id == cmd_id).first()
+    cmd = db.query(TelegramCommand).filter(
+        TelegramCommand.id == cmd_id,
+        TelegramCommand.tenant_id == current_user.tenant_id,
+    ).first()
     if not cmd:
         raise HTTPException(status_code=404, detail="Comando no encontrado")
     

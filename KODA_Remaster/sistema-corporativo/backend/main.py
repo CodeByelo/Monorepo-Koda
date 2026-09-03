@@ -99,6 +99,7 @@ def _extract_client_ip(request: Request) -> Optional[str]:
     return None
 from src import schemas
 from routers import auth_router, users_router, gerencias_router, billing_router, developer_router, ledger_router, analytics_router, facturacion_router, nomina_router, telegram_router, internal_router
+from routers.developer_router import require_developer
 from routers.ledger_router import event_buffer, KodaEventInternal, AggregateType, EventSeverity
 from auth.supabase_auth import get_current_user
 from utils.idempotency import require_idempotency
@@ -656,7 +657,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 import asyncio
 
 @app.get("/test-telegram-alert")
-async def test_telegram_alert():
+async def test_telegram_alert(current_user: dict = Depends(require_developer)):
     """Endpoint de prueba para verificar que las alertas a Telegram están llegando correctamente."""
     admin_chat_id = os.getenv("TELEGRAM_ADMIN_CHAT_ID")
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")

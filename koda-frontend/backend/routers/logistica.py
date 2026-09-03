@@ -25,6 +25,11 @@ from backend.models.operations import Venta, VentaDetalle, Producto
 router = APIRouter(prefix="/api/logistica", tags=["Logística"])
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+_LOGISTICS_BOT_ADMIN_CHAT_IDS = {
+    cid.strip()
+    for cid in os.getenv("LOGISTICS_BOT_ADMIN_CHAT_IDS", "").split(",")
+    if cid.strip()
+}
 
 
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -1071,7 +1076,7 @@ async def telegram_webhook(
     photo = message.get("photo")
     
     # ─── ROUTING DE COMANDOS DEL BOT DE TELEGRAM ───
-    ES_ADMIN = (chat_id == "1910741543" or chat_id == "5552622913")
+    ES_ADMIN = chat_id in _LOGISTICS_BOT_ADMIN_CHAT_IDS
     
     # 1. Comando /start (Vinculación automática con token, o muestra ID)
     if text.strip().lower().startswith("/start"):
