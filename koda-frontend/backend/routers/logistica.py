@@ -1186,14 +1186,13 @@ async def telegram_webhook(
     sender_chofer = db.query(Chofer).filter(Chofer.telegram_chat_id == chat_id, Chofer.activo == True).first()
     tenant_id = sender_profile.tenant_id if sender_profile else (sender_chofer.tenant_id if sender_chofer else None)
 
-    cmd_query = db.query(TelegramCommand).filter(
-        TelegramCommand.trigger_command == text.strip(),
-        TelegramCommand.is_active == True
-    )
+    custom_cmd = None
     if tenant_id:
-        cmd_query = cmd_query.filter(TelegramCommand.tenant_id == tenant_id)
-
-    custom_cmd = cmd_query.first()
+        custom_cmd = db.query(TelegramCommand).filter(
+            TelegramCommand.trigger_command == text.strip(),
+            TelegramCommand.is_active == True,
+            TelegramCommand.tenant_id == tenant_id,
+        ).first()
     if custom_cmd:
         await _enviar_telegram(chat_id, custom_cmd.response_text)
         return {"status": "custom_command_handled", "command": custom_cmd.trigger_command}

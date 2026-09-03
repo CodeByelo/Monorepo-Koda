@@ -4,6 +4,7 @@ from sqlalchemy import func
 from datetime import datetime, timezone
 
 from backend.core.database import get_db
+from backend.core.security import get_current_user
 from backend.models.operations import Venta, Producto
 from backend.models.erp_extended import CuentaPorCobrar, CuentaPorPagar
 from backend.utils.helpers import to_float, margen_bruto_pct, ventas_mensuales_anio
@@ -12,17 +13,17 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
 
 @router.get("/metricas")
-def get_dashboard_metrics(db: Session = Depends(get_db)):
-    ventas_tot = db.query(func.sum(Venta.total_usd)).filter(Venta.estado == "ACTIVA").scalar() or 0
+def get_dashboard_metrics(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    ventas_tot = db.query(func.sum(Venta.total_usd)).filter(Venta.estado == "ACTIVA", Venta.tenant_id == current_user.tenant_id).scalar() or 0
     por_cobrar = (
         db.query(func.sum(CuentaPorCobrar.monto_total_usd - CuentaPorCobrar.monto_pagado_usd))
-        .filter(CuentaPorCobrar.estado != "PAGADA")
+        .filter(CuentaPorCobrar.estado != "PAGADA", CuentaPorCobrar.tenant_id == current_user.tenant_id)
         .scalar()
         or 0
     )
     por_pagar = (
         db.query(func.sum(CuentaPorPagar.monto_total_usd - CuentaPorPagar.monto_pagado_usd))
-        .filter(CuentaPorPagar.estado != "PAGADA")
+        .filter(CuentaPorPagar.estado != "PAGADA", CuentaPorPagar.tenant_id == current_user.tenant_id)
         .scalar()
         or 0
     )
@@ -48,21 +49,21 @@ def get_dashboard_metrics(db: Session = Depends(get_db)):
 
 
 @router.get("/alertas")
-def get_alerts_center(db: Session = Depends(get_db)):
+def get_alerts_center(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     ahora = datetime.now(timezone.utc)
     vencido_cobrar = (
         db.query(func.sum(CuentaPorCobrar.monto_total_usd - CuentaPorCobrar.monto_pagado_usd))
-        .filter(CuentaPorCobrar.estado != "PAGADA", CuentaPorCobrar.fecha_vencimiento < ahora)
+        .filter(CuentaPorCobrar.estado != "PAGADA", CuentaPorCobrar.fecha_vencimiento < ahora, CuentaPorCobrar.tenant_id == current_user.tenant_id)
         .scalar()
         or 0
     )
     vencido_pagar = (
         db.query(func.sum(CuentaPorPagar.monto_total_usd - CuentaPorPagar.monto_pagado_usd))
-        .filter(CuentaPorPagar.estado != "PAGADA", CuentaPorPagar.fecha_vencimiento < ahora)
+        .filter(CuentaPorPagar.estado != "PAGADA", CuentaPorPagar.fecha_vencimiento < ahora, CuentaPorPagar.tenant_id == current_user.tenant_id)
         .scalar()
         or 0
     )
-    prod_agotados = db.query(func.count(Producto.id)).filter(Producto.stock <= 0).scalar() or 0
+    prod_agotados = db.query(func.count(Producto.id)).filter(Producto.stock <= 0, Producto.tenant_id == current_user.tenant_id).scalar() or 0
 
     items, por_area, decisiones, resumen_operativo = [], [], [], []
     if to_float(vencido_cobrar) > 0:
