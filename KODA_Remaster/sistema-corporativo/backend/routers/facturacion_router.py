@@ -243,7 +243,15 @@ async def emitir_factura(
             # PUENTE CONTABLE: Asiento de Partida Doble (Order-to-Cash)
             # Matriz de Integración SENIAT / PCGE Venezuela:
             #   DÉBITO  1.2.02.01 Cuentas por Cobrar Clientes  → monto_total
-            #   CRÉDITO 5.1.01.01 Ingresos por Ventas          → base_imponible
+            #   CRÉDITO 4.1.01    Ingresos por Ventas          → base_imponible
+            # NOTA: el código de esta cuenta se corrigió de "5.1.01.01" a "4.1.01"
+            # (ver PR de fixes del bot de Telegram). El catálogo canónico del ERP
+            # (koda-frontend/backend/utils/seed_extended.py y
+            # routers/contabilidad/cuentas.py) registra "Ingresos por Ventas" bajo
+            # 4.1.01 — prefijo "4" = Ingresos. Con "5.1.01.01" el reporte de
+            # Estado de Resultados (services/reportes.py, prefijo "5.1" = Costos)
+            # contabilizaba cada venta emitida por este endpoint como un COSTO en
+            # vez de un ingreso, invirtiendo el margen bruto y la utilidad.
             #   CRÉDITO 2.1.02.01 IVA Débito Fiscal por Pagar  → monto_iva      (si > 0)
             #   CRÉDITO 2.1.03.01 IGTF por Pagar               → monto_igtf     (si > 0)
             # Garantía ACID: si este bloque falla, la factura hace rollback completo.
@@ -279,7 +287,7 @@ async def emitir_factura(
                 (tenant_id, asiento_id, "1.2.02.01", "Cuentas por Cobrar Clientes",
                  float(monto_total), 0.0),
                 # Línea 2 — CRÉDITO: Ingresos por Ventas
-                (tenant_id, asiento_id, "5.1.01.01", "Ingresos por Ventas",
+                (tenant_id, asiento_id, "4.1.01", "Ingresos por Ventas",
                  0.0, float(base_imponible)),
             ]
             if monto_iva > Decimal("0"):

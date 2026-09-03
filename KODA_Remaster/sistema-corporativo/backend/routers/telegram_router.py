@@ -471,6 +471,365 @@ async def _dyn_query_collections(conn, tenant_id) -> str:
     )
 
 
+async def _dyn_query_alerts(conn, tenant_id) -> str:
+    tid = uuid.UUID(str(tenant_id))
+    row = await conn.fetchrow(
+        """
+        SELECT
+            (SELECT COUNT(*) FROM public.productos
+              WHERE tenant_id = $1 AND stock <= stock_minimo) AS stock_bajo,
+            (SELECT COUNT(*) FROM public.cuentas_por_cobrar
+              WHERE tenant_id = $1 AND estado != 'PAGADA'
+                AND fecha_vencimiento < CURRENT_DATE) AS cxc_vencidas,
+            (SELECT COUNT(*) FROM public.turnos_despacho
+              WHERE tenant_id = $1 AND estado = 'PROGRAMADO'
+                AND fecha_salida < CURRENT_DATE) AS turnos_atrasados
+        """,
+        tid
+    )
+    return (
+        f"🚨 *CENTRO DE ALERTAS ACTIVAS — KODA ERP*\n"
+        f"📦 Productos en stock crítico: {row['stock_bajo']}\n"
+        f"💰 Cuentas por cobrar vencidas: {row['cxc_vencidas']}\n"
+        f"🚚 Despachos programados atrasados: {row['turnos_atrasados']}"
+    )
+
+
+async def _dyn_query_invoices(conn, tenant_id) -> str:
+    tid = uuid.UUID(str(tenant_id))
+    row = await conn.fetchrow(
+        """
+        SELECT
+            COUNT(*) FILTER (WHERE estado != 'ANULADA') AS emitidas,
+            COUNT(*) FILTER (WHERE estado = 'ANULADA') AS anuladas,
+            COALESCE(SUM(total_usd) FILTER (WHERE estado != 'ANULADA'), 0) AS total,
+            COALESCE(SUM(iva_usd) FILTER (WHERE estado != 'ANULADA'), 0) AS iva
+        FROM public.ventas
+        WHERE tenant_id = $1 AND fecha >= CURRENT_DATE
+        """,
+        tid
+    )
+    return (
+        f"🧾 *RESUMEN DE FACTURACIÓN DE HOY — KODA ERP*\n"
+        f"Facturas emitidas: {row['emitidas']}\n"
+        f"Facturas anuladas: {row['anuladas']}\n"
+        f"Total facturado: ${float(row['total']):.2f}\n"
+        f"IVA débito fiscal: ${float(row['iva']):.2f}"
+    )
+
+
+async def _dyn_query_purchases(conn, tenant_id) -> str:
+    tid = uuid.UUID(str(tenant_id))
+    row = await conn.fetchrow(
+        """
+        SELECT
+            (SELECT COUNT(*) FROM public.requisiciones_compra
+              WHERE tenant_id = $1 AND estado = 'PENDIENTE') AS req_cnt,
+            (SELECT COALESCE(SUM(monto_estimado_usd), 0) FROM public.requisiciones_compra
+              WHERE tenant_id = $1 AND estado = 'PENDIENTE') AS req_usd,
+            (SELECT COUNT(*) FROM public.compras
+              WHERE tenant_id = $1 AND estado = 'PENDIENTE') AS compras_cnt,
+            (SELECT COALESCE(SUM(total_usd), 0) FROM public.compras
+              WHERE tenant_id = $1 AND estado = 'PENDIENTE') AS compras_usd
+        """,
+        tid
+    )
+    return (
+        f"🛒 *COMPRAS Y REQUISICIONES — KODA ERP*\n"
+        f"Requisiciones pendientes de aprobar: {row['req_cnt']} (${float(row['req_usd']):.2f})\n"
+        f"Compras facturadas por recibir: {row['compras_cnt']} (${float(row['compras_usd']):.2f})"
+    )
+
+
+async def _dyn_query_logistics(conn, tenant_id) -> str:
+    tid = uuid.UUID(str(tenant_id))
+    counts = await conn.fetchrow(
+        """
+        SELECT
+            COUNT(*) FILTER (WHERE estado = 'PROGRAMADO') AS programados,
+            COUNT(*) FILTER (WHERE estado = 'EN_RUTA') AS en_ruta
+        FROM public.turnos_despacho
+        WHERE tenant_id = $1 AND fecha_salida >= CURRENT_DATE
+          AND fecha_salida < CURRENT_DATE + 1
+        """,
+        tid
+    )
+    en_ruta_rows = await conn.fetch(
+        """
+        SELECT t.numero_turno, t.destino, ch.nombre AS chofer_nombre, v.placa
+        FROM public.turnos_despacho t
+        LEFT JOIN public.choferes ch ON ch.id = t.chofer_id
+        LEFT JOIN public.vehiculos v ON v.id = t.vehiculo_id
+        WHERE t.tenant_id = $1 AND t.estado = 'EN_RUTA'
+        ORDER BY t.fecha_salida ASC
+        LIMIT 3
+        """,
+        tid
+    )
+    lineas = "\n".join(
+        f"• {r['numero_turno']} — {r['chofer_nombre'] or 'Sin chofer asignado'} "
+        f"({r['placa'] or 'Sin vehículo'}) → {r['destino']}"
+        for r in en_ruta_rows
+    ) or "Ningún despacho en ruta en este momento."
+    return (
+        f"🚚 *ESTADO DE LA LOGÍSTICA — KODA ERP*\n"
+        f"Turnos programados hoy: {counts['programados']}\n"
+        f"Turnos en ruta: {counts['en_ruta']}\n\n"
+        f"{lineas}"
+    )
+
+
+async def _dyn_query_payments(conn, tenant_id) -> str:
+    tid = uuid.UUID(str(tenant_id))
+    row = await conn.fetchrow(
+        """
+        SELECT
+            (SELECT COALESCE(SUM(monto_total_usd - monto_pagado_usd), 0)
+               FROM public.cuentas_por_pagar
+               WHERE tenant_id = $1 AND estado != 'PAGADA') AS cxp_total,
+            (SELECT COALESCE(SUM(monto_total_usd - monto_pagado_usd), 0)
+               FROM public.cuentas_por_pagar
+               WHERE tenant_id = $1 AND estado != 'PAGADA'
+                 AND fecha_vencimiento < CURRENT_DATE + INTERVAL '7 days') AS cxp_semana,
+            (SELECT COALESCE(SUM(monto_usd), 0) FROM public.movimientos_bancarios
+               WHERE tenant_id = $1 AND tipo = 'EGRESO' AND estado = 'ACTIVO'
+                 AND fecha >= CURRENT_DATE) AS egresos_hoy
+        """,
+        tid
+    )
+    return (
+        f"💸 *CUENTAS POR PAGAR Y COMPROMISOS — KODA ERP*\n"
+        f"Total CxP a proveedores: ${float(row['cxp_total']):.2f}\n"
+        f"Vencen en los próximos 7 días: ${float(row['cxp_semana']):.2f}\n"
+        f"Egresos ejecutados hoy: ${float(row['egresos_hoy']):.2f}"
+    )
+
+
+async def _dyn_query_treasury(conn, tenant_id) -> str:
+    tid = uuid.UUID(str(tenant_id))
+    cuentas = await conn.fetch(
+        """
+        SELECT banco, moneda, numero_cuenta, saldo_actual_usd
+        FROM public.cuentas_bancarias
+        WHERE tenant_id = $1 AND activa IS NOT FALSE
+        ORDER BY moneda, banco
+        """,
+        tid
+    )
+    caja_chica = await conn.fetchrow(
+        """
+        SELECT COALESCE(SUM(disponible_usd), 0) AS disponible
+        FROM public.fondos_caja_chica
+        WHERE tenant_id = $1 AND estado = 'ACTIVO'
+        """,
+        tid
+    )
+    if not cuentas:
+        cuentas_txt = "Sin cuentas bancarias activas registradas."
+    else:
+        lineas = []
+        for c in cuentas:
+            numero = str(c["numero_cuenta"] or "")
+            enmascarado = f"****{numero[-4:]}" if len(numero) >= 4 else "****"
+            lineas.append(
+                f"• {c['banco']} {enmascarado} ({c['moneda']}): "
+                f"${float(c['saldo_actual_usd']):.2f}"
+            )
+        cuentas_txt = "\n".join(lineas)
+    return (
+        f"🏛️ *SALDOS DE TESORERÍA — KODA ERP*\n"
+        f"{cuentas_txt}\n"
+        f"💵 Caja chica disponible: ${float(caja_chica['disponible']):.2f}"
+    )
+
+
+async def _dyn_query_fiscal(conn, tenant_id) -> str:
+    tid = uuid.UUID(str(tenant_id))
+    ventas_mes = await conn.fetchrow(
+        """
+        SELECT
+            COALESCE(SUM(iva_usd), 0) AS iva,
+            COALESCE(SUM(igtf_usd), 0) AS igtf,
+            COALESCE(SUM(total_usd), 0) AS total
+        FROM public.ventas
+        WHERE tenant_id = $1 AND estado != 'ANULADA'
+          AND fecha >= date_trunc('month', CURRENT_DATE)
+        """,
+        tid
+    )
+    declaracion = await conn.fetchrow(
+        """
+        SELECT estado FROM public.declaraciones_iva
+        WHERE tenant_id = $1 AND periodo = to_char(CURRENT_DATE, 'YYYY-MM')
+        """,
+        tid
+    )
+    estado_decl = declaracion["estado"] if declaracion else "sin declaración registrada"
+    return (
+        f"📊 *OBLIGACIONES FISCALES DEL MES — KODA ERP*\n"
+        f"Débito fiscal IVA (ventas del mes): ${float(ventas_mes['iva']):.2f}\n"
+        f"IGTF acumulado del mes: ${float(ventas_mes['igtf']):.2f}\n"
+        f"Total facturado del mes: ${float(ventas_mes['total']):.2f}\n"
+        f"Declaración del período {datetime.now(timezone.utc).strftime('%Y-%m')}: {estado_decl}"
+    )
+
+
+async def _dyn_query_accounting(conn, tenant_id) -> str:
+    tid = uuid.UUID(str(tenant_id))
+    row = await conn.fetchrow(
+        """
+        SELECT
+            COALESCE(SUM(d.debe_usd), 0) AS debe,
+            COALESCE(SUM(d.haber_usd), 0) AS haber,
+            COUNT(DISTINCT d.asiento_id) AS asientos
+        FROM public.asiento_detalles d
+        JOIN public.asientos_contables a ON a.id = d.asiento_id
+        WHERE d.tenant_id = $1 AND a.fecha >= date_trunc('month', CURRENT_DATE)
+        """,
+        tid
+    )
+    debe = float(row["debe"])
+    haber = float(row["haber"])
+    cuadrado = "✅ Cuadrado" if abs(debe - haber) < 0.01 else "⚠️ Descuadrado — revisar"
+    if row["asientos"] == 0:
+        return (
+            f"📕 *LIBRO DIARIO DEL MES — KODA ERP*\n"
+            f"No hay asientos contables registrados este mes para esta empresa."
+        )
+    return (
+        f"📕 *LIBRO DIARIO DEL MES — KODA ERP*\n"
+        f"Asientos generados: {row['asientos']}\n"
+        f"Total Debe: ${debe:.2f}\n"
+        f"Total Haber: ${haber:.2f}\n"
+        f"Balance: {cuadrado}"
+    )
+
+
+async def _dyn_query_payroll(conn, tenant_id) -> str:
+    tid = uuid.UUID(str(tenant_id))
+    row = await conn.fetchrow(
+        """
+        SELECT
+            (SELECT COUNT(*) FROM public.empleados
+               WHERE tenant_id = $1 AND activo = 1) AS emp_cnt,
+            (SELECT COALESCE(SUM(salario_base_usd + bono_alimentacion_usd), 0)
+               FROM public.empleados WHERE tenant_id = $1 AND activo = 1) AS emp_costo,
+            (SELECT COUNT(*) FROM public.rh_employees
+               WHERE tenant_id = $1 AND status = 'activo') AS rh_cnt,
+            (SELECT COALESCE(SUM(sueldo_base_mensual), 0)
+               FROM public.rh_employees WHERE tenant_id = $1 AND status = 'activo') AS rh_costo
+        """,
+        tid
+    )
+    total_personal = row["emp_cnt"] + row["rh_cnt"]
+    total_costo = float(row["emp_costo"]) + float(row["rh_costo"])
+    return (
+        f"👥 *NÓMINA Y PERSONAL — KODA ERP*\n"
+        f"Personal activo: {total_personal} empleados\n"
+        f"Costo base mensual estimado (sueldos + bono alimentación): ${total_costo:.2f}"
+    )
+
+
+async def _dyn_query_reports(conn, tenant_id) -> str:
+    tid = uuid.UUID(str(tenant_id))
+    rows = await conn.fetch(
+        """
+        SELECT d.cuenta_codigo,
+               COALESCE(SUM(d.debe_usd), 0) AS debe,
+               COALESCE(SUM(d.haber_usd), 0) AS haber
+        FROM public.asiento_detalles d
+        JOIN public.asientos_contables a ON a.id = d.asiento_id
+        WHERE d.tenant_id = $1 AND (d.cuenta_codigo LIKE '4%' OR d.cuenta_codigo LIKE '5%')
+          AND a.fecha >= date_trunc('month', CURRENT_DATE)
+        GROUP BY d.cuenta_codigo
+        """,
+        tid
+    )
+    if not rows:
+        return (
+            f"📈 *INDICADORES DE NEGOCIO — KODA ERP*\n"
+            f"No hay asientos contables registrados este mes; no es posible calcular "
+            f"indicadores todavía."
+        )
+    ingresos = costos = gastos = 0.0
+    for r in rows:
+        debe = float(r["debe"])
+        haber = float(r["haber"])
+        codigo = r["cuenta_codigo"] or ""
+        if codigo.startswith("4"):
+            ingresos += (haber - debe)
+        elif codigo.startswith("5.1"):
+            costos += (debe - haber)
+        elif codigo.startswith("5"):
+            gastos += (debe - haber)
+    utilidad_bruta = ingresos - costos
+    utilidad_operativa = utilidad_bruta - gastos
+    margen = (utilidad_bruta / ingresos * 100) if ingresos else 0.0
+    return (
+        f"📈 *INDICADORES DE NEGOCIO (BI) — KODA ERP*\n"
+        f"Ingresos del mes: ${ingresos:.2f}\n"
+        f"Costos del mes: ${costos:.2f}\n"
+        f"Gastos operativos: ${gastos:.2f}\n"
+        f"Margen bruto: {margen:.1f}%\n"
+        f"Utilidad operativa estimada: ${utilidad_operativa:.2f}\n"
+        f"_(Calculado sobre el Libro Diario del mes; no incluye depreciación/amortización)_"
+    )
+
+
+async def _dyn_query_branches(conn, tenant_id) -> str:
+    tid = uuid.UUID(str(tenant_id))
+    sucursales = await conn.fetch(
+        """
+        SELECT nombre, ciudad, estado FROM public.sucursales
+        WHERE tenant_id = $1
+        ORDER BY nombre
+        """,
+        tid
+    )
+    if sucursales:
+        lineas = "\n".join(
+            f"📍 {s['nombre']}"
+            + (f" ({s['ciudad']})" if s["ciudad"] else "")
+            + f" — {'Activa' if str(s['estado']).upper() == 'ACTIVO' else s['estado']}"
+            for s in sucursales
+        )
+        return f"🏢 *SEDES Y PUNTOS DE VENTA — KODA ERP*\n{lineas}"
+    almacenes = await conn.fetch(
+        """
+        SELECT nombre, tipo FROM public.almacenes
+        WHERE tenant_id = $1 AND activo = TRUE
+        ORDER BY nombre
+        """,
+        tid
+    )
+    if not almacenes:
+        return "🏢 *SEDES Y PUNTOS DE VENTA — KODA ERP*\nNo hay sucursales ni almacenes registrados todavía."
+    lineas = "\n".join(f"📍 {a['nombre']} ({a['tipo']})" for a in almacenes)
+    return f"🏢 *ALMACENES ACTIVOS — KODA ERP*\n{lineas}"
+
+
+async def _dyn_query_audit(conn, tenant_id) -> str:
+    tid = uuid.UUID(str(tenant_id))
+    rows = await conn.fetch(
+        """
+        SELECT usuario, accion, modulo, LEFT(detalle, 80) AS detalle, fecha
+        FROM public.auditoria_logs
+        WHERE tenant_id = $1
+        ORDER BY fecha DESC
+        LIMIT 5
+        """,
+        tid
+    )
+    if not rows:
+        return "🛡️ *CONTROL DE AUDITORÍA — KODA ERP*\nNo hay eventos de auditoría registrados todavía."
+    lineas = "\n".join(
+        f"• {r['fecha'].strftime('%d/%m %H:%M')} — {r['usuario']}: {r['accion']} "
+        f"({r['modulo']})" + (f" — {r['detalle']}" if r['detalle'] else "")
+        for r in rows
+    )
+    return f"🛡️ *ÚLTIMOS EVENTOS DE AUDITORÍA — KODA ERP*\n{lineas}"
+
+
 # Registro de despachadores: la clave debe coincidir EXACTAMENTE con el valor
 # guardado en bot_commands.internal_action. Cualquier internal_action que no
 # esté aquí simplemente usa el response_text estático de siempre (fallback
@@ -480,6 +839,18 @@ _DYNAMIC_COMMAND_HANDLERS = {
     "query_sales": _dyn_query_sales,
     "query_stock": _dyn_query_stock,
     "query_collections": _dyn_query_collections,
+    "query_alerts": _dyn_query_alerts,
+    "query_invoices": _dyn_query_invoices,
+    "query_purchases": _dyn_query_purchases,
+    "query_logistics": _dyn_query_logistics,
+    "query_payments": _dyn_query_payments,
+    "query_treasury": _dyn_query_treasury,
+    "query_fiscal": _dyn_query_fiscal,
+    "query_accounting": _dyn_query_accounting,
+    "query_payroll": _dyn_query_payroll,
+    "query_reports": _dyn_query_reports,
+    "query_branches": _dyn_query_branches,
+    "query_audit": _dyn_query_audit,
 }
 
 
