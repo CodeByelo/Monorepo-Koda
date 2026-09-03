@@ -31,9 +31,20 @@ const ExchangeRates = () => {
     setTimeout(() => setNotification(null), 4000);
   };
 
-  const tieneCuatroDecimales = (valorTexto: string): boolean => {
-    const partes = (valorTexto || '').split('.');
-    return partes.length === 2 && partes[1].length === 4;
+  // Antes exigia EXACTAMENTE 4 decimales (ej. rechazaba "219.95" o "219"),
+  // lo que bloqueaba en silencio el guardado con solo un toast facil de
+  // perder -- eso es lo que reporto el cliente como "la tasa no se guarda".
+  // Ahora solo valida que sea un numero positivo valido con como maximo 4
+  // decimales; el redondeo a 4 decimales se hace al guardar (ver mas abajo).
+  const esTasaValida = (valorTexto: string): boolean => {
+    const texto = (valorTexto || '').trim();
+    if (texto === '') return false;
+    const numero = Number(texto);
+    if (!Number.isFinite(numero) || numero <= 0) return false;
+    const partes = texto.split('.');
+    if (partes.length > 2) return false;
+    if (partes.length === 2 && partes[1].length > 4) return false;
+    return true;
   };
   
   // Table state
@@ -108,14 +119,16 @@ const ExchangeRates = () => {
 
   const handleSaveManual = async (rateToSave: number, isRef: boolean = false) => {
     const rawValue = isRef ? refRateRaw : bcvRateRaw;
-    if (!tieneCuatroDecimales(rawValue)) {
-      showNotification("Recuerda: la tasa debe llevar cuatro decimales (ej: 218.9550) 🔢", 'error');
+    if (!esTasaValida(rawValue)) {
+      showNotification("Ingresa una tasa valida mayor a 0 (hasta 4 decimales, ej: 218.955 o 218.9550).", 'error');
       return;
     }
+    // Redondear a 4 decimales al guardar, en vez de exigirselo al usuario al escribir.
+    const tasaRedondeada = Math.round(Number(rawValue) * 10000) / 10000;
 
     try {
       setIsSaving(true);
-      const payload = isRef ? { tasa_referencial: rateToSave } : { tasa: rateToSave };
+      const payload = isRef ? { tasa_referencial: tasaRedondeada } : { tasa: tasaRedondeada };
       await api.put('/tasa/manual', payload);
       await fetchData();
       showNotification("Tasa guardada exitosamente.", 'success');
