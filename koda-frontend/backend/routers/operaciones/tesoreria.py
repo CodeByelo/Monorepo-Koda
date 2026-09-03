@@ -721,10 +721,13 @@ def arqueo_caja(fecha: str, caja: str = "Caja Principal USD", db: Session = Depe
         )
     ).all()
 
-    # Desglose según método de pago:
-    # Divisas / Efectivo USD vs Bolívares (Efectivo Bs, Pago Móvil, etc.)
+    # Desglose estricto para ARQUEO FÍSICO DE GAVETA:
+    # 1. DIVISA / EFECTIVO USD: billetes en gaveta física USD
+    # 2. EFECTIVO / EFECTIVO BS: billetes en gaveta física VES
+    # 3. PAGO MÓVIL, TRANSFERENCIA, PUNTO/TARJETA: van a Bancos, NO a la gaveta física
     saldo_usd = 0.0
     saldo_ves = 0.0
+    saldo_bancos_usd = 0.0
 
     for v in ventas_del_dia:
         metodo = (v.metodo_pago or "").strip().upper()
@@ -735,8 +738,11 @@ def arqueo_caja(fecha: str, caja: str = "Caja Principal USD", db: Session = Depe
             saldo_usd += total_v_usd
         elif metodo in ("EFECTIVO", "EFECTIVO_BS", "EFECTIVO BS", "VES", "BOLIVARES"):
             saldo_ves += total_v_usd * tasa_v
+        elif metodo in ("PAGOMOVIL", "PAGO_MOVIL", "PAGO MOVIL", "TRANSFERENCIA", "PUNTO", "DEBITO", "CREDITO"):
+            # Dinero bancario electrónico — se contabiliza aparte, NO en la gaveta física
+            saldo_bancos_usd += total_v_usd
         else:
-            # Otros métodos mixtos o generales: si la moneda de documento es SOLO_VES o el método es Bs
+            # Si el documento se emitió explícitamente en Bolívares
             if getattr(v, "moneda_documento", None) == "SOLO_VES":
                 saldo_ves += total_v_usd * tasa_v
             else:
@@ -747,6 +753,7 @@ def arqueo_caja(fecha: str, caja: str = "Caja Principal USD", db: Session = Depe
         "caja": caja,
         "saldo_sistema_usd": round(saldo_usd, 2),
         "saldo_sistema_ves": round(saldo_ves, 2),
+        "saldo_bancos_usd": round(saldo_bancos_usd, 2),
         "ventas_count": len(ventas_del_dia),
     }
 
