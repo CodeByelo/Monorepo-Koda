@@ -281,6 +281,23 @@ def kpis_cuentas_por_pagar(db: Session = Depends(get_db), current_user = Depends
 
 @tesoreria_router.get("/bancos")
 def listar_bancos(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    # Limpiar cuentas fantasma de auto-seeds antiguos que no tienen movimientos
+    try:
+        dummy_cuentas = db.query(CuentaBancaria).filter(
+            CuentaBancaria.tenant_id == current_user.tenant_id,
+            (
+                CuentaBancaria.numero_cuenta.in_(["1234-CAJA-USD-01", "1234-CAJA-USD-02"]) |
+                CuentaBancaria.banco.in_(["Caja Chica Ventas", "Caja Principal USD"])
+            )
+        ).all()
+        for d in dummy_cuentas:
+            tiene_movs = db.query(MovimientoBancario).filter(MovimientoBancario.cuenta_id == d.id).count() > 0
+            if not tiene_movs:
+                db.delete(d)
+        db.commit()
+    except Exception:
+        db.rollback()
+
     cuentas = db.query(CuentaBancaria).filter(CuentaBancaria.tenant_id == current_user.tenant_id).all()
     tasa = tasa_actual(db, current_user.tenant_id)
     res = []
@@ -331,6 +348,58 @@ def crear_banco(body: dict, db: Session = Depends(get_db), current_user = Depend
     db.commit()
     db.refresh(c)
     return c
+
+
+@tesoreria_router.put("/bancos/{cuenta_id}")
+def actualizar_banco(cuenta_id: int, body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    cuenta = db.query(CuentaBancaria).filter(
+        CuentaBancaria.id == cuenta_id,
+        CuentaBancaria.tenant_id == current_user.tenant_id
+    ).first()
+    if not cuenta:
+        raise HTTPException(status_code=404, detail="Cuenta bancaria no encontrada")
+    
+    if "nombre" in body:
+        cuenta.banco = body["nombre"]
+    if "numero" in body:
+        cuenta.numero_cuenta = body["numero"]
+    if "moneda" in body:
+        cuenta.moneda = body["moneda"]
+    if "saldo_actual" in body:
+        cuenta.saldo_actual_usd = Decimal(str(body["saldo_actual"]))
+    if "estado" in body:
+        cuenta.activa = (body["estado"] == "Activa")
+        
+    db.commit()
+    db.refresh(cuenta)
+    return {"ok": True, "cuenta": {
+        "id": cuenta.id,
+        "nombre": cuenta.banco,
+        "numero": cuenta.numero_cuenta,
+        "moneda": cuenta.moneda,
+        "saldo": float(cuenta.saldo_actual_usd),
+        "activa": cuenta.activa
+    }}
+
+
+@tesoreria_router.delete("/bancos/{cuenta_id}")
+def eliminar_banco(cuenta_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    cuenta = db.query(CuentaBancaria).filter(
+        CuentaBancaria.id == cuenta_id,
+        CuentaBancaria.tenant_id == current_user.tenant_id
+    ).first()
+    if not cuenta:
+        raise HTTPException(status_code=404, detail="Cuenta bancaria no encontrada")
+    
+    tiene_movs = db.query(MovimientoBancario).filter(MovimientoBancario.cuenta_id == cuenta.id).count() > 0
+    if tiene_movs:
+        cuenta.activa = False
+        db.commit()
+        return {"ok": True, "accion": "desactivada", "mensaje": "Cuenta desactivada por tener movimientos asociados."}
+    
+    db.delete(cuenta)
+    db.commit()
+    return {"ok": True, "accion": "eliminada", "mensaje": "Cuenta eliminada exitosamente."}
 
 
 @tesoreria_router.get("/movimientos")

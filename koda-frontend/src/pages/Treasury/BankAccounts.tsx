@@ -8,7 +8,8 @@ import {
   X,
   Building2,
   Wallet,
-  Coins
+  Coins,
+  Trash2
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '@/api/client';
@@ -62,6 +63,17 @@ const BankAccounts = () => {
     { label: 'Por Conciliar', value: `$${totalPorConciliar.toLocaleString('en-US', {minimumFractionDigits: 2})}`, desc: 'Diferencias pendientes', color: 'text-amber-600' },
     { label: 'Cuentas en Divisas', value: currencyAccountsCount.toString(), desc: 'Requieren tasa y control', color: 'text-blue-600' },
   ];
+
+  const handleDeleteAccount = async (id: number, name: string) => {
+    if (!window.confirm(`¿Estás seguro de que deseas eliminar la cuenta "${name}"?`)) return;
+    try {
+      await api.delete(`/tesoreria/bancos/${id}`);
+      fetchData();
+    } catch (error) {
+      console.error("Error al eliminar cuenta bancaria:", error);
+      alert("No se pudo eliminar la cuenta bancaria.");
+    }
+  };
 
   const handleNewAccount = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -194,9 +206,18 @@ const BankAccounts = () => {
                       </span>
                     </td>
                     <td className="py-2.5 px-6 text-right">
-                      <button onClick={() => navigate(`/tesoreria/movimientos-bancarios`)} className="text-xs font-black text-[#0b5156] uppercase hover:underline flex items-center gap-1 justify-end ml-auto">
-                        Ver <ChevronRight size={14} />
-                      </button>
+                      <div className="flex items-center justify-end gap-3">
+                        <button onClick={() => navigate(`/tesoreria/movimientos-bancarios`)} className="text-xs font-black text-[#0b5156] uppercase hover:underline flex items-center gap-1">
+                          Ver <ChevronRight size={14} />
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteAccount(row.id, row.name || row.nombre)} 
+                          title="Eliminar cuenta bancaria"
+                          className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );

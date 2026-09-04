@@ -607,6 +607,42 @@ async def _dyn_query_payments(conn, tenant_id) -> str:
 
 async def _dyn_query_treasury(conn, tenant_id) -> str:
     tid = uuid.UUID(str(tenant_id))
+
+    # 1. Depurar de inmediato cuentas fantasma del auto-seed antiguo
+    # (Caja Principal USD "1234-CAJA-USD-01" y Caja Chica Ventas "1234-CAJA-USD-02")
+    # que fueron inyectadas por pruebas y no corresponden al cliente
+    try:
+        await conn.execute(
+            """
+            DELETE FROM public.cuentas_bancarias
+            WHERE tenant_id = $1 
+              AND (
+                  numero_cuenta IN ('1234-CAJA-USD-01', '1234-CAJA-USD-02')
+                  OR banco IN ('Caja Chica Ventas', 'Caja Principal USD')
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM public.movimientos_bancarios WHERE cuenta_id = public.cuentas_bancarias.id
+              )
+            """,
+            tid
+        )
+        # Limpiar fondo de caja chica falso si no tiene gastos reales
+        await conn.execute(
+            """
+            DELETE FROM public.fondos_caja_chica
+            WHERE tenant_id = $1
+              AND nombre = 'Caja Chica Operativa'
+              AND responsable = 'Administración'
+              AND NOT EXISTS (
+                  SELECT 1 FROM public.gastos_caja_chica WHERE fondo_id = public.fondos_caja_chica.id
+              )
+            """,
+            tid
+        )
+    except Exception as clean_err:
+        logger.warning(f"[TELEGRAM] Limpieza de cuentas fantasma: {clean_err}")
+
+    # 2. Consultar cuentas bancarias reales activas
     cuentas = await conn.fetch(
         """
         SELECT banco, moneda, numero_cuenta, saldo_actual_usd
@@ -616,6 +652,8 @@ async def _dyn_query_treasury(conn, tenant_id) -> str:
         """,
         tid
     )
+
+    # 3. Consultar fondos de caja chica reales activos
     caja_chica = await conn.fetchrow(
         """
         SELECT COALESCE(SUM(disponible_usd), 0) AS disponible
@@ -624,22 +662,48 @@ async def _dyn_query_treasury(conn, tenant_id) -> str:
         """,
         tid
     )
+
+    # 4. Consultar efectivo real de ventas del día (reales registradas en el ERP)
+    ventas_hoy = await conn.fetchrow(
+        """
+        SELECT 
+            COALESCE(SUM(CASE WHEN UPPER(metodo_pago) IN ('DIVISA', 'DIVISAS', 'USD', 'DOLARES', 'CASH_USD') THEN total_usd ELSE 0 END), 0) AS efectivo_usd,
+            COALESCE(SUM(CASE WHEN UPPER(metodo_pago) NOT IN ('DIVISA', 'DIVISAS', 'USD', 'DOLARES', 'CASH_USD') THEN total_usd * COALESCE(tasa_cambio_bs, 1) ELSE 0 END), 0) AS efectivo_ves
+        FROM public.ventas
+        WHERE tenant_id = $1 
+          AND estado = 'ACTIVA' 
+          AND fecha >= CURRENT_DATE
+        """,
+        tid
+    )
+
     if not cuentas:
-        cuentas_txt = "Sin cuentas bancarias activas registradas."
+        cuentas_txt = "• _Sin cuentas bancarias registradas._"
     else:
         lineas = []
         for c in cuentas:
             numero = str(c["numero_cuenta"] or "")
-            enmascarado = f"****{numero[-4:]}" if len(numero) >= 4 else "****"
-            lineas.append(
-                f"• {c['banco']} {enmascarado} ({c['moneda']}): "
-                f"${float(c['saldo_actual_usd']):.2f}"
-            )
+            enmascarado = f"****{numero[-4:]}" if len(numero) >= 4 else (f"****{numero}" if numero else "")
+            moneda = (c["moneda"] or "USD").upper()
+            saldo = float(c["saldo_actual_usd"] or 0)
+            
+            if moneda in ("VES", "VED"):
+                lineas.append(f"• {c['banco']} {enmascarado} (VES): Bs. {saldo:,.2f}")
+            else:
+                lineas.append(f"• {c['banco']} {enmascarado} (USD): ${saldo:,.2f}")
         cuentas_txt = "\n".join(lineas)
+
+    caja_usd = float(ventas_hoy["efectivo_usd"]) if ventas_hoy else 0.0
+    caja_ves = float(ventas_hoy["efectivo_ves"]) if ventas_hoy else 0.0
+    caja_chica_disp = float(caja_chica["disponible"]) if caja_chica else 0.0
+
     return (
-        f"🏛️ *SALDOS DE TESORERÍA — KODA ERP*\n"
-        f"{cuentas_txt}\n"
-        f"💵 Caja chica disponible: ${float(caja_chica['disponible']):.2f}"
+        f"🏛️ *SALDOS DE TESORERÍA — KODA ERP*\n\n"
+        f"🏦 *Cuentas y Bancos:*\n{cuentas_txt}\n\n"
+        f"💵 *Caja / Efectivo del Día (Ventas reales):*\n"
+        f"• Efectivo en Divisas: ${caja_usd:,.2f}\n"
+        f"• Efectivo / Cobranzas Bs: Bs. {caja_ves:,.2f}\n\n"
+        f"📦 *Caja Chica Disponible:* ${caja_chica_disp:,.2f}"
     )
 
 

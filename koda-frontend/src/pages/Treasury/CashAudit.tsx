@@ -27,7 +27,8 @@ const CashAudit = () => {
   };
   const [showResModal, setShowResModal] = useState(false);
   const [showManualModal, setShowManualModal] = useState(false);
-  const [selectedCaja, setSelectedCaja] = useState('Caja Principal USD');
+  const [cajasDisponibles, setCajasDisponibles] = useState<string[]>([]);
+  const [selectedCaja, setSelectedCaja] = useState('Caja Principal');
   const [usdDenoms, setUsdDenoms] = useState<Record<string, number>>({ '100': 0, '50': 0, '20': 0, '10': 0, '5': 0, '1': 0 });
   const [vesTotal, setVesTotal] = useState<number>(0);
   const [deterioratedUsd, setDeterioratedUsd] = useState(0);
@@ -43,6 +44,18 @@ const CashAudit = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   const CRITICAL_THRESHOLD = 50.00;
+
+  useEffect(() => {
+    api.get<any[]>('/tesoreria/bancos').then((data) => {
+      if (data && data.length > 0) {
+        const nombres = data.map((b: any) => b.nombre || b.name).filter(Boolean);
+        setCajasDisponibles(nombres);
+        if (nombres.length > 0) {
+          setSelectedCaja(nombres[0]);
+        }
+      }
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     const fetchArqueoData = async () => {
@@ -206,14 +219,17 @@ const CashAudit = () => {
                    <div className="w-10 h-10 bg-[#0b5156] text-white rounded-xl flex items-center justify-center font-black">USD</div>
                    <h2 className="text-xl font-black text-[#0b5156] uppercase tracking-tighter">Caja en Divisas</h2>
                 </div>
-                 <select 
-                   value={selectedCaja}
-                   onChange={(e) => setSelectedCaja(e.target.value)}
-                   className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-black text-[#0b5156] uppercase outline-none focus:border-[#0b5156]"
-                 >
-                    <option>Caja Principal USD</option>
-                    <option>Caja Chica Ventas</option>
-                 </select>
+                  <select 
+                    value={selectedCaja}
+                    onChange={(e) => setSelectedCaja(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-black text-[#0b5156] uppercase outline-none focus:border-[#0b5156]"
+                  >
+                     {cajasDisponibles.length > 0 ? (
+                       cajasDisponibles.map((c, idx) => <option key={idx} value={c}>{c}</option>)
+                     ) : (
+                       <option value={selectedCaja}>{selectedCaja}</option>
+                     )}
+                  </select>
              </div>
 
              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-2">
