@@ -307,6 +307,12 @@ const systemsConfig = {
     icon: Users,
     gradient: 'from-pink-600 to-rose-600',
     badge: 'Personal'
+  },
+  retail_basico: {
+    label: 'Plan Retail Básico',
+    icon: Package,
+    gradient: 'from-cyan-600 to-teal-500',
+    badge: 'Operativo Simple'
   }
 };
 
@@ -341,6 +347,24 @@ const isPathReleasingToSystem = (path: string, system: SystemKey): boolean => {
     if (path.startsWith('/nomina')) return true;
     if (path === '/reportes') return true;
     if (path === '/admin' || path === '/admin/empresa' || path === '/admin/usuarios' || path === '/admin/telegram') return true;
+  }
+
+  if (system === 'retail_basico') {
+    // Inventario completo: catálogo, existencias, kardex, transferencias entre almacenes, ajustes, toma física, garantías
+    if (path.startsWith('/inventario')) return true;
+
+    // Compras: solo lo operativo (sin anteproyecto de costos ni flujo de aprobaciones)
+    if (path === '/compras' || path === '/compras/proveedores' || path === '/compras/ordenes' || path === '/compras/recepcion' || path === '/compras/historial') return true;
+
+    // Caja: solo la porción operativa de Tesorería (arqueo/cierre de caja, caja chica, movimientos de caja)
+    // NO incluye bancos, conciliación, préstamos, inversiones, presupuesto ni posición consolidada
+    if (path === '/tesoreria/caja-chica' || path === '/tesoreria/arqueo' || path === '/tesoreria/movimientos-caja') return true;
+
+    // Reportes operativos básicos
+    if (path === '/reportes' || path === '/reportes/ventas' || path === '/reportes/compras' || path === '/reportes/rentabilidad' || path === '/reportes/matriz-abc') return true;
+
+    // Configuración mínima
+    if (path === '/admin' || path === '/admin/sucursales' || path === '/admin/usuarios' || path === '/admin/monedas' || path === '/admin/notificaciones' || path === '/admin/telegram') return true;
   }
 
   return false;
@@ -422,6 +446,8 @@ const getFilteredNavItems = (system: SystemKey) => {
         isPrimaryAllowed = ['/fiscal', '/reportes', '/admin'].includes(item.path);
       } else if (system === 'nomina') {
         isPrimaryAllowed = ['/nomina', '/reportes', '/admin'].includes(item.path);
+      } else if (system === 'retail_basico') {
+        isPrimaryAllowed = ['/inventario', '/compras', '/tesoreria', '/reportes', '/admin'].includes(item.path);
       }
 
       if (!isPrimaryAllowed) return null;

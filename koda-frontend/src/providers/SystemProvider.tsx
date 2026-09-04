@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState } from 'react';
 
-export type SystemKey = 'all' | 'administrativo' | 'financiero' | 'contable' | 'fiscal' | 'nomina';
+export type SystemKey = 'all' | 'administrativo' | 'financiero' | 'contable' | 'fiscal' | 'nomina' | 'retail_basico';
 
 interface SystemContextType {
   activeSystem: SystemKey;
