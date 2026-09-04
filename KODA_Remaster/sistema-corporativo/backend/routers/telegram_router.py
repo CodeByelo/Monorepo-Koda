@@ -854,6 +854,67 @@ _DYNAMIC_COMMAND_HANDLERS = {
 }
 
 
+def _normalize_command_trigger(text: str) -> str:
+    """Normaliza un comando quitando espacios, pasando a minúsculas y removiendo acentos."""
+    t = text.strip().lower()
+    accents = {
+        'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u',
+        'Á': 'a', 'É': 'e', 'Í': 'i', 'Ó': 'o', 'Ú': 'u'
+    }
+    for orig, norm in accents.items():
+        t = t.replace(orig, norm)
+    return t
+
+
+_HELP_TEXT = (
+    "🤖 *ASISTENTE VIRTUAL KODA ERP - COMANDOS DISPONIBLES*\n\n"
+    "💵 `/tasa` o `/bcv` - Tasas activas del BCV\n"
+    "🛍️ `/ventas` - Ventas y órdenes de hoy\n"
+    "🏛️ `/tesoreria` - Saldos bancarios y caja chica\n"
+    "📦 `/stock <sku>` - Consultar inventario por producto\n"
+    "🛒 `/comprar <producto>` - Búsqueda en catálogo y venta interactiva\n"
+    "🧾 `/venta <sku> <cant>` - Registro directo de venta\n"
+    "💰 `/cobranzas` - Cuentas por Cobrar (CxC)\n"
+    "💸 `/pagos` - Cuentas por Pagar (CxP)\n"
+    "🚨 `/alertas` - Centro de alertas operativas\n"
+    "📄 `/facturas` - Resumen de facturación\n"
+    "📦 `/inventario` - Stock crítico y almacenes\n"
+    "🚚 `/logistica` - Estado de despachos y flota\n"
+    "📊 `/fiscal` - Resumen de IVA e IGTF\n"
+    "📕 `/contabilidad` - Libro Diario y asientos\n"
+    "👥 `/nomina` - Personal activo y costos de nómina\n"
+    "📈 `/reportes` - Indicadores BI y márgenes\n"
+    "🏢 `/sucursales` - Sedes físicas\n"
+    "🛡️ `/auditoria` - Registro de eventos de seguridad\n\n"
+    "_Todos los comandos operan en tiempo real bajo aislamiento multi-tenant._"
+)
+
+# Catálogo integrado de respaldo: permite que los comandos del sistema funcionen
+# de inmediato sin requerir configuración manual previa en public.bot_commands,
+# respetando tolerancia a tildes y mayúsculas.
+_BUILTIN_COMMANDS_FALLBACK = {
+    "/ayuda": {"text": _HELP_TEXT, "action": None},
+    "/help": {"text": _HELP_TEXT, "action": None},
+    "/tesoreria": {"text": "🏛️ Consultando saldos de tesorería...", "action": "query_treasury"},
+    "/tasa": {"text": "💱 Consultando tasa oficial BCV...", "action": "query_rates"},
+    "/bcv": {"text": "💱 Consultando tasa oficial BCV...", "action": "query_rates"},
+    "/ventas": {"text": "🛍️ Consultando ventas de hoy...", "action": "query_sales"},
+    "/cobranzas": {"text": "💰 Consultando cuentas por cobrar...", "action": "query_collections"},
+    "/pagos": {"text": "💸 Consultando cuentas por pagar...", "action": "query_payments"},
+    "/alertas": {"text": "🚨 Consultando centro de alertas...", "action": "query_alerts"},
+    "/facturas": {"text": "🧾 Consultando resumen de facturas...", "action": "query_invoices"},
+    "/compras": {"text": "🛒 Consultando requisiciones y compras...", "action": "query_purchases"},
+    "/inventario": {"text": "📦 Consultando inventario...", "action": "query_stock"},
+    "/logistica": {"text": "🚚 Consultando estado de logística...", "action": "query_logistics"},
+    "/fiscal": {"text": "📊 Consultando obligaciones fiscales...", "action": "query_fiscal"},
+    "/contabilidad": {"text": "📕 Consultando libro diario...", "action": "query_accounting"},
+    "/nomina": {"text": "👥 Consultando personal y nómina...", "action": "query_payroll"},
+    "/reportes": {"text": "📈 Consultando indicadores de negocio...", "action": "query_reports"},
+    "/sucursales": {"text": "🏢 Consultando sucursales...", "action": "query_branches"},
+    "/auditoria": {"text": "🛡️ Consultando logs de auditoría...", "action": "query_audit"},
+}
+
+
 def _parse_venta_command(text: str):
     """
     Parsea "/venta <sku> <cantidad> [rif_cliente]".
@@ -1528,45 +1589,62 @@ async def telegram_webhook(
 
         # 3.1 Comandos de negocio propios del bot (/venta, /stock, /comprar), evaluados
         #     antes que el catálogo genérico de bot_commands.
-        primer_token = command_text.split()[0] if command_text.split() else ""
+        primer_token = command_text.split()[0].strip() if command_text.split() else ""
+        norm_token = _normalize_command_trigger(primer_token)
 
-        if primer_token == "/venta":
+        if norm_token == "/venta":
             return await _handle_venta_command(command_text, chat_id, session_row, conn)
 
-        if primer_token == "/stock":
+        if norm_token == "/stock":
             return await _handle_stock_command(command_text, chat_id, session_row)
 
-        if primer_token == "/comprar":
+        if norm_token == "/comprar":
             return await _handle_comprar_command(command_text, chat_id, session_row, conn)
 
-        # 4. Buscar si el comando coincide con algún trigger_command del tenant.
-        # Filtramos explícitamente por tenant_id además del contexto RLS para total fiabilidad.
-        cmd_row = await conn.fetchrow(
+        # 4. Buscar si el comando coincide con algún trigger_command personalizado del tenant.
+        # Buscamos en la BD tolerando diferencias de mayúsculas y acentos
+        cmd_rows = await conn.fetch(
             """
-            SELECT response_text, internal_action
+            SELECT trigger_command, response_text, internal_action
             FROM public.bot_commands
-            WHERE trigger_command = $1
-              AND (tenant_id = $2::uuid OR tenant_id IS NULL)
+            WHERE (tenant_id = $1::uuid OR tenant_id IS NULL)
               AND is_active = TRUE
             """,
-            command_text,
             uuid.UUID(str(tenant_id))
         )
+        cmd_row = None
+        for r in cmd_rows:
+            db_trig = (r["trigger_command"] or "").strip()
+            if db_trig.lower() == primer_token.lower() or _normalize_command_trigger(db_trig) == norm_token:
+                cmd_row = dict(r)
+                break
 
-        # 5. Responder a Telegram con el resultado correspondiente
+        # 5. Si no está registrado en la BD para el tenant, consultar catálogo base del sistema (fallback)
+        if not cmd_row:
+            for b_cmd, b_meta in _BUILTIN_COMMANDS_FALLBACK.items():
+                if b_cmd == primer_token.lower() or _normalize_command_trigger(b_cmd) == norm_token:
+                    cmd_row = {
+                        "response_text": b_meta["text"],
+                        "internal_action": b_meta["action"]
+                    }
+                    break
+
+        # 6. Responder a Telegram con el resultado correspondiente
         if cmd_row:
             reply_text = cmd_row["response_text"]
-            handler = _DYNAMIC_COMMAND_HANDLERS.get(cmd_row["internal_action"])
-            if handler:
-                try:
-                    reply_text = await handler(conn, tenant_id)
-                except Exception as dyn_err:
-                    logger.error(
-                        f"[TELEGRAM] Error en despachador dinámico "
-                        f"'{cmd_row['internal_action']}' para {command_text}: {dyn_err}"
-                    )
-                    # Si falla la consulta dinámica, cae de vuelta al texto
-                    # estático guardado en vez de dejar al usuario sin respuesta.
+            action = cmd_row.get("internal_action")
+            if action:
+                handler = _DYNAMIC_COMMAND_HANDLERS.get(action)
+                if handler:
+                    try:
+                        reply_text = await handler(conn, tenant_id)
+                    except Exception as dyn_err:
+                        logger.error(
+                            f"[TELEGRAM] Error en despachador dinámico "
+                            f"'{action}' para {command_text}: {dyn_err}"
+                        )
+                        # Si falla la consulta dinámica, cae de vuelta al texto
+                        # estático guardado en vez de dejar al usuario sin respuesta.
             await send_telegram_message(chat_id, reply_text)
             return {"status": "success", "response": reply_text}
         else:
