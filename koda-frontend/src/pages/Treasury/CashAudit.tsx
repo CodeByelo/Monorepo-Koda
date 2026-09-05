@@ -42,6 +42,8 @@ const CashAudit = () => {
   const [systemVesEquivUsd, setSystemVesEquivUsd] = useState(0);
   const [selectedDate, setSelectedDate] = useState(() => getFechaVenezuela());
   const [isLoading, setIsLoading] = useState(true);
+  const [isClosing, setIsClosing] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   const CRITICAL_THRESHOLD = 50.00;
 
@@ -117,6 +119,8 @@ const CashAudit = () => {
   };
 
   const handleCloseCashRegister = async () => {
+    if (isClosing) return; // evita doble envío si el cajero hace doble clic
+    setIsClosing(true);
     try {
       await api.post('/tesoreria/arqueo/cerrar', {
         caja: selectedCaja,
@@ -129,9 +133,9 @@ const CashAudit = () => {
         denominaciones_usd: usdDenoms,
         denominaciones_ves: { "Total": vesTotal },
         accion_contable: auditAction,
-        auditor: auditorName
+        auditor: auditorName,
+        declaracion_veracidad: declared
       });
-      showToast('Cierre y Ajuste Procesado Exitosamente');
       setShowResModal(false);
       // Refresh data after close
       const today = getFechaVenezuela();
@@ -145,16 +149,24 @@ const CashAudit = () => {
       setJustification('');
       setDeclared(false);
       setAuditorName('');
+      // Confirmación clara y difícil de ignorar de que el cierre terminó
+      setShowSuccessModal(true);
     } catch (error: any) {
       console.error("Error al cerrar caja:", error);
       showToast(error?.message || 'Error al procesar el cierre de caja.');
+    } finally {
+      setIsClosing(false);
     }
   };
 
   const handleExecuteCierreClick = () => {
-    if (isLoading) return;
+    if (isLoading || isClosing) return;
     if (!hasInput) {
       showToast("Por favor, ingrese el conteo físico de billetes o efectivo antes de cerrar.");
+      return;
+    }
+    if (!declared) {
+      showToast("Debe marcar la casilla de declaración antes de poder cerrar la caja.");
       return;
     }
     
@@ -200,9 +212,10 @@ const CashAudit = () => {
              </button>
               <button 
                 onClick={handleExecuteCierreClick}
-                className="bg-[#0b5156] text-white shadow-green-900/20 hover:bg-[#083a3d] px-5 py-2 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-lg hover:scale-[1.02]"
+                disabled={isClosing}
+                className="bg-[#0b5156] text-white shadow-green-900/20 hover:bg-[#083a3d] px-5 py-2 rounded-xl text-xs font-black uppercase flex items-center gap-2 transition-all shadow-lg hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
               >
-                 <Lock size={14} /> Ejecutar Cierre
+                 <Lock size={14} /> {isClosing ? 'Procesando...' : 'Ejecutar Cierre'}
               </button>
           </div>
         </div>
@@ -508,8 +521,12 @@ const CashAudit = () => {
                     </p>
                  </div>
 
-                 <button onClick={handleCloseCashRegister} className="w-full bg-[#0b5156] text-white font-black py-4 rounded-2xl uppercase text-xs tracking-widest shadow-xl shadow-green-900/20 hover:scale-[1.02] transition-all">
-                    Confirmar Cierre y Generar Asiento
+                 <button 
+                   onClick={handleCloseCashRegister} 
+                   disabled={isClosing}
+                   className="w-full bg-[#0b5156] text-white font-black py-4 rounded-2xl uppercase text-xs tracking-widest shadow-xl shadow-green-900/20 hover:scale-[1.02] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                 >
+                    {isClosing ? 'Procesando Cierre...' : 'Confirmar Cierre y Generar Asiento'}
                  </button>
               </div>
            </div>
@@ -542,6 +559,30 @@ const CashAudit = () => {
             </div>
          </div>
        )}
+
+       {/* Success Modal */}
+       {showSuccessModal && (
+         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95 duration-200 text-center">
+               <div className="p-8 space-y-4">
+                  <div className="w-16 h-16 mx-auto rounded-full bg-green-100 flex items-center justify-center">
+                     <Lock size={28} className="text-green-600" />
+                  </div>
+                  <h3 className="text-lg font-black text-[#0b5156] uppercase tracking-tight">Cierre de Caja Completado</h3>
+                  <p className="text-xs font-bold text-slate-500 uppercase leading-relaxed">
+                     El cuadre finalizó correctamente y el sistema ya está listo para empezar el siguiente día.
+                  </p>
+                  <button
+                    onClick={() => setShowSuccessModal(false)}
+                    className="w-full bg-[#0b5156] text-white font-black py-3 rounded-xl uppercase text-xs tracking-widest shadow-lg hover:scale-[1.02] transition-all"
+                  >
+                     Entendido
+                  </button>
+               </div>
+            </div>
+         </div>
+       )}
+
       {toast && (
         <div className="fixed bottom-5 right-5 bg-slate-900/90 backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-xl z-50 border border-slate-700/50 flex items-center gap-3 animate-in slide-in-from-bottom-5 duration-300">
           <span className="text-xs font-black uppercase tracking-wider">🔔 {toast}</span>

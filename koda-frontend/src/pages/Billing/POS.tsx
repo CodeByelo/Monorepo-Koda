@@ -75,6 +75,7 @@ const POS = () => {
   const [eximirIva, setEximirIva] = useState(false);
   const [eximirIgtf, setEximirIgtf] = useState(false);
   const [productPage, setProductPage] = useState(1);
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
 
   const showToast = (message: string, type: 'error' | 'success' = 'error') => {
     setToast({ message, type });
@@ -263,6 +264,7 @@ const POS = () => {
   };
 
   const handleCheckout = () => {
+    if (isCheckingOut) return; // evita doble envío si se hace clic varias veces seguidas
     if (cart.length === 0) {
       showToast("El carrito está vacío.");
       return;
@@ -297,6 +299,8 @@ const POS = () => {
         es_exento: eximirIva ? true : Boolean(item.es_exento)
       }))
     };
+
+    setIsCheckingOut(true);
     api.post<any>('/v1/facturacion/emitir', payload).then((res) => {
       showToast(`Factura emitida: ${res.numero_factura} | Control: ${res.numero_control}`, 'success');
       setCart([]);
@@ -304,6 +308,8 @@ const POS = () => {
     }).catch((err) => {
       console.error(err);
       showToast(err.response?.data?.detail || "Error al procesar la factura fiscal");
+    }).finally(() => {
+      setIsCheckingOut(false);
     });
   };
 
@@ -395,9 +401,13 @@ const POS = () => {
                 <Wallet size={16} />
                 Quién Me Debe
              </button>
-             <button onClick={handleCheckout} className="bg-[#0b5156] text-white px-8 py-2.5 rounded-xl text-sm font-black uppercase tracking-widest shadow-lg shadow-[#0b5156]/20 hover:scale-105 transition-all">
-                Cobrar Ticket Actual
-             </button>
+              <button 
+                onClick={handleCheckout} 
+                disabled={isCheckingOut}
+                className="bg-[#0b5156] text-white px-8 py-2.5 rounded-xl text-sm font-black uppercase tracking-widest shadow-lg shadow-[#0b5156]/20 hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+              >
+                 {isCheckingOut ? 'Procesando...' : 'Cobrar Ticket Actual'}
+              </button>
              <Link to="/tesoreria/arqueo" className="bg-amber-600 text-white px-6 py-2.5 rounded-xl text-sm font-black uppercase tracking-widest shadow-lg shadow-amber-600/20 hover:scale-105 transition-all flex items-center gap-2">
                 <Lock size={16} />
                 Cierre de Caja
@@ -1048,8 +1058,12 @@ const POS = () => {
                     </div>
                  </div>
 
-                <button onClick={handleCheckout} className="w-full bg-[#0b5156] text-white font-black py-4 rounded-2xl uppercase text-sm tracking-widest shadow-xl shadow-[#0b5156]/20 hover:scale-[1.02] transition-all mt-4">
-                   Emitir Factura Fiscal
+                <button 
+                  onClick={handleCheckout} 
+                  disabled={isCheckingOut}
+                  className="w-full bg-[#0b5156] text-white font-black py-4 rounded-2xl uppercase text-sm tracking-widest shadow-xl shadow-[#0b5156]/20 hover:scale-[1.02] transition-all mt-4 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                >
+                   {isCheckingOut ? 'Procesando...' : 'Emitir Factura Fiscal'}
                 </button>
              </div>
           </section>

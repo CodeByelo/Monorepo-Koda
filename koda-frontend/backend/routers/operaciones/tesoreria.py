@@ -842,6 +842,10 @@ def cerrar_arqueo(body: dict, db: Session = Depends(get_db), current_user = Depe
     sistema_usd = float(body.get("sistema_usd", 0.0))
     cajero = body.get("cajero", "José Pérez")
     justificacion = body.get("justificacion", "")
+    declaracion_veracidad = bool(body.get("declaracion_veracidad", False))
+
+    if not declaracion_veracidad:
+        raise HTTPException(status_code=400, detail="Debe declarar que la información es veraz y auditable antes de cerrar la caja.")
 
     # Update balance of the selected cash account to reflect the physical count
     selected = db.query(CuentaBancaria).filter(
@@ -867,6 +871,7 @@ def cerrar_arqueo(body: dict, db: Session = Depends(get_db), current_user = Depe
         "fisico": fisico_usd,
         "diferencia": diferencia,
         "justificacion": justificacion,
+        "declaracion_veracidad": declaracion_veracidad,
         "resolucion": "Aceptable" if abs(diferencia) <= 50.0 else "Sujeto a Auditoría"
     }
 
