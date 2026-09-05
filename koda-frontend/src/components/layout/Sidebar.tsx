@@ -361,7 +361,7 @@ const isPathReleasingToSystem = (path: string, system: SystemKey): boolean => {
     if (path === '/tesoreria/caja-chica' || path === '/tesoreria/arqueo' || path === '/tesoreria/movimientos-caja') return true;
 
     // Reportes operativos básicos
-    if (path === '/reportes' || path === '/reportes/ventas' || path === '/reportes/compras' || path === '/reportes/rentabilidad' || path === '/reportes/matriz-abc') return true;
+    if (path === '/reportes' || path === '/reportes/ventas' || path === '/reportes/compras' || path === '/reportes/rentabilidad' || path === '/reportes/matriz-abc' || path === '/reportes/vendedores') return true;
 
     // Configuración mínima
     if (path === '/admin' || path === '/admin/sucursales' || path === '/admin/usuarios' || path === '/admin/monedas' || path === '/admin/notificaciones' || path === '/admin/telegram') return true;

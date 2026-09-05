@@ -35,7 +35,7 @@ const isPathAllowed = (path: string, system: SystemKey): boolean => {
     return path.startsWith('/inventario') ||
       path === '/compras' || path === '/compras/proveedores' || path === '/compras/ordenes' || path === '/compras/recepcion' || path === '/compras/historial' ||
       path === '/tesoreria/caja-chica' || path === '/tesoreria/arqueo' || path === '/tesoreria/movimientos-caja' ||
-      path === '/reportes' || path === '/reportes/ventas' || path === '/reportes/compras' || path === '/reportes/rentabilidad' || path === '/reportes/matriz-abc' ||
+      path === '/reportes' || path === '/reportes/ventas' || path === '/reportes/compras' || path === '/reportes/rentabilidad' || path === '/reportes/matriz-abc' || path === '/reportes/vendedores' ||
       path === '/admin' || path === '/admin/sucursales' || path === '/admin/usuarios' || path === '/admin/monedas' || path === '/admin/notificaciones' || path === '/admin/telegram' ||
       ['/historial', '/nueva', '/nueva-fiscal', '/clientes', '/notas', '/pos'].some(p => path === p || path.startsWith(p + '/'));
   }
