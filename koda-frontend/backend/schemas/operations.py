@@ -81,6 +81,10 @@ class VentaCreate(BaseModel):
     dias_credito: int = Field(default=0, ge=0)
     detalles: List[VentaDetalleCreate] = Field(..., min_length=1)
     vendedor_id: Optional[int] = None
+    pago_movil_banco: Optional[str] = None
+    pago_movil_cedula: Optional[str] = None
+    pago_movil_telefono: Optional[str] = None
+    pago_movil_referencia: Optional[str] = None
 
 class FacturaDetalleRequest(BaseModel):
     producto_id: Union[str, int]
@@ -100,6 +104,13 @@ class FacturaEmisionRequest(BaseModel):
     tasa_cambio_bs: Optional[Decimal] = None
     detalles: List[FacturaDetalleRequest] = Field(..., min_length=1)
     vendedor_id: Optional[int] = None
+    # Los 4 son Optional a nivel de schema (para no romper Efectivo/Divisa/Transferencia,
+    # que no los usan), pero procesar_emision_factura() los exige TODOS, incluida
+    # la referencia, cuando metodo_pago == "PagoMovil".
+    pago_movil_banco: Optional[str] = None
+    pago_movil_cedula: Optional[str] = None
+    pago_movil_telefono: Optional[str] = None
+    pago_movil_referencia: Optional[str] = None
 
 class VentaResponse(BaseModel):
     id: int
@@ -116,6 +127,10 @@ class VentaResponse(BaseModel):
     detalles: List[VentaDetalleResponse]
     creado_por: Optional[uuid.UUID] = None
     cliente: Optional[ClienteResponse] = None
+    pago_movil_banco: Optional[str] = None
+    pago_movil_cedula: Optional[str] = None
+    pago_movil_telefono: Optional[str] = None
+    pago_movil_referencia: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

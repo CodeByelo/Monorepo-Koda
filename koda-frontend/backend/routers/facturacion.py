@@ -194,6 +194,10 @@ def emitir_factura_fiscal(
             tasa_personalizada=body.tasa_cambio_bs,
             almacen_id=almacen_venta_id,
             aplica_igtf_override=aplica_igtf_override,
+            pago_movil_banco=body.pago_movil_banco,
+            pago_movil_cedula=body.pago_movil_cedula,
+            pago_movil_telefono=body.pago_movil_telefono,
+            pago_movil_referencia=body.pago_movil_referencia,
         )
 
         now = resultado.venta.fecha

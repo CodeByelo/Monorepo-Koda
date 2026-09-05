@@ -156,9 +156,24 @@ def procesar_emision_factura(
     tasa_personalizada: Optional[Decimal] = None,
     almacen_id: Optional[int] = None,
     aplica_igtf_override: Optional[bool] = None,
+    pago_movil_banco: Optional[str] = None,
+    pago_movil_cedula: Optional[str] = None,
+    pago_movil_telefono: Optional[str] = None,
+    pago_movil_referencia: Optional[str] = None,
 ) -> ResultadoFactura:
     if not lineas:
         raise ValueError("La factura debe tener al menos un detalle.")
+
+    if metodo_pago == "PagoMovil":
+        if (
+            not (pago_movil_banco or "").strip()
+            or not (pago_movil_cedula or "").strip()
+            or not (pago_movil_telefono or "").strip()
+            or not (pago_movil_referencia or "").strip()
+        ):
+            raise ValueError(
+                "Para pagos con Pago Móvil debe indicar el banco emisor, la cédula/RIF, el teléfono y la referencia de la transferencia."
+            )
 
     tenant_id = current_user.tenant_id
 
@@ -287,6 +302,10 @@ def procesar_emision_factura(
         vendedor_id=vendedor.id if vendedor is not None else None,
         comision_usd=comision_usd,
         moneda_documento=(moneda_documento if moneda_documento in ("BIMONETARIO", "SOLO_USD", "SOLO_VES") else "BIMONETARIO"),
+        pago_movil_banco=(pago_movil_banco.strip() if metodo_pago == "PagoMovil" and pago_movil_banco else None),
+        pago_movil_cedula=(pago_movil_cedula.strip() if metodo_pago == "PagoMovil" and pago_movil_cedula else None),
+        pago_movil_telefono=(pago_movil_telefono.strip() if metodo_pago == "PagoMovil" and pago_movil_telefono else None),
+        pago_movil_referencia=(pago_movil_referencia.strip() if metodo_pago == "PagoMovil" and pago_movil_referencia else None),
         tenant_id=tenant_id,
     )
     db.add(nueva_venta)

@@ -40,6 +40,7 @@ const CashAudit = () => {
   const [systemTotalUsd, setSystemTotalUsd] = useState(0);
   const [systemTotalVes, setSystemTotalVes] = useState(0);
   const [systemVesEquivUsd, setSystemVesEquivUsd] = useState(0);
+  const [systemPagoMovil, setSystemPagoMovil] = useState(0);
   const [selectedDate, setSelectedDate] = useState(() => getFechaVenezuela());
   const [isLoading, setIsLoading] = useState(true);
   const [isClosing, setIsClosing] = useState(false);
@@ -67,6 +68,7 @@ const CashAudit = () => {
         setSystemTotalUsd(Number(data?.saldo_usd || data?.saldo_sistema_usd || 0));
         setSystemTotalVes(Number(data?.saldo_ves || data?.saldo_sistema_ves || 0));
         setSystemVesEquivUsd(Number(data?.saldo_ves_equiv_usd || 0));
+        setSystemPagoMovil(Number(data?.saldo_pago_movil || data?.saldo_sistema_pago_movil || 0));
       } catch (error) {
         console.error("Error fetching arqueo data:", error);
       } finally {
@@ -438,6 +440,20 @@ const CashAudit = () => {
                    </div>
                 </div>
              </div>
+          </article>
+
+          {/* Pago Móvil del día — informativo, NO es efectivo físico, no se cuadra contra billetes */}
+          <article className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+             <div className="flex items-center justify-between">
+                <h3 className="text-sm font-black text-[#0b5156] uppercase tracking-tighter">Pago Móvil del Día</h3>
+                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-slate-100 text-slate-500">Bancarizado</span>
+             </div>
+             <p className="text-2xl font-black text-[#0b5156] font-mono tracking-tighter">
+               Bs. {systemPagoMovil.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+             </p>
+             <p className="text-[10px] font-bold text-slate-400 uppercase leading-relaxed">
+               Este monto ya está en el banco, no en la gaveta física — no se cuenta con billetes ni se mezcla con el efectivo en Bs de arriba.
+             </p>
           </article>
 
           {/* Justification */}

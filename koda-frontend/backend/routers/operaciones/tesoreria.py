@@ -800,7 +800,8 @@ def arqueo_caja(fecha: str, caja: str = "Caja Principal USD", db: Session = Depe
     # 2. EFECTIVO / EFECTIVO BS: billetes en gaveta física VES
     # 3. PAGO MÓVIL, TRANSFERENCIA, PUNTO/TARJETA: van a Bancos, NO a la gaveta física
     saldo_usd = 0.0
-    saldo_ves = 0.0
+    saldo_ves = 0.0           # SOLO efectivo físico en bolívares (billetes en la gaveta)
+    saldo_pago_movil = 0.0    # Pago Móvil / Transferencia: dinero bancarizado, NO está en la gaveta física
     saldo_bancos_usd = 0.0
 
     for v in ventas_del_dia:
@@ -811,13 +812,22 @@ def arqueo_caja(fecha: str, caja: str = "Caja Principal USD", db: Session = Depe
         # Si es Divisa Física (Efectivo USD / Dólares en gaveta):
         if metodo in ("DIVISA", "DIVISAS", "USD", "DOLARES", "CASH_USD"):
             saldo_usd += total_v_usd
-        else:
-            # Todo lo demás es en BOLÍVARES (Efectivo Bs, Pago Móvil, Transferencia nacional):
-            # Se acumula en Bolívares para que cuadre la Caja en Bolívares
+        elif metodo in ("EFECTIVO",):
+            # Efectivo físico en bolívares — SÍ está en la gaveta
             saldo_ves += total_v_usd * tasa_v
+        else:
+            # PAGOMOVIL, TRANSFERENCIA, PUNTO/TARJETA: van a Bancos, NO a la
+            # gaveta física. Antes se sumaban aquí mismo a saldo_ves por error
+            # (mezclando dinero bancarizado con efectivo físico), lo que
+            # inflaba el "sistema" contra el que el cajero debía cuadrar la
+            # gaveta. Se separan en su propio bucket para que el Arqueo lo
+            # muestre aparte.
+            saldo_pago_movil += total_v_usd * tasa_v
 
     # Tasa promedio del día para mostrar relación Bs <-> USD
-    tasa_referencia = (saldo_ves / (sum(to_float(v.total_usd or v.total or 0) for v in ventas_del_dia) - saldo_usd)) if (sum(to_float(v.total_usd or v.total or 0) for v in ventas_del_dia) - saldo_usd) > 0 else 1.0
+    total_bs_ventas = saldo_ves + saldo_pago_movil
+    ventas_no_usd = (sum(to_float(v.total_usd or v.total or 0) for v in ventas_del_dia) - saldo_usd)
+    tasa_referencia = (total_bs_ventas / ventas_no_usd) if ventas_no_usd > 0 else 1.0
     ves_en_usd = round(saldo_ves / tasa_referencia, 2) if tasa_referencia > 0 else 0.0
 
     return {
@@ -825,6 +835,7 @@ def arqueo_caja(fecha: str, caja: str = "Caja Principal USD", db: Session = Depe
         "caja": caja,
         "saldo_sistema_usd": round(saldo_usd, 2),
         "saldo_sistema_ves": round(saldo_ves, 2),
+        "saldo_sistema_pago_movil": round(saldo_pago_movil, 2),
         "saldo_ves_equiv_usd": ves_en_usd,
         "total_general_usd": round(saldo_usd + ves_en_usd, 2),
         "ventas_count": len(ventas_del_dia),
