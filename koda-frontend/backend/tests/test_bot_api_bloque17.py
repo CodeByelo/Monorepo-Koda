@@ -246,3 +246,55 @@ def test_crear_venta_bot_idempotencia_con_cache_redis(client, db_session):
         # No se debió crear una segunda venta en la BD
         ventas_count_after = db_session.query(Venta).filter(Venta.tenant_id == tenant_id).count()
         assert ventas_count_after == 1
+
+
+def test_bot_valida_existencia_tenant(client, db_session):
+    """
+    FIX F (Batch 3): Los endpoints del bot deben validar que el tenant_id
+    exista en la tabla de tenants, respondiendo 404 si es un UUID válido pero no registrado.
+    """
+    bot_key = os.getenv("BOT_INTERNAL_API_KEY")
+    headers = {
+        "X-Bot-Api-Key": bot_key,
+        "X-Idempotency-Key": str(uuid.uuid4())
+    }
+    uuid_inexistente = str(uuid.uuid4())
+
+    # 1. GET /bot/stock con tenant inexistente -> 404
+    resp_stock = client.get(
+        f"/bot/stock?tenant_id={uuid_inexistente}&sku=SKU-TEST",
+        headers={"X-Bot-Api-Key": bot_key}
+    )
+    assert resp_stock.status_code == 404
+    assert "no corresponde a una empresa registrada" in resp_stock.json()["detail"]
+
+    # 2. GET /bot/productos/buscar con tenant inexistente -> 404
+    resp_buscar = client.get(
+        f"/bot/productos/buscar?tenant_id={uuid_inexistente}&q=algo",
+        headers={"X-Bot-Api-Key": bot_key}
+    )
+    assert resp_buscar.status_code == 404
+    assert "no corresponde a una empresa registrada" in resp_buscar.json()["detail"]
+
+    # 3. GET /bot/alertas con tenant inexistente -> 404
+    resp_alertas = client.get(
+        f"/bot/alertas?tenant_id={uuid_inexistente}",
+        headers={"X-Bot-Api-Key": bot_key}
+    )
+    assert resp_alertas.status_code == 404
+    assert "no corresponde a una empresa registrada" in resp_alertas.json()["detail"]
+
+    # 4. POST /bot/venta con tenant inexistente -> 404
+    resp_venta = client.post(
+        "/bot/venta",
+        json={
+            "tenant_id": uuid_inexistente,
+            "vendedor_id": 1,
+            "lineas": [{"sku": "SKU-001", "cantidad": 1}],
+            "metodo_pago": "Efectivo"
+        },
+        headers=headers
+    )
+    assert resp_venta.status_code == 404
+    assert "no corresponde a una empresa registrada" in resp_venta.json()["detail"]
+
