@@ -115,6 +115,23 @@ def descontar_stock_almacen(db: Session, tenant_id, producto_id: int, almacen_id
     fila.cantidad = nueva_cantidad if nueva_cantidad > 0 else Decimal("0")
 
 
+def reponer_stock_almacen(db: Session, tenant_id, producto_id: int, almacen_id: Optional[int], cantidad) -> None:
+    """Repone `cantidad` al StockPorAlmacen de un almacén (reverso de
+    descontar_stock_almacen), usado al anular una venta. Mismo criterio:
+    no bloquea la operación si no existe la fila de desglose."""
+    from backend.models.erp_extended import StockPorAlmacen
+    if not almacen_id:
+        return
+    fila = db.query(StockPorAlmacen).filter(
+        StockPorAlmacen.producto_id == producto_id,
+        StockPorAlmacen.almacen_id == almacen_id,
+        StockPorAlmacen.tenant_id == tenant_id,
+    ).with_for_update().first()
+    if not fila:
+        return
+    fila.cantidad = Decimal(str(fila.cantidad)) + Decimal(str(cantidad))
+
+
 def periodo_rango(periodo: str) -> Tuple[datetime, datetime]:
     """periodo formato YYYY-MM -> inicio y fin del mes."""
     if not periodo or not re.match(r"^\d{4}-\d{2}$", periodo):

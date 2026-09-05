@@ -280,17 +280,30 @@ def anular_venta(
         ).with_for_update().all()
         productos_dict = {p.id: p for p in productos}
         
+        from backend.utils.helpers import reponer_stock_almacen
+
         movimientos_reversos = []
         for detalle in venta.detalles:
             producto = productos_dict.get(detalle.producto_id)
             if producto:
                 producto.stock += detalle.cantidad
-            
+
+            # Buscar el almacén real usado en la venta original vía Kardex
+            kardex_original = db.query(KardexMovimiento).filter(
+                KardexMovimiento.producto_id == detalle.producto_id,
+                KardexMovimiento.documento_referencia == venta.numero_factura,
+                KardexMovimiento.tipo_movimiento == "Venta",
+            ).first()
+            if kardex_original and kardex_original.almacen_id:
+                reponer_stock_almacen(db, current_user.tenant_id, detalle.producto_id, kardex_original.almacen_id, detalle.cantidad)
+
             movimiento_reverso = KardexMovimiento(
                 producto_id=detalle.producto_id,
                 tipo_movimiento="Anulacion_Venta",
                 cantidad=detalle.cantidad, # Es positivo porque la mercancía vuelve a entrar
-                documento_referencia=f"REV-{venta.numero_factura}"
+                documento_referencia=f"REV-{venta.numero_factura}",
+                tenant_id=current_user.tenant_id,
+                almacen_id=kardex_original.almacen_id if kardex_original else None,
             )
             movimientos_reversos.append(movimiento_reverso)
             

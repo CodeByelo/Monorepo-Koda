@@ -23,6 +23,7 @@ from backend.models.erp_extended import Empresa, Almacen, StockPorAlmacen, Cuent
 from backend.models.operations import Producto, Cliente, Venta, VentaDetalle, KardexMovimiento
 from backend.models.fiscal import CorrelativoFiscal, ReglaFiscal
 from backend.core.security import get_current_user
+from backend.services.auth import get_current_user_from_token
 from backend.routers.facturacion import router as facturacion_router
 from backend.routers.sales import router as sales_router
 
@@ -155,6 +156,7 @@ def test_client(db_session):
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_current_user] = override_get_current_user
+    app.dependency_overrides[get_current_user_from_token] = override_get_current_user
 
     client = TestClient(app)
     client.headers.update({"X-Idempotency-Key": str(uuid.uuid4())})
@@ -419,3 +421,71 @@ def test_ventas_facturar_cliente_inexistente_retorna_404(test_client, db_session
     )
     assert res.status_code == 404
     assert "no encontrado en su empresa" in res.json().get("detail", "")
+
+
+def test_anular_venta_repone_stock_por_almacen(test_client, db_session):
+    """
+    FIX B (Batch 3): Anular una venta debe reponer tanto el stock global (Producto.stock)
+    como el desglose por almacén (StockPorAlmacen.cantidad) buscando el almacén original en el Kardex.
+    """
+    # 1. Crear producto con stock global 50 y en almacén 1 con stock 50
+    prod = Producto(
+        id=888,
+        tenant_id=test_client.tenant_a_id,
+        sku="PROD-ANULAR-TEST",
+        nombre="Producto Anular Test",
+        precio_usd=Decimal("10.00"),
+        costo_usd=Decimal("5.00"),
+        stock=Decimal("50.00")
+    )
+    stock_alm = StockPorAlmacen(
+        tenant_id=test_client.tenant_a_id,
+        producto_id=888,
+        almacen_id=1,
+        cantidad=Decimal("50.00")
+    )
+    db_session.add_all([prod, stock_alm])
+    db_session.commit()
+
+    # 2. Emitir venta de 5 unidades vía /v1/facturacion/emitir
+    payload = {
+        "cliente_id": "10",
+        "metodo_pago": "Efectivo",
+        "moneda_documento": "SOLO_USD",
+        "detalles": [
+            {
+                "producto_id": "PROD-ANULAR-TEST",
+                "cantidad": 5.0,
+                "precio_unitario": 10.0
+            }
+        ]
+    }
+    resp_emitir = test_client.post(
+        "/v1/facturacion/emitir",
+        json=payload,
+        headers={"X-Idempotency-Key": str(uuid.uuid4())}
+    )
+    assert resp_emitir.status_code == 201
+    venta_data = resp_emitir.json()
+    numero_factura = venta_data["numero_factura"]
+
+    # Verificar que el stock bajó a 45 en ambos lados
+    db_session.refresh(prod)
+    db_session.refresh(stock_alm)
+    assert prod.stock == Decimal("45.00")
+    assert stock_alm.cantidad == Decimal("45.00")
+
+    # Buscar la venta creada en la base de datos
+    venta_db = db_session.query(Venta).filter(Venta.numero_factura == numero_factura).first()
+    assert venta_db is not None
+
+    # 3. Anular la venta vía POST /ventas/{venta_id}/anular
+    resp_anular = test_client.post(f"/ventas/{venta_db.id}/anular")
+    assert resp_anular.status_code == 200
+    assert resp_anular.json()["estado"] == "ANULADA"
+
+    # 4. Verificar que TANTO prod.stock COMO stock_alm.cantidad volvieron a su valor original de 50.00
+    db_session.refresh(prod)
+    db_session.refresh(stock_alm)
+    assert prod.stock == Decimal("50.00")
+    assert stock_alm.cantidad == Decimal("50.00")
