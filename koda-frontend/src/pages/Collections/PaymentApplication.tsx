@@ -258,7 +258,14 @@ const PaymentApplication = () => {
                            <td className="py-4 px-4">
                               <select
                                 value={m.type}
-                                onChange={(e) => updateMethod(m.id, 'type', e.target.value)}
+                                onChange={(e) => {
+                                  const newType = e.target.value;
+                                  if (newType === 'Bolívares' && (m.rate === '1.00' || m.rate === '1' || !m.rate)) {
+                                    setMethods(methods.map(mx => mx.id === m.id ? { ...mx, type: newType, rate: String(bcvRate || 1) } : mx));
+                                  } else {
+                                    updateMethod(m.id, 'type', newType);
+                                  }
+                                }}
                                 className="bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-black text-slate-700 w-full outline-none focus:border-[#0b5156]"
                               >
                                  <option>Efectivo</option>

@@ -180,3 +180,138 @@ def test_bug2_procesar_aplicacion_fallback_tasa_bcv(db_session):
     mov = db_session.query(MovimientoBancario).filter(MovimientoBancario.tenant_id == tenant_id).first()
     assert mov is not None
     assert float(mov.tasa_cambio_bs) == 784.66
+
+
+def test_procesar_aplicacion_tasa_bolivares_desviada_falla(db_session):
+    """
+    FIX C: Un cobro con type='Bolívares', rate='1.00' y tasa oficial de 40.00
+    debe ser rechazado con HTTP 400 por desviación excesiva (>15%).
+    """
+    from fastapi import HTTPException
+    tenant_id = uuid.uuid4()
+    user = MagicMock()
+    user.tenant_id = tenant_id
+
+    cli = Cliente(nombre="Cliente Rate Test", rif="J-33333333-3", tenant_id=tenant_id)
+    db_session.add(cli)
+    db_session.flush()
+
+    banco = CuentaBancaria(
+        banco="Caja Principal VES",
+        numero_cuenta="1234-VES",
+        moneda="VES",
+        saldo_actual_usd=Decimal("0.00"),
+        activa=True,
+        tenant_id=tenant_id
+    )
+    tasa_activa = TasaCambio(
+        fuente="BCV",
+        valor_ves=Decimal("40.00"),
+        fecha=datetime.now(timezone.utc),
+        tenant_id=tenant_id
+    )
+    cxc = CuentaPorCobrar(
+        cliente_id=cli.id,
+        numero_documento="FAC-RATE-TEST",
+        monto_total_usd=Decimal("100.00"),
+        monto_pagado_usd=Decimal("0.00"),
+        tasa_cambio_bs=Decimal("40.00"),
+        fecha_emision=datetime.now(timezone.utc),
+        fecha_vencimiento=datetime.now(timezone.utc),
+        estado="PENDIENTE",
+        tenant_id=tenant_id
+    )
+    db_session.add_all([banco, tasa_activa, cxc])
+    db_session.commit()
+
+    # Rate 1.00 con oficial 40.00 (desviación ~97.5% > 15%)
+    body_invalido = {
+        "factura_id": "FAC-RATE-TEST",
+        "monto": "100.00",
+        "metodos": [
+            {
+                "type": "Bolívares",
+                "amount": "4000.00",
+                "rate": "1.00",
+                "account": "Caja Principal VES"
+            }
+        ]
+    }
+
+    with pytest.raises(HTTPException) as exc_info:
+        procesar_aplicacion(body=body_invalido, db=db_session, current_user=user)
+    assert exc_info.value.status_code == 400
+    assert "difiere demasiado de la tasa oficial vigente" in exc_info.value.detail
+
+
+def test_procesar_aplicacion_tasa_bolivares_valida_exito(db_session):
+    """
+    FIX C: Un cobro con type='Bolívares', rate='39.00' y tasa oficial de 40.00
+    (desviación de 2.5% <= 15%) debe ser aceptado.
+    """
+    tenant_id = uuid.uuid4()
+    user = MagicMock()
+    user.tenant_id = tenant_id
+
+    cli = Cliente(nombre="Cliente Rate OK", rif="J-44444444-4", tenant_id=tenant_id)
+    db_session.add(cli)
+    db_session.flush()
+
+    banco = CuentaBancaria(
+        banco="Caja Principal VES",
+        numero_cuenta="1234-VES-2",
+        moneda="VES",
+        saldo_actual_usd=Decimal("0.00"),
+        activa=True,
+        tenant_id=tenant_id
+    )
+    tasa_activa = TasaCambio(
+        fuente="BCV",
+        valor_ves=Decimal("40.00"),
+        fecha=datetime.now(timezone.utc),
+        tenant_id=tenant_id
+    )
+    cxc = CuentaPorCobrar(
+        cliente_id=cli.id,
+        numero_documento="FAC-RATE-OK",
+        monto_total_usd=Decimal("100.00"),
+        monto_pagado_usd=Decimal("0.00"),
+        tasa_cambio_bs=Decimal("40.00"),
+        fecha_emision=datetime.now(timezone.utc),
+        fecha_vencimiento=datetime.now(timezone.utc),
+        estado="PENDIENTE",
+        tenant_id=tenant_id
+    )
+    from backend.models.erp_extended import CuentaContable
+    cta_banco = CuentaContable(
+        codigo="1.1.01",
+        nombre="Caja y Bancos",
+        tipo="ACTIVO",
+        tenant_id=tenant_id
+    )
+    cta_cxc = CuentaContable(
+        codigo="1.1.02",
+        nombre="Cuentas por Cobrar",
+        tipo="ACTIVO",
+        tenant_id=tenant_id
+    )
+    db_session.add_all([banco, tasa_activa, cxc, cta_banco, cta_cxc])
+    db_session.commit()
+
+    # Rate 39.00 con oficial 40.00 (desviación 2.5% <= 15%)
+    body_valido = {
+        "factura_id": "FAC-RATE-OK",
+        "monto": "100.00",
+        "metodos": [
+            {
+                "type": "Bolívares",
+                "amount": "3900.00",
+                "rate": "39.00",
+                "account": "Caja Principal VES"
+            }
+        ]
+    }
+
+    res = procesar_aplicacion(body=body_valido, db=db_session, current_user=user)
+    assert res["ok"] is True
+    assert float(cxc.monto_pagado_usd) == 100.00
