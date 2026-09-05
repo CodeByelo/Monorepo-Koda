@@ -50,6 +50,7 @@ const AccountsPayable = () => {
   const currentMonth = new Date().toISOString().slice(0, 7);
   const [periodoLibro, setPeriodoLibro] = useState(currentMonth);
   const [libroResumen, setLibroResumen] = useState<any>(null);
+  const [bcvRate, setBcvRate] = useState<number>(1);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -59,12 +60,13 @@ const AccountsPayable = () => {
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      const [data, bancosRes, provRes, cxpAgingRes, kpisRes] = await Promise.all([
+      const [data, bancosRes, provRes, cxpAgingRes, kpisRes, tasaRes] = await Promise.all([
         api.get<any>('/pagos/cuentas'),
         api.get<any[]>('/tesoreria/bancos'),
         api.get<any[]>('/proveedores'),
         api.get<any[]>('/tesoreria/cuentas-por-pagar').catch(() => []),
-        api.get<any>('/tesoreria/cuentas-por-pagar/kpis').catch(() => null)
+        api.get<any>('/tesoreria/cuentas-por-pagar/kpis').catch(() => null),
+        api.get<any>('/tasa/actual').catch(() => null)
       ]);
       setMetrics(data?.metricas || []);
       setPayables(data?.facturas || data?.cuentas || []);
@@ -72,6 +74,9 @@ const AccountsPayable = () => {
       setProveedores(provRes || []);
       setCxpAging(cxpAgingRes || []);
       setTesoreriaKpis(kpisRes?.metricas || []);
+      if (tasaRes?.tasa_oficial) {
+        setBcvRate(Number(tasaRes.tasa_oficial));
+      }
       if (bancosRes && bancosRes.length > 0) {
         setBancoId(String(bancosRes[0].id));
       }
@@ -189,7 +194,7 @@ const AccountsPayable = () => {
         proveedor_id: parseInt(selectedProveedorId),
         numero_documento: ordenFacturaRef,
         monto_total_usd: parseFloat(montoTotalPlan),
-        tasa_cambio_bs: 36.52,
+        tasa_cambio_bs: bcvRate,
         dias_credito: 15
       });
       showToast("Orden de Pago creada y registrada en la cola exitosamente.");

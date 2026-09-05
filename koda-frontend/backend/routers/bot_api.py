@@ -72,11 +72,16 @@ class _BotServiceIdentity:
     id: None = None
 
 
-def _parse_tenant_id(raw: str) -> uuid.UUID:
+def _parse_tenant_id(raw: str, db: Session) -> uuid.UUID:
     try:
-        return uuid.UUID(str(raw))
+        tid = uuid.UUID(str(raw))
     except (ValueError, AttributeError, TypeError):
         raise HTTPException(status_code=400, detail="tenant_id inválido: debe ser un UUID.")
+    from backend.models.core import Tenant
+    tenant = db.query(Tenant).filter(Tenant.id == tid).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="tenant_id no corresponde a una empresa registrada.")
+    return tid
 
 
 def _set_tenant_scope(db: Session, tenant_id: uuid.UUID) -> None:
@@ -172,7 +177,7 @@ def crear_venta_bot(
     Telegram no debe poder introducir un precio negociado arbitrario sin
     revisión humana previa en el ERP.
     """
-    tenant_id = _parse_tenant_id(body.tenant_id)
+    tenant_id = _parse_tenant_id(body.tenant_id, db)
     _set_tenant_scope(db, tenant_id)
 
     if not body.lineas:
@@ -327,7 +332,7 @@ def consultar_stock_bot(
 ):
     """Stock real (suma de StockPorAlmacen) de un producto, por SKU, aislado
     por tenant."""
-    tid = _parse_tenant_id(tenant_id)
+    tid = _parse_tenant_id(tenant_id, db)
     _set_tenant_scope(db, tid)
 
     producto = db.query(Producto).filter(
@@ -393,12 +398,12 @@ def buscar_productos_bot(
     confirmar — a propósito NO usa StockPorAlmacen (que es una fuente
     distinta, usada solo por /bot/stock para otro caso de uso).
     """
-    tid = _parse_tenant_id(tenant_id)
-    _set_tenant_scope(db, tid)
-
     query = (q or "").strip()
     if len(query) < 2:
         raise HTTPException(status_code=400, detail="Escribe al menos 2 caracteres para buscar.")
+
+    tid = _parse_tenant_id(tenant_id, db)
+    _set_tenant_scope(db, tid)
 
     productos = (
         db.query(Producto)
@@ -443,7 +448,7 @@ def consultar_alertas_bot(
     compartido con los endpoints REST del dashboard web, para que la
     definición de cada alerta nunca diverja entre el bot y el ERP.
     """
-    tid = _parse_tenant_id(tenant_id)
+    tid = _parse_tenant_id(tenant_id, db)
     _set_tenant_scope(db, tid)
 
     alertas = []

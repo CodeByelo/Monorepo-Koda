@@ -183,3 +183,60 @@ def test_bug4_monitor_forense_eager_loading(db_session):
     res = monitor_forense(db=db_session, current_user=mock_user)
     assert "checks" in res
     assert len(res["checks"]) >= 2
+
+
+def test_estado_resultados_clasificacion_costos_vs_gastos(db_session):
+    """
+    FIX E (Batch 3): ReporteService.obtener_estado_resultados debe clasificar
+    únicamente la cuenta 5.1.01 (Costo de Ventas) como costo_totales_usd, mientras
+    que 5.1.02 (Sueldos) y demás egresos deben sumar a gastos_totales_usd.
+    utilidad_neta_usd debe dar el mismo resultado.
+    """
+    from backend.services.reportes import ReporteService
+
+    tenant_id = uuid.uuid4()
+
+    # Asiento con:
+    # - Ingresos (4.1.01): $1000 Haber
+    # - Costo de Ventas (5.1.01): $400 Debe
+    # - Sueldos y Salarios (5.1.02): $200 Debe
+    # - Otras Asignaciones (5.1.03): $50 Debe
+    # - Otros Gastos (5.2.01): $50 Debe
+    # - Bancos (1.1.01): $300 Debe para cuadrar
+    asiento = AsientoContable(
+        concepto="Asiento de Estado de Resultados",
+        referencia="ASI-ER-001",
+        fecha=datetime.now(timezone.utc),
+        total_debe_usd=Decimal("1000.00"),
+        total_haber_usd=Decimal("1000.00"),
+        tasa_cambio_bs=Decimal("50.00"),
+        estado="ACTIVO",
+        tenant_id=tenant_id
+    )
+    db_session.add(asiento)
+    db_session.flush()
+
+    detalles = [
+        AsientoDetalle(asiento_id=asiento.id, cuenta_codigo="4.1.01", cuenta_nombre="Ventas", debe_usd=Decimal("0.00"), haber_usd=Decimal("1000.00"), tenant_id=tenant_id),
+        AsientoDetalle(asiento_id=asiento.id, cuenta_codigo="5.1.01", cuenta_nombre="Costo de Ventas", debe_usd=Decimal("400.00"), haber_usd=Decimal("0.00"), tenant_id=tenant_id),
+        AsientoDetalle(asiento_id=asiento.id, cuenta_codigo="5.1.02", cuenta_nombre="Sueldos", debe_usd=Decimal("200.00"), haber_usd=Decimal("0.00"), tenant_id=tenant_id),
+        AsientoDetalle(asiento_id=asiento.id, cuenta_codigo="5.1.03", cuenta_nombre="Otras Asignaciones", debe_usd=Decimal("50.00"), haber_usd=Decimal("0.00"), tenant_id=tenant_id),
+        AsientoDetalle(asiento_id=asiento.id, cuenta_codigo="5.2.01", cuenta_nombre="Gastos Admin", debe_usd=Decimal("50.00"), haber_usd=Decimal("0.00"), tenant_id=tenant_id),
+        AsientoDetalle(asiento_id=asiento.id, cuenta_codigo="1.1.01", cuenta_nombre="Bancos", debe_usd=Decimal("300.00"), haber_usd=Decimal("0.00"), tenant_id=tenant_id),
+    ]
+    db_session.add_all(detalles)
+    db_session.commit()
+
+    res = ReporteService.obtener_estado_resultados(db=db_session, tenant_id=tenant_id)
+
+    # Ingresos = 1000.00
+    assert float(res["ingresos_totales_usd"]) == 1000.00
+    # Costos solo 5.1.01 = 400.00 (antes sumaba 400 + 200 + 50 = 650)
+    assert float(res["costos_totales_usd"]) == 400.00
+    # Gastos = 200 (sueldos) + 50 (asignaciones) + 50 (admin) = 300.00
+    assert float(res["gastos_totales_usd"]) == 300.00
+    # Utilidad Bruta = 1000 - 400 = 600.00
+    assert float(res["utilidad_bruta_usd"]) == 600.00
+    # Utilidad Neta = 600 - 300 = 300.00 (igual que Ingresos 1000 - Total egresos 700)
+    assert float(res["utilidad_neta_usd"]) == 300.00
+

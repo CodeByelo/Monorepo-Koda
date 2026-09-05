@@ -20,7 +20,8 @@ from backend.models.operations import Proveedor
 from backend.models.core import TasaCambio
 from backend.models.erp_extended import CuentaPorPagar, CuentaBancaria, MovimientoBancario, CuentaContable
 from backend.routers.operaciones.pagos import (
-    aprobar_orden, AprobarOrdenRequest, procesar_lotes, programacion_pagos
+    aprobar_orden, AprobarOrdenRequest, procesar_lotes, programacion_pagos,
+    crear_cuenta_por_pagar_manual, CuentaPorPagarManualRequest
 )
 
 
@@ -334,3 +335,50 @@ def test_fix_d_procesar_lotes_seleccion_parcial_y_fondos_insuficientes(db_sessio
         db_session.refresh(f)
         assert f.estado == "PENDIENTE"
         assert float(f.monto_pagado_usd) == 0.00
+
+
+def test_crear_cuenta_por_pagar_manual_valida_desviacion_tasa(db_session):
+    """
+    FIX D (Batch 3): crear_cuenta_por_pagar_manual debe rechazar con 400
+    si tasa_cambio_bs se desvía más de 15% de la tasa oficial vigente, y aceptar si es razonable.
+    """
+    from fastapi import HTTPException
+
+    tenant_id = uuid.uuid4()
+    user = MagicMock()
+    user.tenant_id = tenant_id
+
+    prov = Proveedor(nombre="Proveedor Tasa Check", rif="J-99887766-5", tenant_id=tenant_id)
+    tasa_oficial = TasaCambio(
+        fuente="BCV",
+        valor_ves=Decimal("50.00"),
+        fecha=datetime.now(timezone.utc),
+        tenant_id=tenant_id
+    )
+    db_session.add_all([prov, tasa_oficial])
+    db_session.commit()
+
+    # 1. Tasa desviada: 36.52 vs oficial 50.00 (desviación ~27% > 15%) -> 400
+    req_desviado = CuentaPorPagarManualRequest(
+        proveedor_id=prov.id,
+        numero_documento="FAC-DESVIADA-01",
+        monto_total_usd=Decimal("100.00"),
+        tasa_cambio_bs=Decimal("36.52"),
+        dias_credito=15
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        crear_cuenta_por_pagar_manual(body=req_desviado, db=db_session, current_user=user)
+    assert exc_info.value.status_code == 400
+    assert "difiere demasiado de la tasa oficial vigente" in exc_info.value.detail
+
+    # 2. Tasa razonable: 49.00 vs oficial 50.00 (desviación 2% <= 15%) -> OK
+    req_ok = CuentaPorPagarManualRequest(
+        proveedor_id=prov.id,
+        numero_documento="FAC-OK-01",
+        monto_total_usd=Decimal("100.00"),
+        tasa_cambio_bs=Decimal("49.00"),
+        dias_credito=15
+    )
+    res = crear_cuenta_por_pagar_manual(body=req_ok, db=db_session, current_user=user)
+    assert res["ok"] is True
+

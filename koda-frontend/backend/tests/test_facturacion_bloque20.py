@@ -19,11 +19,14 @@ from sqlalchemy.pool import StaticPool
 
 from backend.core.database import Base, get_db
 from backend.models.core import Tenant, Profile, TasaCambio
-from backend.models.erp_extended import Empresa, Almacen, StockPorAlmacen, CuentaContable
+from backend.models.erp_extended import Empresa, Almacen, StockPorAlmacen, CuentaContable, Cotizacion, CotizacionItem
 from backend.models.operations import Producto, Cliente, Venta, VentaDetalle, KardexMovimiento
 from backend.models.fiscal import CorrelativoFiscal, ReglaFiscal
 from backend.core.security import get_current_user
+from backend.services.auth import get_current_user_from_token
 from backend.routers.facturacion import router as facturacion_router
+from backend.routers.sales import router as sales_router
+from backend.routers.operaciones.ventas import ventas_ext_router
 
 
 @pytest.fixture(scope="function")
@@ -57,6 +60,8 @@ def test_client(db_session):
     """TestClient de FastAPI con dependencias y entorno fiscal/contable configurado."""
     app = FastAPI()
     app.include_router(facturacion_router)
+    app.include_router(sales_router)
+    app.include_router(ventas_ext_router)
 
     tenant_a_id = uuid.uuid4()
     tenant_b_id = uuid.uuid4()
@@ -153,6 +158,7 @@ def test_client(db_session):
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_current_user] = override_get_current_user
+    app.dependency_overrides[get_current_user_from_token] = override_get_current_user
 
     client = TestClient(app)
     client.headers.update({"X-Idempotency-Key": str(uuid.uuid4())})
@@ -376,3 +382,183 @@ def test_idempotencia_emision_factura(test_client, db_session):
     db_session.refresh(stock_alm)
     assert prod.stock == Decimal("8.00")
     assert stock_alm.cantidad == Decimal("8.00")
+
+
+def test_ventas_facturar_cliente_inexistente_retorna_404(test_client, db_session):
+    """
+    FIX A (Batch 3): POST /ventas/facturar con un cliente_id que no existe en el tenant
+    debe retornar 404 (antes caía silenciosamente al primer cliente o a Consumidor Final).
+    """
+    prod = Producto(
+        id=777,
+        tenant_id=test_client.tenant_a_id,
+        sku="PROD-VENTAS-404",
+        nombre="Producto Test 404",
+        precio_usd=Decimal("20.00"),
+        costo_usd=Decimal("10.00"),
+        stock=Decimal("50.00")
+    )
+    db_session.add(prod)
+    db_session.commit()
+
+    payload = {
+        "cliente_id": 999999,
+        "metodo_pago": "Efectivo",
+        "moneda_pago": "USD",
+        "subtotal_usd": 20.0,
+        "total_usd": 23.2,
+        "detalles": [
+            {
+                "producto_id": prod.id,
+                "cantidad": 1.0,
+                "precio_usd": 20.0
+            }
+        ]
+    }
+
+    res = test_client.post(
+        "/ventas/facturar",
+        json=payload,
+        headers={"X-Idempotency-Key": str(uuid.uuid4())}
+    )
+    assert res.status_code == 404
+    assert "no encontrado en su empresa" in res.json().get("detail", "")
+
+
+def test_anular_venta_repone_stock_por_almacen(test_client, db_session):
+    """
+    FIX B (Batch 3): Anular una venta debe reponer tanto el stock global (Producto.stock)
+    como el desglose por almacén (StockPorAlmacen.cantidad) buscando el almacén original en el Kardex.
+    """
+    # 1. Crear producto con stock global 50 y en almacén 1 con stock 50
+    prod = Producto(
+        id=888,
+        tenant_id=test_client.tenant_a_id,
+        sku="PROD-ANULAR-TEST",
+        nombre="Producto Anular Test",
+        precio_usd=Decimal("10.00"),
+        costo_usd=Decimal("5.00"),
+        stock=Decimal("50.00")
+    )
+    stock_alm = StockPorAlmacen(
+        tenant_id=test_client.tenant_a_id,
+        producto_id=888,
+        almacen_id=1,
+        cantidad=Decimal("50.00")
+    )
+    db_session.add_all([prod, stock_alm])
+    db_session.commit()
+
+    # 2. Emitir venta de 5 unidades vía /v1/facturacion/emitir
+    payload = {
+        "cliente_id": "10",
+        "metodo_pago": "Efectivo",
+        "moneda_documento": "SOLO_USD",
+        "detalles": [
+            {
+                "producto_id": "PROD-ANULAR-TEST",
+                "cantidad": 5.0,
+                "precio_unitario": 10.0
+            }
+        ]
+    }
+    resp_emitir = test_client.post(
+        "/v1/facturacion/emitir",
+        json=payload,
+        headers={"X-Idempotency-Key": str(uuid.uuid4())}
+    )
+    assert resp_emitir.status_code == 201
+    venta_data = resp_emitir.json()
+    numero_factura = venta_data["numero_factura"]
+
+    # Verificar que el stock bajó a 45 en ambos lados
+    db_session.refresh(prod)
+    db_session.refresh(stock_alm)
+    assert prod.stock == Decimal("45.00")
+    assert stock_alm.cantidad == Decimal("45.00")
+
+    # Buscar la venta creada en la base de datos
+    venta_db = db_session.query(Venta).filter(Venta.numero_factura == numero_factura).first()
+    assert venta_db is not None
+
+    # 3. Anular la venta vía POST /ventas/{venta_id}/anular
+    resp_anular = test_client.post(f"/ventas/{venta_db.id}/anular")
+    assert resp_anular.status_code == 200
+    assert resp_anular.json()["estado"] == "ANULADA"
+
+    # 4. Verificar que TANTO prod.stock COMO stock_alm.cantidad volvieron a su valor original de 50.00
+    db_session.refresh(prod)
+    db_session.refresh(stock_alm)
+    assert prod.stock == Decimal("50.00")
+    assert stock_alm.cantidad == Decimal("50.00")
+
+
+def test_facturar_cotizacion_respeta_precio_cotizado(test_client, db_session):
+    """
+    FIX C (Batch 3): Facturar una cotización debe respetar item.precio_unitario (precio cotizado)
+    en vez de pisarlo con el precio de catálogo de Producto.precio_usd.
+    """
+    # 1. Producto con precio de catálogo de $100.00
+    prod = Producto(
+        id=666,
+        tenant_id=test_client.tenant_a_id,
+        sku="PROD-COTIZ-TEST",
+        nombre="Producto Cotización Test",
+        precio_usd=Decimal("100.00"),
+        costo_usd=Decimal("40.00"),
+        stock=Decimal("20.00")
+    )
+    stock_alm = StockPorAlmacen(
+        tenant_id=test_client.tenant_a_id,
+        producto_id=666,
+        almacen_id=1,
+        cantidad=Decimal("20.00")
+    )
+    db_session.add_all([prod, stock_alm])
+    db_session.commit()
+
+    # 2. Cotización con precio especial cotizado de $85.00 (descuento acordado con cliente)
+    cot = Cotizacion(
+        tenant_id=test_client.tenant_a_id,
+        numero_cotizacion=f"COT-PRECIO-{uuid.uuid4().hex[:6]}",
+        cliente_id=10,
+        fecha_emision=datetime.now(timezone.utc),
+        fecha_vencimiento=datetime.now(timezone.utc),
+        moneda="USD",
+        tasa_cambio=Decimal("50.00"),
+        subtotal=Decimal("85.00"),
+        descuento_total=Decimal("0.00"),
+        total=Decimal("98.60"),
+        estado="Aceptada",
+        creado_por=test_client.user_a.id
+    )
+    db_session.add(cot)
+    db_session.flush()
+
+    item = CotizacionItem(
+        cotizacion_id=cot.id,
+        producto_id=666,
+        descripcion="Item con precio negociado",
+        cantidad=Decimal("1.00"),
+        precio_unitario=Decimal("85.00"),
+        descuento_porcentaje=Decimal("0.00"),
+        total_fila=Decimal("85.00")
+    )
+    db_session.add(item)
+    db_session.commit()
+
+    # 3. Facturar la cotización
+    res = test_client.post(
+        f"/ventas/cotizaciones/{cot.id}/facturar",
+        json={"metodo_pago": "Efectivo"}
+    )
+    assert res.status_code == 200
+    factura_num = res.json()["numero_factura"]
+
+    # 4. Verificar que la Venta / VentaDetalle creada tiene precio_usd_capturado = 85.00 (no 100.00)
+    venta_creada = db_session.query(Venta).filter(Venta.numero_factura == factura_num).first()
+    assert venta_creada is not None
+    assert len(venta_creada.detalles) == 1
+    assert float(venta_creada.detalles[0].precio_usd_capturado) == 85.00
+    assert float(venta_creada.subtotal_usd) == 85.00
+

@@ -97,10 +97,10 @@ class ReporteService:
             # Cuenta contable de Ingresos (ej. 4.1.01) -> Naturaleza acreedora (Haber - Debe)
             if r.cuenta_codigo.startswith("4"):
                 ingresos_totales += (haber - debe)
-            # Cuenta de Costos (ej. 5.1.01) -> Naturaleza deudora (Debe - Haber)
-            elif r.cuenta_codigo.startswith("5.1"):
+            # Cuenta de Costo de Ventas (específicamente 5.1.01 o subcuentas) -> Naturaleza deudora (Debe - Haber)
+            elif r.cuenta_codigo == "5.1.01" or r.cuenta_codigo.startswith("5.1.01."):
                 costos_totales += (debe - haber)
-            # Otras cuentas de gastos (ej. 5.2.01, etc.) -> Naturaleza deudora (Debe - Haber)
+            # Otras cuentas de gastos y egresos (ej. 5.1.02 Sueldos, 5.1.04 Mermas, 5.2, etc.) -> Naturaleza deudora (Debe - Haber)
             elif r.cuenta_codigo.startswith("5"):
                 gastos_totales += (debe - haber)
 
