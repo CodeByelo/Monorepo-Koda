@@ -314,7 +314,9 @@ const POS = () => {
     };
 
     setIsCheckingOut(true);
-    api.post<any>('/v1/facturacion/emitir', payload).then((res) => {
+    api.post<any>('/v1/facturacion/emitir', payload, {
+      headers: { 'X-Idempotency-Key': crypto.randomUUID() }
+    }).then((res) => {
       showToast(`Factura emitida: ${res.numero_factura} | Control: ${res.numero_control}`, 'success');
       setCart([]);
       setPagoMovilBanco('');

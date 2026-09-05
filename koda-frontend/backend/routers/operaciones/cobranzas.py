@@ -552,6 +552,15 @@ def procesar_aplicacion(body: dict, db: Session = Depends(get_db), current_user 
             m_rate = Decimal(str(m.get("rate") or 1))
             if m_rate == 0:
                 m_rate = Decimal("1")
+
+            if m_type == "Bolívares":
+                tasa_oficial = Decimal(str(tasa_actual(db, current_user.tenant_id)))
+                if tasa_oficial > 0 and abs(m_rate - tasa_oficial) / tasa_oficial > Decimal("0.15"):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"La tasa ingresada (Bs. {m_rate}) difiere demasiado de la tasa oficial vigente (Bs. {tasa_oficial}). Verifique el valor antes de continuar."
+                    )
+
             # Igual que methodEquivalent() en el frontend (PaymentApplication.tsx):
             # solo "Bolívares" se manda en moneda origen y hay que convertir a
             # su equivalente en USD dividiendo por la tasa; el resto de los

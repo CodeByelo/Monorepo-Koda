@@ -30,7 +30,8 @@ from backend.routers.operaciones.tesoreria import (
     registrar_movimiento_caja,
     resumen_inversiones,
     registrar_inversion,
-    resumen_prestamos_uvc
+    resumen_prestamos_uvc,
+    listar_bancos
 )
 
 
@@ -282,3 +283,42 @@ def test_bug6_tasa_uvc_global_fallback(db_session):
     res = resumen_prestamos_uvc(db=db_session, current_user=mock_user)
     # tasa_uvc_hoy = 50.0, tasa_uvc_ayer = 40.0 -> var_24h = ((50 - 40)/40)*100 = +25.00%
     assert res["metricas"]["var_24h"] == "+25.00%"
+
+
+def test_listar_bancos_no_autoborra_cuentas(db_session):
+    """
+    FIX B: GET /tesoreria/bancos no debe borrar automáticamente cuentas
+    bancarias sin movimientos llamadas 'Caja Principal USD' o 'Caja Chica Ventas'.
+    """
+    tenant_id = uuid.uuid4()
+    cuenta = CuentaBancaria(
+        banco="Caja Principal USD",
+        numero_cuenta="1234-CAJA-USD-01",
+        moneda="USD",
+        saldo_actual_usd=Decimal("500.00"),
+        activa=True,
+        tenant_id=tenant_id
+    )
+    tasa = TasaCambio(
+        fuente="BCV",
+        valor_ves=Decimal("40.00"),
+        fecha=datetime.now(),
+        tenant_id=tenant_id
+    )
+    db_session.add_all([cuenta, tasa])
+    db_session.commit()
+
+    mock_user = MagicMock()
+    mock_user.tenant_id = tenant_id
+
+    res = listar_bancos(db=db_session, current_user=mock_user)
+    assert len(res) == 1
+    assert res[0]["nombre"] == "Caja Principal USD"
+
+    # Verificar que la cuenta SIGUE existiendo en la base de datos
+    cuenta_db = db_session.query(CuentaBancaria).filter(
+        CuentaBancaria.banco == "Caja Principal USD",
+        CuentaBancaria.tenant_id == tenant_id
+    ).first()
+    assert cuenta_db is not None
+    assert cuenta_db.id == cuenta.id
