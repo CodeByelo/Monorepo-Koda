@@ -107,6 +107,10 @@ def registrar_venta_y_cxc(
             dias_credito=venta_in.dias_credito,
             vendedor_id=venta_in.vendedor_id,
             almacen_id=almacen_venta_id,
+            pago_movil_banco=venta_in.pago_movil_banco,
+            pago_movil_cedula=venta_in.pago_movil_cedula,
+            pago_movil_telefono=venta_in.pago_movil_telefono,
+            pago_movil_referencia=venta_in.pago_movil_referencia,
         )
 
         # 4. Auditoría (mismo patrón que facturacion.py/bot_api.py: cada router

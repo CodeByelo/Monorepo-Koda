@@ -57,6 +57,10 @@ const InvoiceForm = () => {
   const [cantidadInput, setCantidadInput] = useState<number>(1);
   const [items, setItems] = useState<ItemDetalle[]>([]);
   const [metodoPago, setMetodoPago] = useState<string>('Efectivo');
+  const [pagoMovilBanco, setPagoMovilBanco] = useState('');
+  const [pagoMovilCedula, setPagoMovilCedula] = useState('');
+  const [pagoMovilTelefono, setPagoMovilTelefono] = useState('');
+  const [pagoMovilReferencia, setPagoMovilReferencia] = useState('');
   const [isEmitting, setIsEmitting] = useState(false);
 
   const clientOptions = useMemo(() => {
@@ -150,6 +154,10 @@ const InvoiceForm = () => {
       alert("Agregue al menos un producto a la factura.");
       return;
     }
+    if (metodoPago === 'PagoMovil' && (!pagoMovilBanco.trim() || !pagoMovilCedula.trim() || !pagoMovilTelefono.trim() || !pagoMovilReferencia.trim())) {
+      alert("Para Pago Móvil debe indicar banco emisor, cédula/RIF, teléfono y referencia de la transferencia.");
+      return;
+    }
     setIsEmitting(true);
     try {
       const payload = {
@@ -157,6 +165,10 @@ const InvoiceForm = () => {
         metodo_pago: metodoPago,
         moneda_pago: metodoPago === 'Divisa' ? 'USD' : 'Bs',
         dias_credito: 0,
+        pago_movil_banco: metodoPago === 'PagoMovil' ? pagoMovilBanco.trim() : undefined,
+        pago_movil_cedula: metodoPago === 'PagoMovil' ? pagoMovilCedula.trim() : undefined,
+        pago_movil_telefono: metodoPago === 'PagoMovil' ? pagoMovilTelefono.trim() : undefined,
+        pago_movil_referencia: metodoPago === 'PagoMovil' ? pagoMovilReferencia.trim() : undefined,
         detalles: items.map(item => ({
           producto_id: item.producto.id,
           cantidad: item.cantidad
@@ -168,6 +180,10 @@ const InvoiceForm = () => {
       });
       alert(`Factura emitida exitosamente: ${result.numero_factura}`);
       setItems([]);
+      setPagoMovilBanco('');
+      setPagoMovilCedula('');
+      setPagoMovilTelefono('');
+      setPagoMovilReferencia('');
     } catch (err: any) {
       alert(err.message || "Error al emitir factura");
     } finally {
@@ -229,6 +245,43 @@ const InvoiceForm = () => {
               <option value="Transferencia">Transferencia</option>
               <option value="PagoMovil">Pago Móvil</option>
             </select>
+            {metodoPago === 'PagoMovil' && (
+              <div className="space-y-2 pt-3 mt-3 border-t border-slate-200 text-left w-72">
+                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none block">
+                   Datos de la Transferencia Pago Móvil
+                 </label>
+                 <input
+                   type="text"
+                   value={pagoMovilBanco}
+                   onChange={(e) => setPagoMovilBanco(e.target.value)}
+                   placeholder="Banco emisor (ej. Banesco, Mercantil...)"
+                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:border-[#0b5156]"
+                 />
+                 <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      value={pagoMovilCedula}
+                      onChange={(e) => setPagoMovilCedula(e.target.value)}
+                      placeholder="Cédula / RIF"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:border-[#0b5156]"
+                    />
+                    <input
+                      type="text"
+                      value={pagoMovilTelefono}
+                      onChange={(e) => setPagoMovilTelefono(e.target.value)}
+                      placeholder="Teléfono"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:border-[#0b5156]"
+                    />
+                 </div>
+                 <input
+                   type="text"
+                   value={pagoMovilReferencia}
+                   onChange={(e) => setPagoMovilReferencia(e.target.value)}
+                   placeholder="Referencia transferencia (obligatoria)"
+                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:border-[#0b5156]"
+                 />
+              </div>
+            )}
          </div>
       </article>
 

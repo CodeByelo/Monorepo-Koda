@@ -67,6 +67,13 @@ class Venta(Base):
     # migración, para la cual no se conoce el valor real (ver reporte_vendedores).
     comision_usd = Column(Numeric(15, 2), nullable=True)
     moneda_documento = Column(String(20), nullable=True, default="BIMONETARIO")  # BIMONETARIO / SOLO_USD / SOLO_VES — formato de moneda elegido en el POS para IMPRIMIR la factura
+    # Datos reales de la transferencia Pago Móvil venezolana, capturados en el
+    # momento de la venta cuando metodo_pago == "PagoMovil". Requeridos por
+    # procesar_emision_factura() en ese caso (ver facturacion_service.py).
+    pago_movil_banco = Column(String(100), nullable=True)
+    pago_movil_cedula = Column(String(20), nullable=True)
+    pago_movil_telefono = Column(String(20), nullable=True)
+    pago_movil_referencia = Column(String(50), nullable=True)  # requerido en la práctica cuando metodo_pago == "PagoMovil" (validado en procesar_emision_factura), nullable a nivel de columna solo por compatibilidad con ventas anteriores a esta migración
 
     # Relación uno-a-muchos con los detalles de la venta
     cliente = relationship("Cliente")

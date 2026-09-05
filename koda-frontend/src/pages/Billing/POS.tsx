@@ -64,6 +64,10 @@ const POS = () => {
   const [vendedorId, setVendedorId] = useState('');
   const [tarifa, setTarifa] = useState<Tarifa>('Detal');
   const [metodoPago, setMetodoPago] = useState<'Efectivo' | 'Divisa' | 'Transferencia' | 'PagoMovil'>('Divisa');
+  const [pagoMovilBanco, setPagoMovilBanco] = useState('');
+  const [pagoMovilCedula, setPagoMovilCedula] = useState('');
+  const [pagoMovilTelefono, setPagoMovilTelefono] = useState('');
+  const [pagoMovilReferencia, setPagoMovilReferencia] = useState('');
   const [formatoDocumento, setFormatoDocumento] = useState<'BIMONETARIO' | 'SOLO_USD' | 'SOLO_VES'>('BIMONETARIO');
   const [tipoTasa, setTipoTasa] = useState<'BCV' | 'PERSONALIZADA'>('BCV');
   const [tasaPersonalizada, setTasaPersonalizada] = useState<string>('');
@@ -278,6 +282,11 @@ const POS = () => {
       return;
     }
 
+    if (metodoPago === 'PagoMovil' && (!pagoMovilBanco.trim() || !pagoMovilCedula.trim() || !pagoMovilTelefono.trim() || !pagoMovilReferencia.trim())) {
+      showToast("Para Pago Móvil debe indicar banco emisor, cédula/RIF, teléfono y referencia de la transferencia.");
+      return;
+    }
+
     const appliesIgtfBase = metodoPago === 'Divisa' && formatoDocumento !== 'SOLO_VES';
     const appliesIgtf = appliesIgtfBase && !eximirIgtf;
 
@@ -291,6 +300,10 @@ const POS = () => {
       moneda_documento: formatoDocumento,
       tasa_cambio_bs: tasaEfectiva,
       vendedor_id: vendedorId ? parseInt(vendedorId, 10) : null,
+      pago_movil_banco: metodoPago === 'PagoMovil' ? pagoMovilBanco.trim() : undefined,
+      pago_movil_cedula: metodoPago === 'PagoMovil' ? pagoMovilCedula.trim() : undefined,
+      pago_movil_telefono: metodoPago === 'PagoMovil' ? pagoMovilTelefono.trim() : undefined,
+      pago_movil_referencia: metodoPago === 'PagoMovil' ? pagoMovilReferencia.trim() : undefined,
       detalles: cart.map(item => ({
         producto_id: item.id,
         cantidad: Number(item.qty) || 1,
@@ -304,6 +317,10 @@ const POS = () => {
     api.post<any>('/v1/facturacion/emitir', payload).then((res) => {
       showToast(`Factura emitida: ${res.numero_factura} | Control: ${res.numero_control}`, 'success');
       setCart([]);
+      setPagoMovilBanco('');
+      setPagoMovilCedula('');
+      setPagoMovilTelefono('');
+      setPagoMovilReferencia('');
       fetchContext();
     }).catch((err) => {
       console.error(err);
@@ -958,6 +975,43 @@ const POS = () => {
                         <span className={`text-[8px] font-mono ${metodoPago === 'Efectivo' ? 'text-emerald-200' : 'text-slate-400'}`}>0% IGTF (Bs)</span>
                       </button>
                     </div>
+                    {metodoPago === 'PagoMovil' && (
+                      <div className="space-y-2 pt-2 border-t border-slate-100">
+                         <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none block">
+                           Datos de la Transferencia Pago Móvil
+                         </label>
+                         <input
+                           type="text"
+                           value={pagoMovilBanco}
+                           onChange={(e) => setPagoMovilBanco(e.target.value)}
+                           placeholder="Banco emisor (ej. Banesco, Mercantil...)"
+                           className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:border-[#0b5156]"
+                         />
+                         <div className="grid grid-cols-2 gap-2">
+                            <input
+                              type="text"
+                              value={pagoMovilCedula}
+                              onChange={(e) => setPagoMovilCedula(e.target.value)}
+                              placeholder="Cédula / RIF del pagador"
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:border-[#0b5156]"
+                            />
+                            <input
+                              type="text"
+                              value={pagoMovilTelefono}
+                              onChange={(e) => setPagoMovilTelefono(e.target.value)}
+                              placeholder="Teléfono del pagador"
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:border-[#0b5156]"
+                            />
+                         </div>
+                         <input
+                           type="text"
+                           value={pagoMovilReferencia}
+                           onChange={(e) => setPagoMovilReferencia(e.target.value)}
+                           placeholder="Referencia de la transferencia (obligatoria)"
+                           className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:border-[#0b5156]"
+                         />
+                      </div>
+                    )}
                  </div>
 
                  {/* Controles Fiscales: Eximir IVA y Eximir IGTF */}
