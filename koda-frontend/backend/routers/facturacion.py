@@ -31,6 +31,7 @@ from backend.models.core import Profile
 from backend.models.operations import Cliente, Producto
 from backend.models.erp_extended import AuditoriaLog
 from backend.utils.ip_utils import get_real_ip
+from backend.utils.idempotency import require_idempotency
 from backend.schemas.operations import FacturaEmisionRequest
 from backend.services.facturacion_service import LineaFactura, procesar_emision_factura, resolver_precio_unitario
 
@@ -61,6 +62,7 @@ def _generate_document_hash(
 
 
 @router.post("/emitir", status_code=status.HTTP_201_CREATED)
+@require_idempotency
 def emitir_factura_fiscal(
     request: Request,
     body: FacturaEmisionRequest,

@@ -155,6 +155,7 @@ def test_client(db_session):
     app.dependency_overrides[get_current_user] = override_get_current_user
 
     client = TestClient(app)
+    client.headers.update({"X-Idempotency-Key": str(uuid.uuid4())})
     client.tenant_a_id = tenant_a_id
     client.tenant_b_id = tenant_b_id
     client.user_a = user_a
@@ -288,3 +289,90 @@ def test_bug2_rechazar_cliente_inexistente_o_ajeno_con_404(test_client, db_sessi
 
     # Verificar que NO se crearon ventas espurias en la BD
     assert db_session.query(Venta).filter(Venta.cliente_id == 20).count() == 0
+
+
+def test_idempotencia_emision_factura(test_client, db_session):
+    """
+    FIX A: POST /v1/facturacion/emitir debe respetar X-Idempotency-Key.
+    Dos llamadas con la misma key deben devolver la misma factura cacheada
+    y descontar el stock del producto una sola vez.
+    """
+    from unittest.mock import AsyncMock, patch
+    import backend.utils.idempotency as idem_module
+
+    tenant_a_id = test_client.tenant_a_id
+    prod = Producto(
+        id=303,
+        sku="PROD-IDEM-TEST",
+        nombre="Producto Idempotencia",
+        precio_usd=Decimal("50.00"),
+        costo_usd=Decimal("30.00"),
+        stock=Decimal("10.00"),
+        tenant_id=tenant_a_id
+    )
+    stock_alm = StockPorAlmacen(
+        producto_id=303,
+        almacen_id=1,
+        cantidad=Decimal("10.00"),
+        tenant_id=tenant_a_id
+    )
+    db_session.add_all([prod, stock_alm])
+    db_session.commit()
+
+    idem_key = str(uuid.uuid4())
+    payload = {
+        "cliente_id": "10",
+        "metodo_pago": "Efectivo",
+        "moneda_documento": "SOLO_USD",
+        "detalles": [
+            {
+                "producto_id": "PROD-IDEM-TEST",
+                "cantidad": 2.0,
+                "precio_unitario": 50.0
+            }
+        ]
+    }
+
+    # Simular Redis en memoria para probar el mecanismo de idempotencia
+    redis_store = {}
+
+    mock_redis = AsyncMock()
+
+    async def mock_set(key, val, ex=None, nx=False):
+        if nx and key in redis_store:
+            return False
+        redis_store[key] = val.encode("utf-8") if isinstance(val, str) else val
+        return True
+
+    async def mock_get(key):
+        return redis_store.get(key)
+
+    mock_redis.set.side_effect = mock_set
+    mock_redis.get.side_effect = mock_get
+
+    with patch.object(idem_module, "redis_client", mock_redis):
+        # 1. Primera emisión
+        resp1 = test_client.post(
+            "/v1/facturacion/emitir",
+            json=payload,
+            headers={"X-Idempotency-Key": idem_key}
+        )
+        assert resp1.status_code == 201
+        data1 = resp1.json()
+        factura_num1 = data1["numero_factura"]
+
+        # 2. Segunda emisión con la MISMA llave (reintento de red)
+        resp2 = test_client.post(
+            "/v1/facturacion/emitir",
+            json=payload,
+            headers={"X-Idempotency-Key": idem_key}
+        )
+        assert resp2.status_code in (200, 201)
+        data2 = resp2.json()
+        assert data2["numero_factura"] == factura_num1
+
+    # Verificar que el stock se descontó una sola vez (10.0 - 2.0 = 8.0)
+    db_session.refresh(prod)
+    db_session.refresh(stock_alm)
+    assert prod.stock == Decimal("8.00")
+    assert stock_alm.cantidad == Decimal("8.00")
