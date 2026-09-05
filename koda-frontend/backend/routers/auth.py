@@ -239,29 +239,10 @@ def exchange_code(payload: ExchangeCodeRequest, db: Session = Depends(get_db)):
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register(user_in: UserCreate, db: Session = Depends(get_db)):
-    # Validar si el email ya existe en la BD
-    existing_user = db.query(Profile).filter(Profile.email == user_in.email).first()
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="El correo electrónico ingresado ya está registrado"
-        )
-    
-    # Crear la contraseña hasheada de manera segura
-    hashed_password = get_password_hash(user_in.password)
-    
-    # Instanciar y guardar el usuario en la BD
-    db_user = Profile(
-        nombre=user_in.nombre,
-        email=user_in.email,
-        username=user_in.email, # username is required in profiles
-        password_hash=hashed_password
-        # Note: tenant_id should be set, but we leave it null or expect it in schema
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="El registro público está deshabilitado en este entorno corporativo. Las cuentas se crean únicamente a través de invitación / administración interna."
     )
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    return db_user
 
 @router.post("/login")
 def login(request: Request, user_in: UserLogin, db: Session = Depends(get_db)):

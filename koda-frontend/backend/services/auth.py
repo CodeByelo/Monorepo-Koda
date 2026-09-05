@@ -145,8 +145,8 @@ def get_current_user_from_token(token: str = Depends(oauth2_scheme), db: Session
     # 2. Control Multi-Tenant
     if not is_developer:
         # Los usuarios normales ESTÁN atados a su tenant.
-        if str(user.tenant_id) != str(tenant_id):
-            logger.warning("Tenant mismatch. User: %s | Token: %s", user.tenant_id, tenant_id)
+        if user.tenant_id is None or str(user.tenant_id) != str(tenant_id):
+            logger.warning("Tenant mismatch o tenant nulo. User: %s | Token: %s", user.tenant_id, tenant_id)
             raise credentials_exception
 
         # Verificar estado de la licencia del Tenant
