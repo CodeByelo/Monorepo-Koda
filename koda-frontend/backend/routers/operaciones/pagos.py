@@ -479,6 +479,14 @@ def crear_cuenta_por_pagar_manual(body: CuentaPorPagarManualRequest, db: Session
     if not proveedor:
          raise HTTPException(status_code=404, detail="Proveedor no encontrado")
 
+    if body.tasa_cambio_bs:
+        tasa_oficial = Decimal(str(tasa_actual(db, current_user.tenant_id)))
+        if tasa_oficial > 0 and abs(Decimal(str(body.tasa_cambio_bs)) - tasa_oficial) / tasa_oficial > Decimal("0.15"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"La tasa ingresada (Bs. {body.tasa_cambio_bs}) difiere demasiado de la tasa oficial vigente (Bs. {tasa_oficial}). Verifique el valor antes de continuar."
+            )
+
     now = datetime.now(timezone.utc)
     nueva_c = CuentaPorPagar(
         proveedor_id=body.proveedor_id,

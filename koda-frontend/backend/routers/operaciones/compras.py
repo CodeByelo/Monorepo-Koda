@@ -682,6 +682,14 @@ def crear_compra(
         # creación manual de asientos en contabilidad_ext.py).
         verificar_periodo_abierto(db, current_user.tenant_id, compra_in.fecha_emision, contexto="compras")
 
+        if compra_in.tasa_cambio_bs:
+            tasa_oficial = Decimal(str(tasa_actual(db, current_user.tenant_id)))
+            if tasa_oficial > 0 and abs(Decimal(str(compra_in.tasa_cambio_bs)) - tasa_oficial) / tasa_oficial > Decimal("0.15"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"La tasa ingresada (Bs. {compra_in.tasa_cambio_bs}) difiere demasiado de la tasa oficial vigente (Bs. {tasa_oficial}). Verifique el valor antes de continuar."
+                )
+
         # Crear Compra
         nueva_compra = Compra(
             proveedor_id=compra_in.proveedor_id,

@@ -21,9 +21,9 @@ from backend.models.erp_extended import (
     Almacen, Compra, RecepcionStock, DevolucionProveedor, RequisicionCompra
 )
 from backend.models.fiscal import CorrelativoFiscal
-from backend.schemas.operations import RecepcionStockCreate, DevolucionProveedorCreate
+from backend.schemas.operations import RecepcionStockCreate, DevolucionProveedorCreate, CompraCreate
 from backend.routers.operaciones.compras import (
-    procesar_recepcion, crear_devolucion, create_requisicion, RequisicionCreate
+    procesar_recepcion, crear_devolucion, create_requisicion, RequisicionCreate, crear_compra
 )
 from fastapi import HTTPException
 
@@ -204,3 +204,62 @@ def test_bug3_crear_devolucion_valida_factura_tenant(db_session):
         crear_devolucion(dev_in=dev_cross, db=db_session, current_user=user_a)
     assert exc_info.value.status_code == 404
     assert "Factura de compra no encontrada" in exc_info.value.detail
+
+
+def test_crear_compra_valida_desviacion_tasa(db_session):
+    """
+    FIX D (Batch 3): crear_compra debe rechazar con 400 si tasa_cambio_bs
+    difiere más de un 15% de la tasa oficial vigente (tasa_actual).
+    """
+    from backend.models.core import TasaCambio
+    from backend.models.erp_extended import CuentaContable
+
+    tenant_id = uuid.uuid4()
+    user = MagicMock()
+    user.tenant_id = tenant_id
+
+    prov = Proveedor(nombre="Proveedor Compra Tasa", rif="J-77889900-1", tenant_id=tenant_id)
+    tasa_oficial = TasaCambio(
+        fuente="BCV",
+        valor_ves=Decimal("50.00"),
+        fecha=datetime.now(timezone.utc),
+        tenant_id=tenant_id
+    )
+    cta_inv = CuentaContable(codigo="1.1.04", nombre="Inventario", tipo="ACTIVO", tenant_id=tenant_id)
+    cta_cxp = CuentaContable(codigo="2.1.01", nombre="CXP", tipo="PASIVO", tenant_id=tenant_id)
+    cta_iva = CuentaContable(codigo="1.1.05", nombre="Crédito Fiscal", tipo="ACTIVO", tenant_id=tenant_id)
+
+    db_session.add_all([prov, tasa_oficial, cta_inv, cta_cxp, cta_iva])
+    db_session.commit()
+
+    # 1. Tasa desviada: 36.52 vs 50.00 (desviación ~27% > 15%) -> 400
+    compra_desviada = CompraCreate(
+        proveedor_id=prov.id,
+        numero_factura="FAC-COMPRA-DESVIADA",
+        numero_control="CTRL-001",
+        subtotal_usd=Decimal("100.00"),
+        iva_usd=Decimal("16.00"),
+        total_usd=Decimal("116.00"),
+        tasa_cambio_bs=Decimal("36.52"),
+        detalles=[]
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        crear_compra(compra_in=compra_desviada, db=db_session, current_user=user)
+    assert exc_info.value.status_code == 400
+    assert "difiere demasiado de la tasa oficial vigente" in exc_info.value.detail
+
+    # 2. Tasa razonable: 49.50 vs 50.00 (desviación 1% <= 15%) -> 201
+    compra_ok = CompraCreate(
+        proveedor_id=prov.id,
+        numero_factura="FAC-COMPRA-OK",
+        numero_control="CTRL-002",
+        subtotal_usd=Decimal("100.00"),
+        iva_usd=Decimal("16.00"),
+        total_usd=Decimal("116.00"),
+        tasa_cambio_bs=Decimal("49.50"),
+        detalles=[]
+    )
+    res = crear_compra(compra_in=compra_ok, db=db_session, current_user=user)
+    assert res["ok"] is True
+    assert res["numero_factura"] == "FAC-COMPRA-OK"
+
