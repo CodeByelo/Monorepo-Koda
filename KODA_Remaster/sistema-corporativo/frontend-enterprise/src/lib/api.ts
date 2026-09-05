@@ -978,3 +978,109 @@ export async function updateTenant(tenantId: string, payload: any): Promise<any>
     return handleResponse<any>(res);
 }
 
+export async function deleteTenant(tenantId: string): Promise<any> {
+    const res = await apiFetch(`/api/dev/tenants/${tenantId}`, {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+    });
+    return handleResponse<any>(res);
+}
+
+export async function createPlan(payload: any): Promise<any> {
+    const res = await apiFetch(`/api/dev/plans`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(payload),
+    });
+    return handleResponse<any>(res);
+}
+
+export async function updatePlan(planId: number, payload: any): Promise<any> {
+    const res = await apiFetch(`/api/dev/plans/${planId}`, {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(payload),
+    });
+    return handleResponse<any>(res);
+}
+
+export async function deletePlan(planId: number): Promise<any> {
+    const res = await apiFetch(`/api/dev/plans/${planId}`, {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+    });
+    return handleResponse<any>(res);
+}
+
+export async function uploadPlanImage(planId: number, file: File): Promise<any> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const token = typeof window !== "undefined" ? localStorage.getItem("sgd_token") : null;
+    const res = await apiFetch(`/api/dev/plans/${planId}/image`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+    });
+    return handleResponse<any>(res);
+}
+
+export async function getCriticalSecurityEvents(): Promise<any[]> {
+    const res = await apiFetch(`/api/dev/security-events/critical`, {
+        headers: getAuthHeaders(),
+        cache: "no-store",
+    });
+    return handleResponse<any[]>(res);
+}
+
+export async function disconnectSession(sessionId: string): Promise<any> {
+    const res = await apiFetch(`/api/dev/disconnect`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ session_id: sessionId }),
+    });
+    return handleResponse<any>(res);
+}
+
+export async function getDevUsers(): Promise<any[]> {
+    const res = await apiFetch(`/api/dev/users`, {
+        headers: getAuthHeaders(),
+        cache: "no-store",
+    });
+    return handleResponse<any[]>(res);
+}
+
+export async function createDevUser(payload: any): Promise<any> {
+    const res = await apiFetch(`/api/dev/users`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(payload),
+    });
+    return handleResponse<any>(res);
+}
+
+export async function deleteDevUser(userId: string): Promise<any> {
+    const res = await apiFetch(`/api/dev/users/${userId}`, {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+    });
+    return handleResponse<any>(res);
+}
+
+export async function generateProvisionToken(payload: { tenant_id: string; max_users: number; expires_in_hours?: number }): Promise<any> {
+    const res = await apiFetch(`/api/dev/provision/token`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(payload),
+    });
+    return handleResponse<any>(res);
+}
+
+export async function getSystemMetrics(): Promise<any> {
+    const res = await apiFetch(`/api/dev/system-metrics`, {
+        headers: getAuthHeaders(),
+        cache: "no-store",
+    });
+    return handleResponse<any>(res);
+}
+
+
