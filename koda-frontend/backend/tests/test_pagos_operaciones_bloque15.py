@@ -182,7 +182,11 @@ def test_bug2_procesar_lotes_mixto_suma_correcta_usd(db_session):
     db_session.add_all([cta_banco, cta_cxp, banco, tasa_bcv, cxp1, cxp2, cxp3])
     db_session.commit()
 
-    res = procesar_lotes(body={"referencia": "LOTE-TEST-MIXTO"}, db=db_session, current_user=user)
+    res = procesar_lotes(
+        body={"referencia": "LOTE-TEST-MIXTO", "cuentas_por_pagar_ids": [cxp1.id, cxp2.id, cxp3.id]},
+        db=db_session,
+        current_user=user
+    )
     assert res["ok"] is True
 
     # 5000.00 - (850 + 1000 + 5.00) = 5000 - 1855 = 3145.00
@@ -233,3 +237,100 @@ def test_bug3_programacion_pagos_convierte_deuda_fija(db_session):
     vencidos = res["columnas"]["vencido_hoy"]
     assert len(vencidos) == 1
     assert vencidos[0]["amount"] == "$3.50"
+
+
+def test_fix_d_procesar_lotes_seleccion_parcial_y_fondos_insuficientes(db_session):
+    """
+    FIX D:
+    1. POST /pagos/lotes/procesar con lista de 2 de 5 IDs pendientes debe liquidar
+       solo las 2 seleccionadas, dejando las otras 3 sin tocar (PENDIENTE).
+    2. Debe fallar con 400 si el saldo de la cuenta bancaria es menor al total de las facturas seleccionadas.
+    3. Debe fallar con 400 si no se envían cuentas_por_pagar_ids o la lista está vacía.
+    """
+    from fastapi import HTTPException
+
+    tenant_id = uuid.uuid4()
+    user = MagicMock()
+    user.tenant_id = tenant_id
+
+    prov = Proveedor(nombre="Proveedor Lotes", rif="J-11223344-5", tenant_id=tenant_id)
+    db_session.add(prov)
+    db_session.flush()
+
+    cta_banco = CuentaContable(codigo="1.1.01", nombre="Caja y Bancos", tipo="ACTIVO", tenant_id=tenant_id)
+    cta_cxp = CuentaContable(codigo="2.1.01", nombre="Cuentas por Pagar", tipo="PASIVO", tenant_id=tenant_id)
+
+    # Banco con saldo suficiente para 2 facturas ($200), pero no para $500
+    banco = CuentaBancaria(
+        banco="Banesco USD",
+        numero_cuenta="0134-1111-2222",
+        saldo_actual_usd=Decimal("300.00"),
+        activa=True,
+        tenant_id=tenant_id
+    )
+    tasa_bcv = TasaCambio(
+        fuente="BCV",
+        valor_ves=Decimal("40.00"),
+        fecha=datetime.now(timezone.utc),
+        tenant_id=tenant_id
+    )
+
+    # Creamos 5 facturas pendientes de $100 cada una
+    facturas = []
+    for i in range(1, 6):
+        facturas.append(CuentaPorPagar(
+            proveedor_id=prov.id,
+            numero_documento=f"FAC-LOTE-{i}",
+            monto_total_usd=Decimal("100.00"),
+            monto_pagado_usd=Decimal("0.00"),
+            tasa_cambio_bs=Decimal("40.0"),
+            fecha_emision=datetime.now(timezone.utc),
+            fecha_vencimiento=datetime.now(timezone.utc),
+            estado="PENDIENTE",
+            tenant_id=tenant_id
+        ))
+
+    db_session.add_all([cta_banco, cta_cxp, banco, tasa_bcv] + facturas)
+    db_session.commit()
+
+    # 1. Error si lista vacía o ausente
+    with pytest.raises(HTTPException) as exc_vacio:
+        procesar_lotes(body={"referencia": "LOTE-VACIO"}, db=db_session, current_user=user)
+    assert exc_vacio.value.status_code == 400
+    assert "Debe seleccionar al menos una factura" in exc_vacio.value.detail
+
+    # 2. Error por fondos insuficientes si seleccionamos 4 facturas ($400 > saldo $300)
+    cuatro_ids = [f.id for f in facturas[:4]]
+    with pytest.raises(HTTPException) as exc_fondos:
+        procesar_lotes(
+            body={"referencia": "LOTE-EXCESIVO", "cuentas_por_pagar_ids": cuatro_ids},
+            db=db_session,
+            current_user=user
+        )
+    assert exc_fondos.value.status_code == 400
+    assert "Fondos insuficientes" in exc_fondos.value.detail
+
+    # 3. Procesar exitosamente 2 facturas ($200 <= saldo $300)
+    dos_ids = [facturas[0].id, facturas[1].id]
+    res = procesar_lotes(
+        body={"referencia": "LOTE-2-DE-5", "cuentas_por_pagar_ids": dos_ids},
+        db=db_session,
+        current_user=user
+    )
+    assert res["ok"] is True
+    assert "2 facturas liquidadas" in res["message"]
+
+    # Verificar banco: 300 - 200 = 100
+    db_session.refresh(banco)
+    assert float(banco.saldo_actual_usd) == 100.00
+
+    # Verificar que solo las 2 seleccionadas fueron PAGADAS y las otras 3 siguen PENDIENTES
+    for f in facturas[:2]:
+        db_session.refresh(f)
+        assert f.estado == "PAGADA"
+        assert float(f.monto_pagado_usd) == 100.00
+
+    for f in facturas[2:]:
+        db_session.refresh(f)
+        assert f.estado == "PENDIENTE"
+        assert float(f.monto_pagado_usd) == 0.00

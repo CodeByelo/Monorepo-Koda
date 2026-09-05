@@ -574,6 +574,8 @@ def validar_lotes(db: Session = Depends(get_db), current_user = Depends(get_curr
             mensaje = "Falta correo electrónico para notificaciones"
 
         validaciones.append({
+            "id": c.id,
+            "monto_debitar_usd": float(saldo_usd_converted),
             "provider": c.proveedor.nombre if c.proveedor else "Proveedor Desconocido",
             "proveedor": c.proveedor.nombre if c.proveedor else "Proveedor Desconocido",
             "status": status,
@@ -595,13 +597,17 @@ def validar_lotes(db: Session = Depends(get_db), current_user = Depends(get_curr
 def procesar_lotes(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
     try:
         ref = body.get("referencia", "LOTE-GEN")
-        
+        cxp_ids = body.get("cuentas_por_pagar_ids")
+        if not cxp_ids or not isinstance(cxp_ids, list) or len(cxp_ids) == 0:
+            raise HTTPException(status_code=400, detail="Debe seleccionar al menos una factura a pagar.")
+
         cxps = db.query(CuentaPorPagar).filter(
+            CuentaPorPagar.id.in_(cxp_ids),
             CuentaPorPagar.estado != "PAGADA",
             CuentaPorPagar.tenant_id == current_user.tenant_id
         ).all()
         if not cxps:
-            return {"ok": True, "message": "No hay deudas pendientes"}
+            return {"ok": True, "message": "No hay deudas pendientes para procesar."}
 
         banco = db.query(CuentaBancaria).filter(
             CuentaBancaria.activa == True,
@@ -623,6 +629,9 @@ def procesar_lotes(body: dict, db: Session = Depends(get_db), current_user = Dep
             else:
                 saldo_converted = saldo_usd
             total_debitar_usd += saldo_converted
+
+        if Decimal(str(banco.saldo_actual_usd)) < total_debitar_usd:
+            raise HTTPException(status_code=400, detail="Fondos insuficientes en la cuenta seleccionada para procesar este lote.")
 
         banco.saldo_actual_usd -= total_debitar_usd
 

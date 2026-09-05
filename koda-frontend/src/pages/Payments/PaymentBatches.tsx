@@ -21,6 +21,7 @@ const PaymentBatches = () => {
   ]);
 
   const [validations, setValidations] = useState<any[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [loteData, setLoteData] = useState<any>(null);
   const [bancos, setBancos] = useState<any[]>([]);
   const [selectedBanco, setSelectedBanco] = useState<any>(null);
@@ -40,7 +41,7 @@ const PaymentBatches = () => {
   const [formProveedorId, setFormProveedorId] = useState('');
   const [formRef, setFormRef] = useState('');
   const [formMonto, setFormMonto] = useState('');
-  const [formTasa, setFormTasa] = useState('36.52');
+  const [formTasa, setFormTasa] = useState('1.00');
   const [formCredito, setFormCredito] = useState('15');
 
   const showToast = (msg: string) => {
@@ -51,15 +52,29 @@ const PaymentBatches = () => {
   const fetchValidations = async () => {
     setIsLoading(true);
     try {
-      const [data, bancosRes, provRes] = await Promise.all([
+      const [data, bancosRes, provRes, tasaRes] = await Promise.all([
         api.get<any>('/pagos/lotes/validar'),
         api.get<any[]>('/tesoreria/bancos'),
-        api.get<any[]>('/proveedores')
+        api.get<any[]>('/proveedores'),
+        api.get<any>('/tasa/actual').catch(() => null)
       ]);
-      setValidations(data?.validaciones || []);
+      const valids = data?.validaciones || [];
+      setValidations(valids);
+      // Inicializar seleccionados con todos los que no tengan error
+      const initialSelected = new Set<number>();
+      valids.forEach((v: any) => {
+        if (v.id && v.status !== 'ERROR' && v.estado !== 'ERROR') {
+          initialSelected.add(v.id);
+        }
+      });
+      setSelectedIds(initialSelected);
+
       setLoteData(data || {});
       setBancos(bancosRes || []);
       setProveedores(provRes || []);
+      if (tasaRes?.tasa_oficial) {
+        setFormTasa(String(tasaRes.tasa_oficial));
+      }
       if (bancosRes && bancosRes.length > 0) {
         setSelectedBanco(bancosRes[0]);
       }
@@ -78,11 +93,32 @@ const PaymentBatches = () => {
   }, []);
 
   const totalErrores = validations.filter(v => v.status === 'ERROR' || v.estado === 'ERROR').length;
-  const totalDebitar = loteData?.total_debitar || '$0.00';
+  
+  // Recalcular total a debitar sumando solo los items seleccionados
+  const totalDebitarMonto = validations
+    .filter(v => v.id && selectedIds.has(v.id))
+    .reduce((sum, v) => sum + (Number(v.monto_debitar_usd) || 0), 0);
+  const totalDebitar = `$${totalDebitarMonto.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
 
   const handleProcesarLote = async () => {
     if (totalErrores > 0) {
       showToast("No se puede procesar el lote. Existen errores de validación.");
+      return;
+    }
+    if (selectedIds.size === 0) {
+      showToast("Debe seleccionar al menos una factura a pagar.");
       return;
     }
 
@@ -91,7 +127,8 @@ const PaymentBatches = () => {
         referencia: loteRef,
         fecha: fecha,
         formato: formato,
-        total: totalDebitar
+        total: totalDebitar,
+        cuentas_por_pagar_ids: Array.from(selectedIds)
       });
       showToast("Lote procesado exitosamente.");
       
@@ -99,9 +136,10 @@ const PaymentBatches = () => {
       newSteps[1].status = 'completed';
       newSteps[2].status = 'active';
       setSteps(newSteps);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error processing batch:", error);
-      showToast("Error al procesar el lote de pagos.");
+      const detail = error?.response?.data?.detail || "Error al procesar el lote de pagos.";
+      showToast(detail);
     }
   };
 
@@ -297,15 +335,27 @@ const PaymentBatches = () => {
                 const color = isError ? 'text-red-600' : 'text-green-600';
                 const bg = isError ? 'bg-red-50' : 'bg-green-50';
                 const border = isError ? 'border-red-200' : 'border-green-200';
+                const isChecked = v.id ? selectedIds.has(v.id) : false;
                 
                 return (
-                  <div key={i} className={`p-4 rounded-2xl border-l-4 ${v.bg || bg} ${v.border || border} ${v.color || color} space-y-1 transition-all hover:scale-[1.02]`}>
-                    <div className="flex justify-between items-center">
-                      <strong className="text-xs font-black uppercase">{v.provider || v.proveedor}</strong>
-                      <span className="text-[10px] font-black">{!isError ? '✅ OK' : '❌ ERROR'}</span>
+                  <div key={i} className={`p-4 rounded-2xl border-l-4 ${v.bg || bg} ${v.border || border} ${v.color || color} space-y-1 transition-all hover:scale-[1.01] flex items-start gap-3`}>
+                    <div className="pt-0.5">
+                      <input
+                        type="checkbox"
+                        disabled={isError}
+                        checked={isChecked}
+                        onChange={() => v.id && toggleSelect(v.id)}
+                        className="w-4 h-4 text-[#0b5156] rounded border-slate-300 focus:ring-[#0b5156] cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                      />
                     </div>
-                    {(v.error || v.mensaje) && <p className="text-[10px] font-black uppercase">{v.error || v.mensaje}</p>}
-                    <p className="text-[9px] font-bold text-slate-400 font-mono uppercase">{v.meta || v.metadata}</p>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-center">
+                        <strong className="text-xs font-black uppercase truncate">{v.provider || v.proveedor}</strong>
+                        <span className="text-[10px] font-black">{!isError ? '✅ OK' : '❌ ERROR'}</span>
+                      </div>
+                      {(v.error || v.mensaje) && <p className="text-[10px] font-black uppercase">{v.error || v.mensaje}</p>}
+                      <p className="text-[9px] font-bold text-slate-400 font-mono uppercase">{v.meta || v.metadata}</p>
+                    </div>
                   </div>
                 );
               })}
@@ -313,7 +363,10 @@ const PaymentBatches = () => {
 
             <div className="pt-6 border-t border-slate-100">
               <div className="flex justify-between items-end mb-4">
-                <span className="text-xs font-black text-slate-400 uppercase">Total a Debitar</span>
+                <div>
+                  <span className="text-xs font-black text-slate-400 uppercase block">Total a Debitar</span>
+                  <span className="text-[10px] font-bold text-slate-400">({selectedIds.size} seleccionadas)</span>
+                </div>
                 <strong className="text-2xl font-black text-red-600 font-mono tracking-tighter">{totalDebitar}</strong>
               </div>
               {totalErrores > 0 ? (
@@ -323,9 +376,10 @@ const PaymentBatches = () => {
               ) : (
                 <button 
                   onClick={handleProcesarLote}
-                  className="w-full bg-green-600 text-white text-center py-4 rounded-2xl text-xs font-black uppercase shadow-lg shadow-green-900/20 hover:bg-green-700 transition-all"
+                  disabled={selectedIds.size === 0}
+                  className="w-full bg-green-600 text-white text-center py-4 rounded-2xl text-xs font-black uppercase shadow-lg shadow-green-900/20 hover:bg-green-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  LISTO PARA PROCESAR
+                  {selectedIds.size === 0 ? 'NINGUNA FACTURA SELECCIONADA' : 'LISTO PARA PROCESAR'}
                 </button>
               )}
             </div>
