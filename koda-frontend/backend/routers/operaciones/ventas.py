@@ -720,7 +720,7 @@ def facturar_cotizacion(
             lineas.append(LineaFactura(
                 producto_id=producto.id,
                 cantidad=cantidad_item,
-                precio_unitario=resolver_precio_unitario(producto),
+                precio_unitario=resolver_precio_unitario(producto, item.precio_unitario),
                 es_exento=bool(producto.es_exento),
             ))
 

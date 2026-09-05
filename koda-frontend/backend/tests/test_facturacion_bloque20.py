@@ -19,13 +19,14 @@ from sqlalchemy.pool import StaticPool
 
 from backend.core.database import Base, get_db
 from backend.models.core import Tenant, Profile, TasaCambio
-from backend.models.erp_extended import Empresa, Almacen, StockPorAlmacen, CuentaContable
+from backend.models.erp_extended import Empresa, Almacen, StockPorAlmacen, CuentaContable, Cotizacion, CotizacionItem
 from backend.models.operations import Producto, Cliente, Venta, VentaDetalle, KardexMovimiento
 from backend.models.fiscal import CorrelativoFiscal, ReglaFiscal
 from backend.core.security import get_current_user
 from backend.services.auth import get_current_user_from_token
 from backend.routers.facturacion import router as facturacion_router
 from backend.routers.sales import router as sales_router
+from backend.routers.operaciones.ventas import ventas_ext_router
 
 
 @pytest.fixture(scope="function")
@@ -60,6 +61,7 @@ def test_client(db_session):
     app = FastAPI()
     app.include_router(facturacion_router)
     app.include_router(sales_router)
+    app.include_router(ventas_ext_router)
 
     tenant_a_id = uuid.uuid4()
     tenant_b_id = uuid.uuid4()
@@ -489,3 +491,74 @@ def test_anular_venta_repone_stock_por_almacen(test_client, db_session):
     db_session.refresh(stock_alm)
     assert prod.stock == Decimal("50.00")
     assert stock_alm.cantidad == Decimal("50.00")
+
+
+def test_facturar_cotizacion_respeta_precio_cotizado(test_client, db_session):
+    """
+    FIX C (Batch 3): Facturar una cotización debe respetar item.precio_unitario (precio cotizado)
+    en vez de pisarlo con el precio de catálogo de Producto.precio_usd.
+    """
+    # 1. Producto con precio de catálogo de $100.00
+    prod = Producto(
+        id=666,
+        tenant_id=test_client.tenant_a_id,
+        sku="PROD-COTIZ-TEST",
+        nombre="Producto Cotización Test",
+        precio_usd=Decimal("100.00"),
+        costo_usd=Decimal("40.00"),
+        stock=Decimal("20.00")
+    )
+    stock_alm = StockPorAlmacen(
+        tenant_id=test_client.tenant_a_id,
+        producto_id=666,
+        almacen_id=1,
+        cantidad=Decimal("20.00")
+    )
+    db_session.add_all([prod, stock_alm])
+    db_session.commit()
+
+    # 2. Cotización con precio especial cotizado de $85.00 (descuento acordado con cliente)
+    cot = Cotizacion(
+        tenant_id=test_client.tenant_a_id,
+        numero_cotizacion=f"COT-PRECIO-{uuid.uuid4().hex[:6]}",
+        cliente_id=10,
+        fecha_emision=datetime.now(timezone.utc),
+        fecha_vencimiento=datetime.now(timezone.utc),
+        moneda="USD",
+        tasa_cambio=Decimal("50.00"),
+        subtotal=Decimal("85.00"),
+        descuento_total=Decimal("0.00"),
+        total=Decimal("98.60"),
+        estado="Aceptada",
+        creado_por=test_client.user_a.id
+    )
+    db_session.add(cot)
+    db_session.flush()
+
+    item = CotizacionItem(
+        cotizacion_id=cot.id,
+        producto_id=666,
+        descripcion="Item con precio negociado",
+        cantidad=Decimal("1.00"),
+        precio_unitario=Decimal("85.00"),
+        descuento_porcentaje=Decimal("0.00"),
+        total_fila=Decimal("85.00")
+    )
+    db_session.add(item)
+    db_session.commit()
+
+    # 3. Facturar la cotización
+    res = test_client.post(
+        f"/ventas/cotizaciones/{cot.id}/facturar",
+        json={"metodo_pago": "Efectivo"}
+    )
+    assert res.status_code == 200
+    factura_num = res.json()["numero_factura"]
+
+    # 4. Verificar que la Venta / VentaDetalle creada tiene precio_usd_capturado = 85.00 (no 100.00)
+    venta_creada = db_session.query(Venta).filter(Venta.numero_factura == factura_num).first()
+    assert venta_creada is not None
+    assert len(venta_creada.detalles) == 1
+    assert float(venta_creada.detalles[0].precio_usd_capturado) == 85.00
+    assert float(venta_creada.subtotal_usd) == 85.00
+
