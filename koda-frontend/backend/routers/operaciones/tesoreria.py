@@ -281,23 +281,6 @@ def kpis_cuentas_por_pagar(db: Session = Depends(get_db), current_user = Depends
 
 @tesoreria_router.get("/bancos")
 def listar_bancos(db: Session = Depends(get_db), current_user = Depends(get_current_user)):
-    # Limpiar cuentas fantasma de auto-seeds antiguos que no tienen movimientos
-    try:
-        dummy_cuentas = db.query(CuentaBancaria).filter(
-            CuentaBancaria.tenant_id == current_user.tenant_id,
-            (
-                CuentaBancaria.numero_cuenta.in_(["1234-CAJA-USD-01", "1234-CAJA-USD-02"]) |
-                CuentaBancaria.banco.in_(["Caja Chica Ventas", "Caja Principal USD"])
-            )
-        ).all()
-        for d in dummy_cuentas:
-            tiene_movs = db.query(MovimientoBancario).filter(MovimientoBancario.cuenta_id == d.id).count() > 0
-            if not tiene_movs:
-                db.delete(d)
-        db.commit()
-    except Exception:
-        db.rollback()
-
     cuentas = db.query(CuentaBancaria).filter(CuentaBancaria.tenant_id == current_user.tenant_id).all()
     tasa = tasa_actual(db, current_user.tenant_id)
     res = []
