@@ -319,11 +319,19 @@ def listar_bancos(db: Session = Depends(get_db), current_user = Depends(get_curr
 
 @tesoreria_router.post("/bancos")
 def crear_banco(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    moneda = body.get("moneda", "VES")
+    saldo_input = Decimal(str(body.get("saldo_actual", 0)))
+    if moneda == "USD":
+        saldo_usd = saldo_input
+    else:
+        tasa = tasa_actual(db, current_user.tenant_id)
+        saldo_usd = (saldo_input / Decimal(str(tasa))) if tasa else saldo_input
+
     c = CuentaBancaria(
         banco=body.get("nombre", ""),
         numero_cuenta=body.get("numero", ""),
-        moneda=body.get("moneda", "VES"),
-        saldo_actual_usd=body.get("saldo_actual", 0),
+        moneda=moneda,
+        saldo_actual_usd=saldo_usd,
         activa=(body.get("estado") == "Activa"),
         tenant_id=current_user.tenant_id
     )
@@ -349,7 +357,12 @@ def actualizar_banco(cuenta_id: int, body: dict, db: Session = Depends(get_db), 
     if "moneda" in body:
         cuenta.moneda = body["moneda"]
     if "saldo_actual" in body:
-        cuenta.saldo_actual_usd = Decimal(str(body["saldo_actual"]))
+        saldo_input = Decimal(str(body["saldo_actual"]))
+        if cuenta.moneda == "USD":
+            cuenta.saldo_actual_usd = saldo_input
+        else:
+            tasa = tasa_actual(db, current_user.tenant_id)
+            cuenta.saldo_actual_usd = (saldo_input / Decimal(str(tasa))) if tasa else saldo_input
     if "estado" in body:
         cuenta.activa = (body["estado"] == "Activa")
         
@@ -1548,12 +1561,18 @@ def importar_extracto_bancario(body: dict, db: Session = Depends(get_db), curren
         MovimientoBancario.estado != "CONCILIADO"
     ).all()
 
+    todos_movs_existentes = db.query(MovimientoBancario).filter(
+        MovimientoBancario.cuenta_id == cuenta_id,
+        MovimientoBancario.tenant_id == current_user.tenant_id
+    ).all()
+
     TOLERANCIA_USD = 0.02
     TOLERANCIA_DIAS = 3
 
     total_monto_usd = 0.0
     conciliados_count = 0
     nuevos_count = 0
+    posibles_duplicados_count = 0
 
     for m in movs:
         fecha_str = m.get("fecha", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
@@ -1589,29 +1608,44 @@ def importar_extracto_bancario(body: dict, db: Session = Depends(get_db), curren
             candidatos_pendientes.remove(match)
             conciliados_count += 1
         else:
-            nuevo_mov = MovimientoBancario(
-                cuenta_id=cuenta_id,
-                fecha=fecha_mov,
-                concepto=concepto,
-                monto_usd=abs(monto_usd),
-                tasa_cambio_bs=tasa_cambio,
-                tipo=tipo,
-                referencia=ref,
-                estado="ACTIVO",
-                tenant_id=current_user.tenant_id
+            es_duplicado = any(
+                em.tipo == tipo
+                and abs(to_float(em.monto_usd) - abs(monto_usd)) <= TOLERANCIA_USD
+                and em.fecha and abs((em.fecha - fecha_mov).days) <= TOLERANCIA_DIAS
+                and (not ref or not em.referencia or ref.lower() == em.referencia.strip().lower())
+                for em in todos_movs_existentes
             )
-            db.add(nuevo_mov)
-            total_monto_usd += monto_usd
-            nuevos_count += 1
+            if es_duplicado:
+                posibles_duplicados_count += 1
+            else:
+                nuevo_mov = MovimientoBancario(
+                    cuenta_id=cuenta_id,
+                    fecha=fecha_mov,
+                    concepto=concepto,
+                    monto_usd=abs(monto_usd),
+                    tasa_cambio_bs=tasa_cambio,
+                    tipo=tipo,
+                    referencia=ref,
+                    estado="ACTIVO",
+                    tenant_id=current_user.tenant_id
+                )
+                db.add(nuevo_mov)
+                total_monto_usd += monto_usd
+                nuevos_count += 1
+                todos_movs_existentes.append(nuevo_mov)
 
     cuenta.saldo_actual_usd = to_float(cuenta.saldo_actual_usd) + total_monto_usd
     db.commit()
+    msg = f"Se procesaron {len(movs)} movimientos del extracto: {conciliados_count} conciliados contra registros existentes, {nuevos_count} nuevos sin coincidencia."
+    if posibles_duplicados_count > 0:
+        msg += f" {posibles_duplicados_count} posibles duplicados omitidos (ya existían movimientos equivalentes)."
     return {
         "ok": True,
         "count": len(movs),
         "conciliados": conciliados_count,
         "nuevos": nuevos_count,
-        "message": f"Se procesaron {len(movs)} movimientos del extracto: {conciliados_count} conciliados contra registros existentes, {nuevos_count} nuevos sin coincidencia."
+        "posibles_duplicados": posibles_duplicados_count,
+        "message": msg
     }
 
 

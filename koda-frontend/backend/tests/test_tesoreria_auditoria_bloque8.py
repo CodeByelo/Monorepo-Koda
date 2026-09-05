@@ -31,7 +31,9 @@ from backend.routers.operaciones.tesoreria import (
     resumen_inversiones,
     registrar_inversion,
     resumen_prestamos_uvc,
-    listar_bancos
+    listar_bancos,
+    crear_banco,
+    actualizar_banco
 )
 
 
@@ -322,3 +324,143 @@ def test_listar_bancos_no_autoborra_cuentas(db_session):
     ).first()
     assert cuenta_db is not None
     assert cuenta_db.id == cuenta.id
+
+
+def test_crear_y_actualizar_banco_conversion_usd(db_session):
+    """
+    FIX 1: crear_banco y actualizar_banco deben convertir saldo_actual a USD
+    cuando moneda es VES usando tasa_actual, y mantenerlo idéntico cuando moneda es USD.
+    """
+    tenant_id = uuid.uuid4()
+    mock_user = MagicMock()
+    mock_user.tenant_id = tenant_id
+
+    # Configurar tasa oficial en 36.00
+    tasa = TasaCambio(
+        fuente="BCV",
+        valor_ves=Decimal("36.00"),
+        fecha=datetime.now(),
+        tenant_id=tenant_id
+    )
+    db_session.add(tasa)
+    db_session.commit()
+
+    # (a) Crear un banco VES con saldo_actual=3600 y tasa=36 -> saldo_actual_usd ≈ 100
+    body_ves = {
+        "nombre": "Banesco VES",
+        "numero": "0134-1234-5678",
+        "moneda": "VES",
+        "saldo_actual": 3600,
+        "estado": "Activa"
+    }
+    cuenta_ves = crear_banco(body=body_ves, db=db_session, current_user=mock_user)
+    assert cuenta_ves.moneda == "VES"
+    assert round(cuenta_ves.saldo_actual_usd, 2) == Decimal("100.00")
+
+    # (b) Crear un banco USD con saldo_actual=100 -> saldo_actual_usd == 100 exacto
+    body_usd = {
+        "nombre": "Banesco Panamá USD",
+        "numero": "9876-5432-1098",
+        "moneda": "USD",
+        "saldo_actual": 100,
+        "estado": "Activa"
+    }
+    cuenta_usd = crear_banco(body=body_usd, db=db_session, current_user=mock_user)
+    assert cuenta_usd.moneda == "USD"
+    assert cuenta_usd.saldo_actual_usd == Decimal("100")
+
+    # (c) Actualizar banco VES con saldo_actual=7200 -> saldo_actual_usd ≈ 200
+    res_act = actualizar_banco(cuenta_id=cuenta_ves.id, body={"saldo_actual": 7200}, db=db_session, current_user=mock_user)
+    assert res_act["ok"] is True
+    assert round(res_act["cuenta"]["saldo"], 2) == 200.00
+
+
+def test_reimportar_extracto_deduplicacion(db_session):
+    """
+    FIX 2: Reimportar el mismo extracto bancario no debe duplicar movimientos
+    ni sumar doble al saldo de la cuenta bancaria.
+    """
+    tenant_id = uuid.uuid4()
+    mock_user = MagicMock()
+    mock_user.tenant_id = tenant_id
+
+    tasa = TasaCambio(
+        fuente="BCV",
+        valor_ves=Decimal("40.00"),
+        fecha=datetime.now(),
+        tenant_id=tenant_id
+    )
+    db_session.add(tasa)
+
+    cuenta = CuentaBancaria(
+        banco="Banesco USD Test",
+        numero_cuenta="0134-9999-0000",
+        moneda="USD",
+        saldo_actual_usd=Decimal("500.00"),
+        activa=True,
+        tenant_id=tenant_id
+    )
+    db_session.add(cuenta)
+    db_session.commit()
+
+    # Movimiento interno pendiente para probar que uno se concilie y los otros sean nuevos
+    mov_pendiente = MovimientoBancario(
+        cuenta_id=cuenta.id,
+        fecha=datetime.now(),
+        concepto="Pago Factura Pendiente",
+        monto_usd=Decimal("10.00"),  # 400 Bs / 40
+        tasa_cambio_bs=Decimal("40.00"),
+        tipo="INGRESO",
+        referencia="REF-PEND-01",
+        estado="PENDIENTE",
+        tenant_id=tenant_id
+    )
+    db_session.add(mov_pendiente)
+    db_session.commit()
+
+    body_extracto = {
+        "cuenta_id": cuenta.id,
+        "movimientos": [
+            {
+                "fecha": datetime.now().strftime("%Y-%m-%d"),
+                "referencia": "REF-PEND-01",
+                "concepto": "Abono cliente",
+                "monto": 400.0  # Concilia con mov_pendiente (10 USD)
+            },
+            {
+                "fecha": datetime.now().strftime("%Y-%m-%d"),
+                "referencia": "REF-NUEVO-02",
+                "concepto": "Transferencia nueva",
+                "monto": 800.0  # Nuevo (20 USD)
+            },
+            {
+                "fecha": datetime.now().strftime("%Y-%m-%d"),
+                "referencia": "REF-EGRESO-03",
+                "concepto": "Comisión bancaria",
+                "monto": -200.0  # Nuevo (-5 USD)
+            }
+        ]
+    }
+
+    # Primera importación
+    res_1 = importar_extracto_bancario(body=body_extracto, db=db_session, current_user=mock_user)
+    assert res_1["ok"] is True
+    assert res_1["conciliados"] == 1
+    assert res_1["nuevos"] == 2
+    assert res_1["posibles_duplicados"] == 0
+
+    saldo_despues_primer_import = float(cuenta.saldo_actual_usd)
+    # Saldo original (500) + nuevos (20 - 5 = 15 USD) = 515 USD (el conciliado ya existía)
+    assert round(saldo_despues_primer_import, 2) == 515.00
+
+    # Segunda importación con EXACTAMENTE el mismo archivo
+    res_2 = importar_extracto_bancario(body=body_extracto, db=db_session, current_user=mock_user)
+    assert res_2["ok"] is True
+    assert res_2["nuevos"] == 0  # Ningún movimiento nuevo duplicado debe insertarse
+    assert res_2["posibles_duplicados"] == 1  # El que ya estaba CONCILIADO es detectado como duplicado
+    assert "posibles duplicados omitidos" in res_2["message"]
+
+    # Verificar que el saldo de la cuenta NO se modificó entre el 1er y 2do import
+    assert float(cuenta.saldo_actual_usd) == saldo_despues_primer_import
+
+
