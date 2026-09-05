@@ -31,7 +31,9 @@ from backend.routers.operaciones.tesoreria import (
     resumen_inversiones,
     registrar_inversion,
     resumen_prestamos_uvc,
-    listar_bancos
+    listar_bancos,
+    crear_banco,
+    actualizar_banco
 )
 
 
@@ -322,3 +324,53 @@ def test_listar_bancos_no_autoborra_cuentas(db_session):
     ).first()
     assert cuenta_db is not None
     assert cuenta_db.id == cuenta.id
+
+
+def test_crear_y_actualizar_banco_conversion_usd(db_session):
+    """
+    FIX 1: crear_banco y actualizar_banco deben convertir saldo_actual a USD
+    cuando moneda es VES usando tasa_actual, y mantenerlo idéntico cuando moneda es USD.
+    """
+    tenant_id = uuid.uuid4()
+    mock_user = MagicMock()
+    mock_user.tenant_id = tenant_id
+
+    # Configurar tasa oficial en 36.00
+    tasa = TasaCambio(
+        fuente="BCV",
+        valor_ves=Decimal("36.00"),
+        fecha=datetime.now(),
+        tenant_id=tenant_id
+    )
+    db_session.add(tasa)
+    db_session.commit()
+
+    # (a) Crear un banco VES con saldo_actual=3600 y tasa=36 -> saldo_actual_usd ≈ 100
+    body_ves = {
+        "nombre": "Banesco VES",
+        "numero": "0134-1234-5678",
+        "moneda": "VES",
+        "saldo_actual": 3600,
+        "estado": "Activa"
+    }
+    cuenta_ves = crear_banco(body=body_ves, db=db_session, current_user=mock_user)
+    assert cuenta_ves.moneda == "VES"
+    assert round(cuenta_ves.saldo_actual_usd, 2) == Decimal("100.00")
+
+    # (b) Crear un banco USD con saldo_actual=100 -> saldo_actual_usd == 100 exacto
+    body_usd = {
+        "nombre": "Banesco Panamá USD",
+        "numero": "9876-5432-1098",
+        "moneda": "USD",
+        "saldo_actual": 100,
+        "estado": "Activa"
+    }
+    cuenta_usd = crear_banco(body=body_usd, db=db_session, current_user=mock_user)
+    assert cuenta_usd.moneda == "USD"
+    assert cuenta_usd.saldo_actual_usd == Decimal("100")
+
+    # (c) Actualizar banco VES con saldo_actual=7200 -> saldo_actual_usd ≈ 200
+    res_act = actualizar_banco(cuenta_id=cuenta_ves.id, body={"saldo_actual": 7200}, db=db_session, current_user=mock_user)
+    assert res_act["ok"] is True
+    assert round(res_act["cuenta"]["saldo"], 2) == 200.00
+

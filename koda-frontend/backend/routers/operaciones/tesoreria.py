@@ -319,11 +319,19 @@ def listar_bancos(db: Session = Depends(get_db), current_user = Depends(get_curr
 
 @tesoreria_router.post("/bancos")
 def crear_banco(body: dict, db: Session = Depends(get_db), current_user = Depends(get_current_user)):
+    moneda = body.get("moneda", "VES")
+    saldo_input = Decimal(str(body.get("saldo_actual", 0)))
+    if moneda == "USD":
+        saldo_usd = saldo_input
+    else:
+        tasa = tasa_actual(db, current_user.tenant_id)
+        saldo_usd = (saldo_input / Decimal(str(tasa))) if tasa else saldo_input
+
     c = CuentaBancaria(
         banco=body.get("nombre", ""),
         numero_cuenta=body.get("numero", ""),
-        moneda=body.get("moneda", "VES"),
-        saldo_actual_usd=body.get("saldo_actual", 0),
+        moneda=moneda,
+        saldo_actual_usd=saldo_usd,
         activa=(body.get("estado") == "Activa"),
         tenant_id=current_user.tenant_id
     )
@@ -349,7 +357,12 @@ def actualizar_banco(cuenta_id: int, body: dict, db: Session = Depends(get_db), 
     if "moneda" in body:
         cuenta.moneda = body["moneda"]
     if "saldo_actual" in body:
-        cuenta.saldo_actual_usd = Decimal(str(body["saldo_actual"]))
+        saldo_input = Decimal(str(body["saldo_actual"]))
+        if cuenta.moneda == "USD":
+            cuenta.saldo_actual_usd = saldo_input
+        else:
+            tasa = tasa_actual(db, current_user.tenant_id)
+            cuenta.saldo_actual_usd = (saldo_input / Decimal(str(tasa))) if tasa else saldo_input
     if "estado" in body:
         cuenta.activa = (body["estado"] == "Activa")
         
