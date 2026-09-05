@@ -18,7 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.core.database import Base, get_db
-from backend.models.core import Tenant, Profile
+from backend.models.core import Tenant, Profile, TasaCambio
 from backend.models.erp_extended import FondoCajaChica, GastoCajaChica, CuentaBancaria
 from backend.core.security import get_current_user
 from backend.routers.operaciones.tesoreria import tesoreria_router
@@ -257,3 +257,72 @@ def test_delete_fondo_caja_chica_otro_tenant_devuelve_404(db_session):
     fondo_db = db_session.query(FondoCajaChica).filter(FondoCajaChica.id == 3).first()
     assert fondo_db is not None
     assert fondo_db.estado == "ACTIVO"
+
+
+# ============================================================
+# FIX 6: POST /tesoreria/arqueo/cerrar convierte VES a USD
+# ============================================================
+
+def test_cerrar_arqueo_ves_convierte_a_usd(db_session):
+    """
+    POST /tesoreria/arqueo/cerrar con fisico_ves convierte el monto a USD
+    usando la tasa vigente (tasa_actual), evitando guardar bolívares en
+    la columna saldo_actual_usd de Caja Principal VES.
+    """
+    user = create_mock_user(db_session)
+    tenant_id = user.tenant_id
+
+    # 1. Configurar tasa de cambio: 36.50 Bs/USD
+    tasa = TasaCambio(
+        tenant_id=tenant_id,
+        valor_ves=Decimal("36.50"),
+        fuente="BCV",
+        fecha=datetime.now(timezone.utc)
+    )
+    # 2. Configurar Caja Principal VES
+    caja_ves = CuentaBancaria(
+        tenant_id=tenant_id,
+        banco="Caja Principal VES",
+        numero_cuenta="1234-CAJA-VES-01",
+        moneda="VES",
+        saldo_actual_usd=Decimal("0.00"),
+        activa=True
+    )
+    # 3. Configurar Caja Principal USD
+    caja_usd = CuentaBancaria(
+        tenant_id=tenant_id,
+        banco="Caja Principal USD",
+        numero_cuenta="1234-CAJA-USD-01",
+        moneda="USD",
+        saldo_actual_usd=Decimal("0.00"),
+        activa=True
+    )
+    db_session.add_all([tasa, caja_ves, caja_usd])
+    db_session.commit()
+
+    app = FastAPI()
+    app.include_router(tesoreria_router)
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_current_user] = lambda: user
+
+    client = TestClient(app)
+    payload = {
+        "caja": "Caja Principal USD",
+        "fisico_usd": 150.0,
+        "fisico_ves": 3650.0,  # 3650 Bs / 36.50 = 100.00 USD
+        "sistema_usd": 150.0,
+        "cajero": "Cajero Test",
+        "justificacion": "Cuadre del día",
+        "declaracion_veracidad": True
+    }
+    resp = client.post("/tesoreria/arqueo/cerrar", json=payload)
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+
+    # Verificar que Caja Principal VES se actualizó a 100.00 USD (NO 3650.00)
+    db_session.refresh(caja_ves)
+    assert caja_ves.saldo_actual_usd == Decimal("100.00")
+
+    # Verificar que Caja Principal USD mantiene los 150.00 USD directos
+    db_session.refresh(caja_usd)
+    assert caja_usd.saldo_actual_usd == Decimal("150.00")

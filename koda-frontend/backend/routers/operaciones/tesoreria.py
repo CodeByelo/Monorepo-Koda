@@ -866,13 +866,16 @@ def cerrar_arqueo(body: dict, db: Session = Depends(get_db), current_user = Depe
     if selected:
         selected.saldo_actual_usd = fisico_usd
 
-    # Update balance of the VES cash account
+    # Update balance of the VES cash account (converting VES physical count to USD)
+    tasa_bs = to_float(tasa_actual(db, current_user.tenant_id)) or 1.0
+    fisico_ves_usd = round(fisico_ves / tasa_bs, 2) if tasa_bs > 0 else 0.0
+
     caja_ves = db.query(CuentaBancaria).filter(
         CuentaBancaria.banco == "Caja Principal VES",
         CuentaBancaria.tenant_id == current_user.tenant_id
     ).first()
     if caja_ves:
-        caja_ves.saldo_actual_usd = fisico_ves
+        caja_ves.saldo_actual_usd = fisico_ves_usd
 
     # Log the audit closure
     diferencia = fisico_usd - sistema_usd
