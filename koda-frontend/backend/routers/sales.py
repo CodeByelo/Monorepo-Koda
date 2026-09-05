@@ -37,24 +37,31 @@ def registrar_venta_y_cxc(
 
     try:
         # 1. Validar Cliente (aislado por tenant)
-        cliente = db.query(Cliente).filter(
-            Cliente.id == venta_in.cliente_id,
-            Cliente.tenant_id == tenant_id,
-        ).first()
-        if not cliente:
+        cliente = None
+        if venta_in.cliente_id:
+            cliente = db.query(Cliente).filter(
+                Cliente.id == venta_in.cliente_id,
+                Cliente.tenant_id == tenant_id,
+            ).first()
+            if not cliente:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Cliente con ID {venta_in.cliente_id} no encontrado en su empresa."
+                )
+        else:
             cliente = db.query(Cliente).filter(Cliente.tenant_id == tenant_id).first()
-        if not cliente:
-            cliente = Cliente(
-                rif="J-00000000-0",
-                nombre="Consumidor Final",
-                telefono="+58 212 000-0000",
-                email="consumidor@koda.com",
-                direccion="Caracas, Venezuela",
-                es_contribuyente_especial=False,
-                tenant_id=tenant_id,
-            )
-            db.add(cliente)
-            db.flush()
+            if not cliente:
+                cliente = Cliente(
+                    rif="J-00000000-0",
+                    nombre="Consumidor Final",
+                    telefono="+58 212 000-0000",
+                    email="consumidor@koda.com",
+                    direccion="Caracas, Venezuela",
+                    es_contribuyente_especial=False,
+                    tenant_id=tenant_id,
+                )
+                db.add(cliente)
+                db.flush()
 
         # 2. Resolver productos, validar/descontar stock, consultando el precio oficial
         producto_ids = [detalle_in.producto_id for detalle_in in venta_in.detalles]

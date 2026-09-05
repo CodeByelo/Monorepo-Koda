@@ -24,6 +24,7 @@ from backend.models.operations import Producto, Cliente, Venta, VentaDetalle, Ka
 from backend.models.fiscal import CorrelativoFiscal, ReglaFiscal
 from backend.core.security import get_current_user
 from backend.routers.facturacion import router as facturacion_router
+from backend.routers.sales import router as sales_router
 
 
 @pytest.fixture(scope="function")
@@ -57,6 +58,7 @@ def test_client(db_session):
     """TestClient de FastAPI con dependencias y entorno fiscal/contable configurado."""
     app = FastAPI()
     app.include_router(facturacion_router)
+    app.include_router(sales_router)
 
     tenant_a_id = uuid.uuid4()
     tenant_b_id = uuid.uuid4()
@@ -376,3 +378,44 @@ def test_idempotencia_emision_factura(test_client, db_session):
     db_session.refresh(stock_alm)
     assert prod.stock == Decimal("8.00")
     assert stock_alm.cantidad == Decimal("8.00")
+
+
+def test_ventas_facturar_cliente_inexistente_retorna_404(test_client, db_session):
+    """
+    FIX A (Batch 3): POST /ventas/facturar con un cliente_id que no existe en el tenant
+    debe retornar 404 (antes caía silenciosamente al primer cliente o a Consumidor Final).
+    """
+    prod = Producto(
+        id=777,
+        tenant_id=test_client.tenant_a_id,
+        sku="PROD-VENTAS-404",
+        nombre="Producto Test 404",
+        precio_usd=Decimal("20.00"),
+        costo_usd=Decimal("10.00"),
+        stock=Decimal("50.00")
+    )
+    db_session.add(prod)
+    db_session.commit()
+
+    payload = {
+        "cliente_id": 999999,
+        "metodo_pago": "Efectivo",
+        "moneda_pago": "USD",
+        "subtotal_usd": 20.0,
+        "total_usd": 23.2,
+        "detalles": [
+            {
+                "producto_id": prod.id,
+                "cantidad": 1.0,
+                "precio_usd": 20.0
+            }
+        ]
+    }
+
+    res = test_client.post(
+        "/ventas/facturar",
+        json=payload,
+        headers={"X-Idempotency-Key": str(uuid.uuid4())}
+    )
+    assert res.status_code == 404
+    assert "no encontrado en su empresa" in res.json().get("detail", "")
