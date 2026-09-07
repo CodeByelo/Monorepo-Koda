@@ -153,6 +153,10 @@ def test_emitir_factura_solo_ves_persiste_correctamente(setup_db):
         "metodo_pago": "PagoMovil",
         "moneda_documento": "SOLO_VES",
         "tasa_cambio_bs": 50.0,
+        "pago_movil_banco": "Banesco",
+        "pago_movil_cedula": "V-12345678",
+        "pago_movil_telefono": "0414-1234567",
+        "pago_movil_referencia": "123456789",
         "detalles": [
             {
                 "producto_id": producto.id,
