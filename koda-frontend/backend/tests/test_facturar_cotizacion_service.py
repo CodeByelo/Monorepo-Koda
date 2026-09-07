@@ -538,17 +538,21 @@ def test_facturar_cotizacion_usa_correlativo_fiscal_compartido(setup_db):
     assert data_cot["numero_factura"] == "FAC-00000010"
 
     # 2. Emitir siguiente factura vía /v1/facturacion/emitir
-    res_pos = client_app.post("/v1/facturacion/emitir", json={
-        "cliente_id": cliente.id,
-        "metodo_pago": "Transferencia",
-        "detalles": [
-            {
-                "producto_id": producto.id,
-                "cantidad": 1,
-                "precio_unitario": 100.0
-            }
-        ]
-    })
+    res_pos = client_app.post(
+        "/v1/facturacion/emitir",
+        json={
+            "cliente_id": cliente.id,
+            "metodo_pago": "Transferencia",
+            "detalles": [
+                {
+                    "producto_id": producto.id,
+                    "cantidad": 1,
+                    "precio_unitario": 100.0
+                }
+            ]
+        },
+        headers={"X-Idempotency-Key": str(uuid.uuid4())}
+    )
     assert res_pos.status_code == 201
     data_pos = res_pos.json()
     assert data_pos["numero_factura"] == "FAC-00000011"

@@ -264,7 +264,10 @@ def test_pago_por_lote_genera_un_solo_asiento_por_el_total(setup_db):
     client = TestClient(app)
 
     ref_lote = "LOTE-TEST-PAGOS-001"
-    payload = {"referencia": ref_lote}
+    payload = {
+        "referencia": ref_lote,
+        "cuentas_por_pagar_ids": [cxp1.id, cxp2.id, cxp3.id],
+    }
 
     res = client.post("/pagos/lotes/procesar", json=payload)
     assert res.status_code == 200, res.text

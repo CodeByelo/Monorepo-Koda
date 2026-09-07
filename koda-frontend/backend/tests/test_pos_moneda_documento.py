@@ -121,7 +121,11 @@ def test_emitir_factura_solo_usd_persiste_y_no_aplica_igtf_si_no_es_divisa(setup
             }
         ]
     }
-    res = client_app.post("/v1/facturacion/emitir", json=payload)
+    res = client_app.post(
+        "/v1/facturacion/emitir",
+        json=payload,
+        headers={"X-Idempotency-Key": str(uuid.uuid4())}
+    )
     assert res.status_code == 201, res.text
     data = res.json()
 
@@ -157,7 +161,11 @@ def test_emitir_factura_solo_ves_persiste_correctamente(setup_db):
             }
         ]
     }
-    res = client_app.post("/v1/facturacion/emitir", json=payload)
+    res = client_app.post(
+        "/v1/facturacion/emitir",
+        json=payload,
+        headers={"X-Idempotency-Key": str(uuid.uuid4())}
+    )
     assert res.status_code == 201, res.text
     data = res.json()
 
@@ -192,7 +200,11 @@ def test_emitir_factura_bimonetario_persiste_correctamente(setup_db):
             }
         ]
     }
-    res = client_app.post("/v1/facturacion/emitir", json=payload)
+    res = client_app.post(
+        "/v1/facturacion/emitir",
+        json=payload,
+        headers={"X-Idempotency-Key": str(uuid.uuid4())}
+    )
     assert res.status_code == 201, res.text
     data = res.json()
 
@@ -213,7 +225,11 @@ def test_emitir_factura_bimonetario_persiste_correctamente(setup_db):
             }
         ]
     }
-    res_def = client_app.post("/v1/facturacion/emitir", json=payload_def)
+    res_def = client_app.post(
+        "/v1/facturacion/emitir",
+        json=payload_def,
+        headers={"X-Idempotency-Key": str(uuid.uuid4())}
+    )
     assert res_def.status_code == 201, res_def.text
     venta_def = db.query(Venta).filter(Venta.id == res_def.json()["id"]).first()
     assert venta_def.moneda_documento == "BIMONETARIO"
@@ -275,7 +291,11 @@ def test_emitir_factura_divisa_sigue_aplicando_igtf_sin_importar_moneda_document
             }
         ]
     }
-    res = client_app.post("/v1/facturacion/emitir", json=payload)
+    res = client_app.post(
+        "/v1/facturacion/emitir",
+        json=payload,
+        headers={"X-Idempotency-Key": str(uuid.uuid4())}
+    )
     assert res.status_code == 201, res.text
     data = res.json()
 
@@ -322,7 +342,11 @@ def test_pdf_factura_se_genera_sin_error_en_los_3_formatos(setup_db):
                 }
             ]
         }
-        res = client_app.post("/v1/facturacion/emitir", json=payload)
+        res = client_app.post(
+            "/v1/facturacion/emitir",
+            json=payload,
+            headers={"X-Idempotency-Key": str(uuid.uuid4())}
+        )
         assert res.status_code == 201, res.text
         venta_id = res.json()["id"]
 
@@ -380,7 +404,11 @@ def test_ticket_factura_se_genera_y_verifica_contenido_en_los_3_formatos(setup_d
                 }
             ]
         }
-        res = client_app.post("/v1/facturacion/emitir", json=payload)
+        res = client_app.post(
+            "/v1/facturacion/emitir",
+            json=payload,
+            headers={"X-Idempotency-Key": str(uuid.uuid4())}
+        )
         assert res.status_code == 201, res.text
         venta_id = res.json()["id"]
 
