@@ -94,3 +94,59 @@ jobs:
         # infraestructura. Pendiente: correrlos con un servicio de Postgres
         # en el workflow.
         run: pytest tests/ --ignore=tests/test_ledger_integration.py --deselect tests/test_tenancy.py::test_tenant_isolation
+
+  test-koda-frontend-backend:
+    name: Tests Backend ERP koda-frontend (pytest)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: koda_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        working-directory: koda-frontend/backend
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Ejecutar pytest
+        working-directory: koda-frontend/backend
+        env:
+          # Postgres real de un solo uso para este job, vive y muere con el
+          # runner. No es la base de datos de producción bajo ninguna
+          # circunstancia.
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/koda_test
+          # Solo para que los módulos puedan importarse en CI (varios exigen
+          # >=32 caracteres, sin default hardcodeado). No son secretos reales,
+          # mismo patrón que ya usa el job test-python-backend de arriba.
+          SECRET_KEY: ci-only-fake-secret-key-not-a-real-secret-32chars
+          AUDIT_LOG_SECRET: ci-only-fake-audit-log-secret-not-a-real-32char
+          BOT_INTERNAL_API_KEY: ci-only-fake-bot-internal-key-not-a-real-32c
+          ORG_SYNC_API_KEY: ci-only-fake-org-sync-key-not-a-real-secret-32c
+          LOGISTICS_INTERNAL_FORWARD_KEY: ci-only-fake-logistics-key-not-real-32c
+          SSO_BRIDGE_INTERNAL_KEY: ci-only-fake-sso-bridge-key-not-real-32ch
+        run: pytest
+        # Sin argumentos adicionales a propósito: backend/pytest.ini ya define
+        # testpaths=tests, pythonpath=.., y el --ignore-glob de
+        # test_logistica_e2e.py (ese sí necesita un servidor HTTP real
+        # corriendo, fuera de alcance de este job). No dupliques esa
+        # configuración aquí.
