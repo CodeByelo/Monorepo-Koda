@@ -79,6 +79,7 @@ class Venta(Base):
     cliente = relationship("Cliente")
     vendedor = relationship("Vendedor")
     detalles = relationship("VentaDetalle", back_populates="venta", cascade="all, delete-orphan")
+    pagos = relationship("PagoVenta", back_populates="venta", cascade="all, delete-orphan", order_by="PagoVenta.orden")
     cuenta_por_cobrar = relationship("CuentaPorCobrar", back_populates="venta", uselist=False)
 
     # Backward-compat aliases used by routers
@@ -120,6 +121,27 @@ class VentaDetalle(Base):
     # Relaciones de retroalimentación
     venta = relationship("Venta", back_populates="detalles")
     producto = relationship("Producto")
+
+class PagoVenta(Base):
+    """
+    Detalle de las "patas" de pago de una venta, usado ÚNICAMENTE cuando
+    Venta.metodo_pago == 'Cashea' (pago dividido: inicial + Cashea). Para
+    cualquier otra venta (Efectivo/Divisa/Transferencia/PagoMovil, el 99% de
+    los casos hoy) esta tabla no se usa — Venta.metodo_pago sigue siendo la
+    única fuente de verdad, sin cambios.
+    """
+    __tablename__ = "pagos_venta"
+    __table_args__ = {'schema': 'public'}
+    tenant_id = Column(UUID(as_uuid=True))
+
+    id = Column(Integer, primary_key=True, index=True)
+    venta_id = Column(Integer, ForeignKey("public.ventas.id"), nullable=False)
+    forma_pago = Column(String(50), nullable=False)  # Efectivo, Divisa, Transferencia, PagoMovil, Cashea
+    monto_usd = Column(Numeric(15, 2), nullable=False)
+    orden = Column(Integer, nullable=False)  # 1 = inicial, 2 = remanente Cashea
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    venta = relationship("Venta", back_populates="pagos")
 
 class KardexMovimiento(Base):
     """

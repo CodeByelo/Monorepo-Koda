@@ -20,7 +20,7 @@ from sqlalchemy.pool import StaticPool
 from backend.core.database import Base, get_db
 from backend.models.core import Tenant, Profile, TasaCambio
 from backend.models.erp_extended import Empresa, Almacen, StockPorAlmacen, CuentaContable, Cotizacion, CotizacionItem
-from backend.models.operations import Producto, Cliente, Venta, VentaDetalle, KardexMovimiento
+from backend.models.operations import Producto, Cliente, Venta, VentaDetalle, KardexMovimiento, PagoVenta
 from backend.models.fiscal import CorrelativoFiscal, ReglaFiscal
 from backend.core.security import get_current_user
 from backend.services.auth import get_current_user_from_token
@@ -561,4 +561,238 @@ def test_facturar_cotizacion_respeta_precio_cotizado(test_client, db_session):
     assert len(venta_creada.detalles) == 1
     assert float(venta_creada.detalles[0].precio_usd_capturado) == 85.00
     assert float(venta_creada.subtotal_usd) == 85.00
+
+
+def test_factura_cashea_pago_dividido_con_inicial_divisa_e_igtf(test_client, db_session):
+    """
+    Test Cashea con pago dividido:
+    - metodo_pago="Cashea", metodo_pago_inicial="Divisa", monto_inicial_usd=60.00
+    - Factura de 1 producto exento por $100.00 total
+    - Confirma:
+      (a) Se crean 2 filas en pagos_venta con montos 60 y 40 (orden 1 y 2).
+      (b) El IGTF calculado es el 3% de $60 ($1.80), no de $100 ni de $40.
+      (c) Venta.metodo_pago queda como "Cashea".
+      (d) Total de la factura = $101.80 ($100 subtotal + $1.80 IGTF), remanente Cashea = $41.80.
+    """
+    prod = Producto(
+        id=901,
+        tenant_id=test_client.tenant_a_id,
+        sku="PROD-CASHEA-100",
+        nombre="Producto Cashea 100",
+        precio_usd=Decimal("100.00"),
+        costo_usd=Decimal("50.00"),
+        stock=Decimal("10.00"),
+        es_exento=True  # Exento de IVA para aislar el IGTF de forma limpia
+    )
+    stock_alm = StockPorAlmacen(
+        tenant_id=test_client.tenant_a_id,
+        producto_id=901,
+        almacen_id=1,
+        cantidad=Decimal("10.00")
+    )
+    db_session.add_all([prod, stock_alm])
+    db_session.commit()
+
+    payload = {
+        "cliente_id": "10",
+        "metodo_pago": "Cashea",
+        "metodo_pago_inicial": "Divisa",
+        "monto_inicial_usd": 60.00,
+        "moneda_documento": "BIMONETARIO",
+        "detalles": [
+            {
+                "producto_id": 901,
+                "cantidad": 1.0,
+                "precio_unitario": 100.00,
+                "es_exento": True
+            }
+        ]
+    }
+
+    res = test_client.post("/v1/facturacion/emitir", json=payload)
+    assert res.status_code == 201, res.text
+    data = res.json()
+
+    # (b) IGTF es 3% de $60.00 = $1.80
+    assert data["monto_igtf"] == 1.80
+    assert data["monto_total"] == 101.80
+
+    venta = db_session.query(Venta).filter(Venta.id == data["id"]).first()
+    assert venta is not None
+    # (c) Venta.metodo_pago queda como "Cashea"
+    assert venta.metodo_pago == "Cashea"
+    assert Decimal(str(venta.igtf_usd)) == Decimal("1.80")
+
+    # (a) Confirmar 2 filas en pagos_venta con montos 60 y 41.80 (o 40 s/ subtotal)
+    pagos = db_session.query(PagoVenta).filter(PagoVenta.venta_id == venta.id).order_by(PagoVenta.orden.asc()).all()
+    assert len(pagos) == 2
+    assert pagos[0].forma_pago == "Divisa"
+    assert Decimal(str(pagos[0].monto_usd)) == Decimal("60.00")
+    assert pagos[0].orden == 1
+
+    assert pagos[1].forma_pago == "Cashea"
+    # total_factura ($101.80) - inicial ($60.00) = $41.80
+    assert Decimal(str(pagos[1].monto_usd)) == Decimal("41.80")
+    assert pagos[1].orden == 2
+
+
+def test_factura_cashea_con_inicial_pago_movil_sin_igtf(test_client, db_session):
+    """
+    Test Cashea con inicial en PagoMovil o Efectivo (moneda nacional):
+    - metodo_pago="Cashea", metodo_pago_inicial="PagoMovil", monto_inicial_usd=50.00
+    - IGTF debe ser $0.00 porque el inicial no es Divisa y Cashea no genera IGTF.
+    """
+    prod = Producto(
+        id=902,
+        tenant_id=test_client.tenant_a_id,
+        sku="PROD-CASHEA-PM",
+        nombre="Producto Cashea PM",
+        precio_usd=Decimal("100.00"),
+        costo_usd=Decimal("50.00"),
+        stock=Decimal("10.00"),
+        es_exento=True
+    )
+    stock_alm = StockPorAlmacen(
+        tenant_id=test_client.tenant_a_id,
+        producto_id=902,
+        almacen_id=1,
+        cantidad=Decimal("10.00")
+    )
+    db_session.add_all([prod, stock_alm])
+    db_session.commit()
+
+    payload = {
+        "cliente_id": "10",
+        "metodo_pago": "Cashea",
+        "metodo_pago_inicial": "PagoMovil",
+        "monto_inicial_usd": 50.00,
+        "moneda_documento": "BIMONETARIO",
+        "detalles": [
+            {
+                "producto_id": 902,
+                "cantidad": 1.0,
+                "precio_unitario": 100.00,
+                "es_exento": True
+            }
+        ]
+    }
+
+    res = test_client.post("/v1/facturacion/emitir", json=payload)
+    assert res.status_code == 201, res.text
+    data = res.json()
+    assert data["monto_igtf"] == 0.00
+    assert data["monto_total"] == 100.00
+
+    venta = db_session.query(Venta).filter(Venta.id == data["id"]).first()
+    pagos = db_session.query(PagoVenta).filter(PagoVenta.venta_id == venta.id).order_by(PagoVenta.orden.asc()).all()
+    assert len(pagos) == 2
+    assert pagos[0].forma_pago == "PagoMovil"
+    assert Decimal(str(pagos[0].monto_usd)) == Decimal("50.00")
+    assert pagos[1].forma_pago == "Cashea"
+    assert Decimal(str(pagos[1].monto_usd)) == Decimal("50.00")
+
+
+def test_factura_cashea_validaciones_monto_inicial(test_client, db_session):
+    """
+    Validaciones de Cashea:
+    - Inicial faltante -> 400
+    - Inicial negativo -> 400 / 422
+    - Inicial mayor al total -> 400
+    """
+    prod = Producto(
+        id=903,
+        tenant_id=test_client.tenant_a_id,
+        sku="PROD-CASHEA-VAL",
+        nombre="Producto Cashea Val",
+        precio_usd=Decimal("50.00"),
+        costo_usd=Decimal("20.00"),
+        stock=Decimal("10.00"),
+        es_exento=True
+    )
+    stock_alm = StockPorAlmacen(
+        tenant_id=test_client.tenant_a_id,
+        producto_id=903,
+        almacen_id=1,
+        cantidad=Decimal("10.00")
+    )
+    db_session.add_all([prod, stock_alm])
+    db_session.commit()
+
+    # 1. Sin metodo_pago_inicial
+    res1 = test_client.post("/v1/facturacion/emitir", json={
+        "cliente_id": "10",
+        "metodo_pago": "Cashea",
+        "monto_inicial_usd": 20.00,
+        "detalles": [{"producto_id": 903, "cantidad": 1.0, "precio_unitario": 50.00, "es_exento": True}]
+    })
+    assert res1.status_code == 400
+    assert "Para pagos con Cashea debe indicar" in res1.json()["detail"]
+
+    # 2. Inicial mayor al total
+    res2 = test_client.post("/v1/facturacion/emitir", json={
+        "cliente_id": "10",
+        "metodo_pago": "Cashea",
+        "metodo_pago_inicial": "Efectivo",
+        "monto_inicial_usd": 150.00,
+        "detalles": [{"producto_id": 903, "cantidad": 1.0, "precio_unitario": 50.00, "es_exento": True}]
+    })
+    assert res2.status_code == 400
+    assert "no puede ser mayor al total" in res2.json()["detail"]
+
+
+def test_factura_divisa_normal_sigue_igual(test_client, db_session):
+    """
+    Chequeo crítico #3: Venta con metodo_pago="Divisa" (sin Cashea) funciona
+    exactamente igual que antes, aplicando IGTF 3% sobre la base imponible completa.
+    No debe crear filas en pagos_venta.
+    """
+    prod = Producto(
+        id=904,
+        tenant_id=test_client.tenant_a_id,
+        sku="PROD-DIVISA-STD",
+        nombre="Producto Divisa Estandar",
+        precio_usd=Decimal("100.00"),
+        costo_usd=Decimal("50.00"),
+        stock=Decimal("10.00"),
+        es_exento=True
+    )
+    stock_alm = StockPorAlmacen(
+        tenant_id=test_client.tenant_a_id,
+        producto_id=904,
+        almacen_id=1,
+        cantidad=Decimal("10.00")
+    )
+    db_session.add_all([prod, stock_alm])
+    db_session.commit()
+
+    payload = {
+        "cliente_id": "10",
+        "metodo_pago": "Divisa",
+        "moneda_documento": "BIMONETARIO",
+        "detalles": [
+            {
+                "producto_id": 904,
+                "cantidad": 1.0,
+                "precio_unitario": 100.00,
+                "es_exento": True
+            }
+        ]
+    }
+
+    res = test_client.post("/v1/facturacion/emitir", json=payload)
+    assert res.status_code == 201, res.text
+    data = res.json()
+
+    # IGTF del 3% sobre $100.00 = $3.00
+    assert data["monto_igtf"] == 3.00
+    assert data["monto_total"] == 103.00
+
+    venta = db_session.query(Venta).filter(Venta.id == data["id"]).first()
+    assert venta.metodo_pago == "Divisa"
+    assert Decimal(str(venta.igtf_usd)) == Decimal("3.00")
+
+    # Para ventas normales NO se usa la tabla pagos_venta
+    pagos = db_session.query(PagoVenta).filter(PagoVenta.venta_id == venta.id).all()
+    assert len(pagos) == 0
+
 

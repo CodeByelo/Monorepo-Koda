@@ -8,7 +8,7 @@ from typing import Optional, List
 
 from backend.core.database import get_db
 from backend.models.operations import (
-    Venta, Cliente, Proveedor, Producto, VentaDetalle, KardexMovimiento, EvaluacionProveedor
+    Venta, Cliente, Proveedor, Producto, VentaDetalle, KardexMovimiento, EvaluacionProveedor, PagoVenta
 )
 from backend.models.erp_extended import (
     Compra, CuentaPorCobrar, CuentaPorPagar, CuentaBancaria, MovimientoBancario,
@@ -156,9 +156,28 @@ def descargar_factura_pdf(
 
     c.drawString(50, alto - 148, f"Razón Social: {cliente_nombre}")
     c.drawString(50, alto - 162, f"R.I.F. / C.I.: {cliente_rif}")
-    c.drawString(50, alto - 176, f"Método de Pago: {metodo_pago}")
-    if not es_solo_bolivares:
-        c.drawString(50, alto - 190, f"Tasa de Cambio: Bs. {tasa_val:,.2f}")
+    if venta.metodo_pago == "Cashea":
+        pagos_lista = (
+            db.query(PagoVenta)
+            .filter(PagoVenta.venta_id == venta.id)
+            .order_by(PagoVenta.orden.asc())
+            .all()
+        )
+        pago_inicial = next((p for p in pagos_lista if p.orden == 1), None)
+        pago_cashea = next((p for p in pagos_lista if p.orden == 2), None)
+        if pago_inicial and pago_cashea:
+            c.drawString(50, alto - 176, f"Forma de Pago (Inicial): {pago_inicial.forma_pago} — ${float(pago_inicial.monto_usd):.2f}")
+            c.drawString(50, alto - 190, f"Forma de Pago: Cashea — ${float(pago_cashea.monto_usd):.2f}")
+            if not es_solo_bolivares:
+                c.drawString(50, alto - 204, f"Tasa de Cambio: Bs. {tasa_val:,.2f}")
+        else:
+            c.drawString(50, alto - 176, f"Método de Pago: {metodo_pago}")
+            if not es_solo_bolivares:
+                c.drawString(50, alto - 190, f"Tasa de Cambio: Bs. {tasa_val:,.2f}")
+    else:
+        c.drawString(50, alto - 176, f"Método de Pago: {metodo_pago}")
+        if not es_solo_bolivares:
+            c.drawString(50, alto - 190, f"Tasa de Cambio: Bs. {tasa_val:,.2f}")
     
     # Tabla de Detalles
     c.line(50, alto - 210, ancho - 50, alto - 210)
@@ -500,10 +519,31 @@ def descargar_ticket_pdf(
     y -= 8
 
     # --- Método de Pago Registrado ---
-    metodo = venta.metodo_pago or "Efectivo"
-    c.setFont("Helvetica-Bold", 8)
-    c.drawCentredString(ANCHO / 2, y, f"Forma de Pago: {metodo.upper()}")
-    y -= 10
+    if venta.metodo_pago == "Cashea":
+        pagos_lista = (
+            db.query(PagoVenta)
+            .filter(PagoVenta.venta_id == venta.id)
+            .order_by(PagoVenta.orden.asc())
+            .all()
+        )
+        pago_inicial = next((p for p in pagos_lista if p.orden == 1), None)
+        pago_cashea = next((p for p in pagos_lista if p.orden == 2), None)
+        if pago_inicial and pago_cashea:
+            c.setFont("Helvetica-Bold", 8)
+            c.drawCentredString(ANCHO / 2, y, f"Forma de Pago (Inicial): {pago_inicial.forma_pago} — ${float(pago_inicial.monto_usd):.2f}")
+            y -= 10
+            c.drawCentredString(ANCHO / 2, y, f"Forma de Pago: Cashea — ${float(pago_cashea.monto_usd):.2f}")
+            y -= 10
+        else:
+            metodo = venta.metodo_pago or "Efectivo"
+            c.setFont("Helvetica-Bold", 8)
+            c.drawCentredString(ANCHO / 2, y, f"Forma de Pago: {metodo.upper()}")
+            y -= 10
+    else:
+        metodo = venta.metodo_pago or "Efectivo"
+        c.setFont("Helvetica-Bold", 8)
+        c.drawCentredString(ANCHO / 2, y, f"Forma de Pago: {metodo.upper()}")
+        y -= 10
     c.line(4 * mm, y + 2, ANCHO - 4 * mm, y + 2)
     y -= 8
 
@@ -735,6 +775,8 @@ def facturar_cotizacion(
             dias_credito=0,
             vendedor_id=None,
             almacen_id=almacen_venta_id,
+            metodo_pago_inicial=req_body.metodo_pago_inicial,
+            monto_inicial_usd=req_body.monto_inicial_usd,
         )
 
         # 7. Actualizar cotización y registrar auditoría

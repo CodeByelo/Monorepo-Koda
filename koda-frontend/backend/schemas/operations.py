@@ -74,9 +74,16 @@ class VentaDetalleResponse(BaseModel):
 # ESQUEMAS PARA VENTA
 # ==========================================
 
+class PagoVentaResponse(BaseModel):
+    forma_pago: str
+    monto_usd: Decimal
+    orden: int
+
+    model_config = ConfigDict(from_attributes=True)
+
 class VentaCreate(BaseModel):
     cliente_id: int
-    metodo_pago: str = Field(..., pattern="^(Efectivo|Divisa|Transferencia|PagoMovil)$")
+    metodo_pago: str = Field(..., pattern="^(Efectivo|Divisa|Transferencia|PagoMovil|Cashea)$")
     moneda_pago: str = Field(..., pattern="^(Bs|USD)$")
     dias_credito: int = Field(default=0, ge=0)
     detalles: List[VentaDetalleCreate] = Field(..., min_length=1)
@@ -85,6 +92,8 @@ class VentaCreate(BaseModel):
     pago_movil_cedula: Optional[str] = None
     pago_movil_telefono: Optional[str] = None
     pago_movil_referencia: Optional[str] = None
+    metodo_pago_inicial: Optional[str] = Field(default=None, pattern="^(Efectivo|Divisa|Transferencia|PagoMovil)$")
+    monto_inicial_usd: Optional[Decimal] = Field(default=None, ge=0, decimal_places=2)
 
 class FacturaDetalleRequest(BaseModel):
     producto_id: Union[str, int]
@@ -95,7 +104,7 @@ class FacturaDetalleRequest(BaseModel):
 
 class FacturaEmisionRequest(BaseModel):
     cliente_id: Union[str, int]
-    metodo_pago: str = Field(..., pattern="^(Efectivo|Divisa|Transferencia|PagoMovil)$")
+    metodo_pago: str = Field(..., pattern="^(Efectivo|Divisa|Transferencia|PagoMovil|Cashea)$")
     aplica_igtf: Optional[bool] = None
     eximir_igtf: Optional[bool] = False
     aplica_iva: Optional[bool] = True
@@ -111,6 +120,8 @@ class FacturaEmisionRequest(BaseModel):
     pago_movil_cedula: Optional[str] = None
     pago_movil_telefono: Optional[str] = None
     pago_movil_referencia: Optional[str] = None
+    metodo_pago_inicial: Optional[str] = Field(default=None, pattern="^(Efectivo|Divisa|Transferencia|PagoMovil)$")
+    monto_inicial_usd: Optional[Decimal] = Field(default=None, ge=0, decimal_places=2)
 
 class VentaResponse(BaseModel):
     id: int
@@ -131,6 +142,7 @@ class VentaResponse(BaseModel):
     pago_movil_cedula: Optional[str] = None
     pago_movil_telefono: Optional[str] = None
     pago_movil_referencia: Optional[str] = None
+    pagos: Optional[List[PagoVentaResponse]] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -225,7 +237,9 @@ class CotizacionStatusUpdate(BaseModel):
     estado: str = Field(..., min_length=1)
 
 class FacturarCotizacionRequest(BaseModel):
-    metodo_pago: str = Field(default="Transferencia", pattern="^(Efectivo|Divisa|Transferencia|PagoMovil)$")
+    metodo_pago: str = Field(default="Transferencia", pattern="^(Efectivo|Divisa|Transferencia|PagoMovil|Cashea)$")
+    metodo_pago_inicial: Optional[str] = Field(default=None, pattern="^(Efectivo|Divisa|Transferencia|PagoMovil)$")
+    monto_inicial_usd: Optional[Decimal] = Field(default=None, ge=0, decimal_places=2)
 
 # ==========================================
 # ESQUEMAS PARA NOTAS DE ENTREGA (REMISIONES)

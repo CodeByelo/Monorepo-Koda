@@ -118,6 +118,8 @@ def registrar_venta_y_cxc(
             pago_movil_cedula=venta_in.pago_movil_cedula,
             pago_movil_telefono=venta_in.pago_movil_telefono,
             pago_movil_referencia=venta_in.pago_movil_referencia,
+            metodo_pago_inicial=venta_in.metodo_pago_inicial,
+            monto_inicial_usd=venta_in.monto_inicial_usd,
         )
 
         # 4. Auditoría (mismo patrón que facturacion.py/bot_api.py: cada router
