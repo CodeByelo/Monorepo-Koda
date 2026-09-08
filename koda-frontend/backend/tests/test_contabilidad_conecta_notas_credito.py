@@ -50,8 +50,8 @@ def test_nota_credito_genera_asiento_y_actualiza_cxc(setup_db):
     tenant_id = uuid.uuid4()
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa NC Test {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa NC Test {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),
@@ -179,8 +179,8 @@ def test_nota_debito_genera_asiento_y_reabre_cxc_pagada(setup_db):
     tenant_id = uuid.uuid4()
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa ND Test {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa ND Test {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),
@@ -309,8 +309,8 @@ def test_nota_credito_rechazada_en_periodo_cerrado_y_rollback_completo(setup_db)
     tenant_id = uuid.uuid4()
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa NC Cierre {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa NC Cierre {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),

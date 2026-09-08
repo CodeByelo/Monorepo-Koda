@@ -115,8 +115,8 @@ def test_crear_venta_bot_idempotencia_con_cache_redis(client, db_session):
 
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa="Tenant Bot Test",
-        estado_licencia="ACTIVA"
+        name="Tenant Bot Test",
+        status="active"
     )
     empresa = Empresa(
         razon_social="Empresa Bot C.A.",

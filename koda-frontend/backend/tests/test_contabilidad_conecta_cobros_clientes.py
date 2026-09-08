@@ -51,8 +51,8 @@ def test_cobro_simple_banco_genera_asiento_y_movimiento(setup_db):
     tenant_id = uuid.uuid4()
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Cobro Simple {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Cobro Simple {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),
@@ -186,8 +186,8 @@ def test_cobro_mixto_efectivo_y_banco(setup_db):
     tenant_id = uuid.uuid4()
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Cobro Mixto {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Cobro Mixto {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),
@@ -311,8 +311,8 @@ def test_cobro_con_diferencia_faltante_comision(setup_db):
     tenant_id = uuid.uuid4()
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Cobro Comision {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Cobro Comision {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),
@@ -441,8 +441,8 @@ def test_cobro_sin_metodos_trata_como_efectivo(setup_db):
     tenant_id = uuid.uuid4()
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Cobro Pendiente {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Cobro Pendiente {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),
@@ -543,8 +543,8 @@ def test_cobro_rechazado_en_periodo_cerrado_y_rollback_completo(setup_db):
     tenant_id = uuid.uuid4()
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Cierre Cobro {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Cierre Cobro {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),
@@ -666,8 +666,8 @@ def test_cobro_metodo_bolivares_convierte_a_usd_correctamente(setup_db):
     tenant_id = uuid.uuid4()
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Cobro Bolivares {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Cobro Bolivares {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),

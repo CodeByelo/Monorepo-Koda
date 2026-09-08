@@ -27,8 +27,8 @@ def test_asiento_rechazado_en_periodo_cerrado(setup_db):
     tenant_id = uuid.uuid4()
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Cierre Test {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Cierre Test {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),
@@ -106,8 +106,8 @@ def test_ciclo_completo_cierre_y_reapertura_periodo(setup_db):
     tenant_id = uuid.uuid4()
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Ciclo Cierre {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Ciclo Cierre {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),
@@ -207,8 +207,8 @@ def test_balance_comprobacion_cuadra_matematicamente(setup_db):
     tenant_id = uuid.uuid4()
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Balance {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Balance {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),

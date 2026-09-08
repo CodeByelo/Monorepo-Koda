@@ -50,8 +50,8 @@ def test_pago_individual_cxp_genera_asiento_contable(setup_db):
     tenant_id = uuid.uuid4()
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Pago Individual {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Pago Individual {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),
@@ -174,8 +174,8 @@ def test_pago_por_lote_genera_un_solo_asiento_por_el_total(setup_db):
     tenant_id = uuid.uuid4()
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Pago Lote {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Pago Lote {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),
@@ -318,8 +318,8 @@ def test_pago_rechazado_en_periodo_cerrado_y_rollback_completo(setup_db):
     tenant_id = uuid.uuid4()
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Cierre Pago {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Cierre Pago {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),

@@ -29,8 +29,8 @@ def _crear_ambiente_cotizacion(db):
     tenant_id = uuid.uuid4()
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Cotizacion {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Cotizacion {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     db.add(tenant)
     db.flush()

@@ -63,18 +63,16 @@ current_tenant_id_var = contextvars.ContextVar("current_tenant_id", default=None
 
 @event.listens_for(Session, "do_orm_execute")
 def _add_tenant_filter(execute_state):
-    # Only intercept SELECTs and simple statements (not relationships or column loads directly if not needed,
-    # but with_loader_criteria automatically handles the depth)
+    # Only intercept SELECTs, UPDATEs, and DELETEs
     if execute_state.is_select or execute_state.is_update or execute_state.is_delete:
         tenant_id = current_tenant_id_var.get()
         if tenant_id:
             # Applies to any class mapped to Base that has the tenant_id attribute
-            # We explicitly exclude Profile, Organization and other global tables from filtering here 
-            # if we wanted to, but the lambda conditional check is safer:
+            # We explicitly exclude Profile, Organization, and Tenant from automatic tenant filtering
             execute_state.statement = execute_state.statement.options(
                 with_loader_criteria(
                     Base,
-                    lambda cls: cls.tenant_id == tenant_id if hasattr(cls, 'tenant_id') and cls.__name__ not in ('Profile', 'Organization') else True,
+                    lambda cls: cls.tenant_id == tenant_id if hasattr(cls, 'tenant_id') and cls.__name__ not in ('Profile', 'Organization', 'Tenant') else True,
                     include_aliases=True,
                     track_closure_variables=False
                 )
@@ -84,13 +82,12 @@ from sqlalchemy.orm import Mapper
 @event.listens_for(Mapper, "before_insert")
 @event.listens_for(Mapper, "before_update")
 def receive_before_insert_update(mapper, connection, target):
-    if hasattr(target, 'tenant_id') and target.__class__.__name__ not in ('Profile', 'Organization'):
-        # Only overwrite or set if it's currently None, or always enforce it?
-        # Always enforce it to be secure, or just set if None.
-        # Actually, let's enforce it securely to prevent tenant spoofing.
-        tenant_id = current_tenant_id_var.get()
-        if tenant_id:
-            target.tenant_id = tenant_id
+    if hasattr(target, 'tenant_id') and target.__class__.__name__ not in ('Profile', 'Organization', 'Tenant'):
+        # Only assign from ContextVar if tenant_id was not explicitly provided on the model instance
+        if getattr(target, 'tenant_id', None) is None:
+            tenant_id = current_tenant_id_var.get()
+            if tenant_id:
+                target.tenant_id = tenant_id
 
 # Dependencia (Dependency) para obtener la sesión de la base de datos en los endpoints de FastAPI
 def get_db():
@@ -99,3 +96,4 @@ def get_db():
         yield db
     finally:
         db.close()
+        current_tenant_id_var.set(None)

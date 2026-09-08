@@ -26,8 +26,8 @@ def test_actualizar_control_compra_persiste_sin_crashear(setup_db):
     tenant_id = uuid.uuid4()
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Control Compra {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Control Compra {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),
@@ -106,8 +106,8 @@ def test_actualizar_control_compra_rechaza_vacio(setup_db):
     tenant_id = uuid.uuid4()
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Control Vacio {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Control Vacio {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),

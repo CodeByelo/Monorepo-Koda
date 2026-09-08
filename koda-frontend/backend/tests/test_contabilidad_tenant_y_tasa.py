@@ -26,8 +26,8 @@ def test_crear_asiento_usa_tasa_actual_no_hardcoded(setup_db):
     tenant_id = uuid.uuid4()
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Test {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Test {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),
@@ -110,13 +110,13 @@ def test_matriz_integracion_aislamiento_multi_tenant(setup_db):
 
     tenant_obj_a = Organization(
         id=tenant_a,
-        nombre_empresa=f"Empresa A {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa A {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     tenant_obj_b = Organization(
         id=tenant_b,
-        nombre_empresa=f"Empresa B {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa B {uuid.uuid4().hex[:6]}",
+        status="active"
     )
 
     user_a = Profile(

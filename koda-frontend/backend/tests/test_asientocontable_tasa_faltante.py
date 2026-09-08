@@ -47,8 +47,8 @@ def _create_tenant_and_admin(db, name_prefix="TasaFaltante"):
     tenant_id = uuid.uuid4()
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"{name_prefix} {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"{name_prefix} {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),

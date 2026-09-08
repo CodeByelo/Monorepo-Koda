@@ -323,6 +323,16 @@ async def rate_limit_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def reset_tenant_context_middleware(request: Request, call_next):
+    """Garantiza que el contexto de tenant (ContextVar) se limpie al finalizar cada request."""
+    from backend.core.database import current_tenant_id_var
+    try:
+        return await call_next(request)
+    finally:
+        current_tenant_id_var.set(None)
+
+
 
 app.add_middleware(
     CORSMiddleware,

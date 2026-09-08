@@ -25,8 +25,8 @@ def _crear_ambiente_cierre(db, rol="Admin"):
     tenant_id = uuid.uuid4()
     tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Auditoria Cierre {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Auditoria Cierre {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     rol_id_map = {"Admin": 2, "Gerente": 5, "Vendedor": 3}
     user = Profile(
