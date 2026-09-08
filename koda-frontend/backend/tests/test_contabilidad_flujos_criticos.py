@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.core.database import SessionLocal, Base, engine
-from backend.models.core import Profile, TasaCambio, Tenant
+from backend.models.core import Profile, TasaCambio, Organization
 from backend.models.accounting import AsientoContable, AsientoDetalle, CierrePeriodo
 from backend.models.erp_extended import CuentaContable
 from backend.core.security import get_current_user
@@ -25,10 +25,10 @@ def test_asiento_rechazado_en_periodo_cerrado(setup_db):
     """1. Un asiento no se puede crear en un período ya cerrado."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Cierre Test {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Cierre Test {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),
@@ -95,7 +95,7 @@ def test_asiento_rechazado_en_periodo_cerrado(setup_db):
     db.query(CierrePeriodo).filter(CierrePeriodo.tenant_id == tenant_id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -104,10 +104,10 @@ def test_ciclo_completo_cierre_y_reapertura_periodo(setup_db):
     """2. Ciclo completo de cierre de período (ejecutar, historial, bloqueo y reapertura)."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Ciclo Cierre {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Ciclo Cierre {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),
@@ -196,7 +196,7 @@ def test_ciclo_completo_cierre_y_reapertura_periodo(setup_db):
     db.query(CierrePeriodo).filter(CierrePeriodo.tenant_id == tenant_id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -205,10 +205,10 @@ def test_balance_comprobacion_cuadra_matematicamente(setup_db):
     """3. El balance de comprobación cuadra matemáticamente."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Balance {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Balance {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),
@@ -306,7 +306,7 @@ def test_balance_comprobacion_cuadra_matematicamente(setup_db):
     db.query(CuentaContable).filter(CuentaContable.tenant_id == tenant_id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -317,7 +317,7 @@ def test_aislamiento_multitenant_asientos_y_balance(setup_db):
 
     # Tenant A
     tenant_a_id = uuid.uuid4()
-    tenant_a = Tenant(id=tenant_a_id, nombre_empresa="Tenant A Contabilidad", estado_licencia="ACTIVA")
+    tenant_a = Organization(id=tenant_a_id, name="Tenant A Contabilidad", status="active")
     user_a = Profile(
         id=uuid.uuid4(),
         username=f"user_a_{uuid.uuid4().hex[:6]}",
@@ -342,7 +342,7 @@ def test_aislamiento_multitenant_asientos_y_balance(setup_db):
 
     # Tenant B
     tenant_b_id = uuid.uuid4()
-    tenant_b = Tenant(id=tenant_b_id, nombre_empresa="Tenant B Contabilidad", estado_licencia="ACTIVA")
+    tenant_b = Organization(id=tenant_b_id, name="Tenant B Contabilidad", status="active")
     user_b = Profile(
         id=uuid.uuid4(),
         username=f"user_b_{uuid.uuid4().hex[:6]}",
@@ -437,7 +437,7 @@ def test_aislamiento_multitenant_asientos_y_balance(setup_db):
     db.query(CuentaContable).filter(CuentaContable.tenant_id.in_([tenant_a_id, tenant_b_id])).delete(synchronize_session=False)
     db.query(TasaCambio).filter(TasaCambio.tenant_id.in_([tenant_a_id, tenant_b_id])).delete(synchronize_session=False)
     db.query(Profile).filter(Profile.id.in_([user_a.id, user_b.id])).delete(synchronize_session=False)
-    db.query(Tenant).filter(Tenant.id.in_([tenant_a_id, tenant_b_id])).delete(synchronize_session=False)
+    db.query(Organization).filter(Organization.id.in_([tenant_a_id, tenant_b_id])).delete(synchronize_session=False)
     db.commit()
     db.close()
 
@@ -448,7 +448,7 @@ def test_cierre_periodo_aislado_por_tenant(setup_db):
 
     # Tenant 1
     tenant_1_id = uuid.uuid4()
-    tenant_1 = Tenant(id=tenant_1_id, nombre_empresa="Tenant 1 Cierre", estado_licencia="ACTIVA")
+    tenant_1 = Organization(id=tenant_1_id, name="Tenant 1 Cierre", status="active")
     user_1 = Profile(
         id=uuid.uuid4(),
         username=f"user_1_{uuid.uuid4().hex[:6]}",
@@ -465,7 +465,7 @@ def test_cierre_periodo_aislado_por_tenant(setup_db):
 
     # Tenant 2
     tenant_2_id = uuid.uuid4()
-    tenant_2 = Tenant(id=tenant_2_id, nombre_empresa="Tenant 2 Cierre", estado_licencia="ACTIVA")
+    tenant_2 = Organization(id=tenant_2_id, name="Tenant 2 Cierre", status="active")
     user_2 = Profile(
         id=uuid.uuid4(),
         username=f"user_2_{uuid.uuid4().hex[:6]}",
@@ -507,7 +507,7 @@ def test_cierre_periodo_aislado_por_tenant(setup_db):
     # Cleanup
     db.query(CierrePeriodo).filter(CierrePeriodo.tenant_id.in_([tenant_1_id, tenant_2_id])).delete(synchronize_session=False)
     db.query(Profile).filter(Profile.id.in_([user_1.id, user_2.id])).delete(synchronize_session=False)
-    db.query(Tenant).filter(Tenant.id.in_([tenant_1_id, tenant_2_id])).delete(synchronize_session=False)
+    db.query(Organization).filter(Organization.id.in_([tenant_1_id, tenant_2_id])).delete(synchronize_session=False)
     db.commit()
     db.close()
 

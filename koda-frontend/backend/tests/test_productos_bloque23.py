@@ -20,7 +20,7 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.exc import IntegrityError as SAIntegrityError
 
 from backend.core.database import Base, get_db
-from backend.models.core import Tenant, Profile
+from backend.models.core import Organization, Profile
 from backend.models.operations import Producto
 from backend.core.security import get_current_user
 from backend.services.auth import get_current_user_from_token
@@ -54,7 +54,7 @@ def db_session(test_engine):
 @pytest.fixture(scope="function")
 def test_setup(db_session):
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa="Tenant Productos")
+    tenant = Organization(id=tenant_id, name="Tenant Productos", status="active")
     user = Profile(
         id=uuid.uuid4(),
         tenant_id=tenant_id,

@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.core.database import SessionLocal, Base, engine
-from backend.models.core import Profile, TasaCambio, Tenant
+from backend.models.core import Profile, TasaCambio, Organization
 from backend.models.operations import Cliente, Proveedor
 from backend.models.erp_extended import (
     CuentaPorCobrar, CuentaPorPagar, CuentaBancaria, MovimientoBancario,
@@ -50,7 +50,7 @@ def _seed_cuentas_contables(db, tenant_id):
 
 def _create_tenant_and_user(db, name_prefix="Test"):
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa=f"{name_prefix} {uuid.uuid4().hex[:6]}", estado_licencia="ACTIVA")
+    tenant = Organization(id=tenant_id, name=f"{name_prefix} {uuid.uuid4().hex[:6]}", status="active")
     user = Profile(
         id=uuid.uuid4(),
         username=f"user_{uuid.uuid4().hex[:6]}",
@@ -160,7 +160,7 @@ def test_transferencias_internas_crud_confirmar_and_multitenant(setup_db):
     db.query(TransferenciaTesoreria).filter(TransferenciaTesoreria.tenant_id.in_([tenant_a.id, tenant_b.id])).delete()
     db.query(CuentaBancaria).filter(CuentaBancaria.tenant_id.in_([tenant_a.id, tenant_b.id])).delete()
     db.query(Profile).filter(Profile.id.in_([user_a.id, user_b.id])).delete()
-    db.query(Tenant).filter(Tenant.id.in_([tenant_a.id, tenant_b.id])).delete()
+    db.query(Organization).filter(Organization.id.in_([tenant_a.id, tenant_b.id])).delete()
     db.commit()
     db.close()
 
@@ -194,7 +194,7 @@ def test_obtener_cuentas_bancarias_and_multitenant(setup_db):
     # Cleanup
     db.query(CuentaBancaria).filter(CuentaBancaria.tenant_id.in_([tenant_a.id, tenant_b.id])).delete()
     db.query(Profile).filter(Profile.id.in_([user_a.id, user_b.id])).delete()
-    db.query(Tenant).filter(Tenant.id.in_([tenant_a.id, tenant_b.id])).delete()
+    db.query(Organization).filter(Organization.id.in_([tenant_a.id, tenant_b.id])).delete()
     db.commit()
     db.close()
 
@@ -282,7 +282,7 @@ def test_flujo_caja_alias_and_multitenant(setup_db):
     db.query(Cliente).filter(Cliente.tenant_id.in_([tenant_a.id, tenant_b.id])).delete()
     db.query(Proveedor).filter(Proveedor.tenant_id.in_([tenant_a.id, tenant_b.id])).delete()
     db.query(Profile).filter(Profile.id.in_([user_a.id, user_b.id])).delete()
-    db.query(Tenant).filter(Tenant.id.in_([tenant_a.id, tenant_b.id])).delete()
+    db.query(Organization).filter(Organization.id.in_([tenant_a.id, tenant_b.id])).delete()
     db.commit()
     db.close()
 
@@ -343,7 +343,7 @@ def test_auditoria_turnos_and_multitenant(setup_db):
     # Cleanup
     db.query(AuditoriaLog).filter(AuditoriaLog.tenant_id.in_([tenant_a.id, tenant_b.id])).delete()
     db.query(Profile).filter(Profile.id.in_([user_a.id, user_b.id])).delete()
-    db.query(Tenant).filter(Tenant.id.in_([tenant_a.id, tenant_b.id])).delete()
+    db.query(Organization).filter(Organization.id.in_([tenant_a.id, tenant_b.id])).delete()
     db.commit()
     db.close()
 
@@ -396,7 +396,7 @@ def test_prestamos_uvc_crud_and_multitenant(setup_db):
     db.query(PrestamoUVC).filter(PrestamoUVC.tenant_id.in_([tenant_a.id, tenant_b.id])).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id.in_([tenant_a.id, tenant_b.id])).delete()
     db.query(Profile).filter(Profile.id.in_([user_a.id, user_b.id])).delete()
-    db.query(Tenant).filter(Tenant.id.in_([tenant_a.id, tenant_b.id])).delete()
+    db.query(Organization).filter(Organization.id.in_([tenant_a.id, tenant_b.id])).delete()
     db.commit()
     db.close()
 
@@ -459,7 +459,7 @@ def test_presupuesto_y_desviacion_and_multitenant(setup_db):
     # Cleanup
     db.query(PresupuestoPartida).filter(PresupuestoPartida.tenant_id.in_([tenant_a.id, tenant_b.id])).delete()
     db.query(Profile).filter(Profile.id.in_([user_a.id, user_b.id])).delete()
-    db.query(Tenant).filter(Tenant.id.in_([tenant_a.id, tenant_b.id])).delete()
+    db.query(Organization).filter(Organization.id.in_([tenant_a.id, tenant_b.id])).delete()
     db.commit()
     db.close()
 
@@ -512,7 +512,7 @@ def test_inversiones_crud_resumen_y_exportar_and_multitenant(setup_db):
     # Cleanup
     db.query(ColocacionInversion).filter(ColocacionInversion.tenant_id.in_([tenant_a.id, tenant_b.id])).delete()
     db.query(Profile).filter(Profile.id.in_([user_a.id, user_b.id])).delete()
-    db.query(Tenant).filter(Tenant.id.in_([tenant_a.id, tenant_b.id])).delete()
+    db.query(Organization).filter(Organization.id.in_([tenant_a.id, tenant_b.id])).delete()
     db.commit()
     db.close()
 
@@ -597,7 +597,7 @@ def test_importar_extracto_bancario_and_multitenant(setup_db):
     db.query(CuentaBancaria).filter(CuentaBancaria.tenant_id.in_([tenant_a.id, tenant_b.id])).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id.in_([tenant_a.id, tenant_b.id])).delete()
     db.query(Profile).filter(Profile.id.in_([user_a.id, user_b.id])).delete()
-    db.query(Tenant).filter(Tenant.id.in_([tenant_a.id, tenant_b.id])).delete()
+    db.query(Organization).filter(Organization.id.in_([tenant_a.id, tenant_b.id])).delete()
     db.commit()
     db.close()
 
@@ -653,7 +653,7 @@ def test_movimientos_caja_crud_and_multitenant(setup_db):
     db.query(MovimientoBancario).filter(MovimientoBancario.tenant_id.in_([tenant_a.id, tenant_b.id])).delete()
     db.query(CuentaBancaria).filter(CuentaBancaria.tenant_id.in_([tenant_a.id, tenant_b.id])).delete()
     db.query(Profile).filter(Profile.id.in_([user_a.id, user_b.id])).delete()
-    db.query(Tenant).filter(Tenant.id.in_([tenant_a.id, tenant_b.id])).delete()
+    db.query(Organization).filter(Organization.id.in_([tenant_a.id, tenant_b.id])).delete()
     db.commit()
     db.close()
 
@@ -723,6 +723,6 @@ def test_estado_cuenta_cliente_and_multitenant(setup_db):
     db.query(TasaCambio).filter(TasaCambio.tenant_id.in_([tenant_a.id, tenant_b.id])).delete()
     db.query(Cliente).filter(Cliente.tenant_id.in_([tenant_a.id, tenant_b.id])).delete()
     db.query(Profile).filter(Profile.id.in_([user_a.id, user_b.id])).delete()
-    db.query(Tenant).filter(Tenant.id.in_([tenant_a.id, tenant_b.id])).delete()
+    db.query(Organization).filter(Organization.id.in_([tenant_a.id, tenant_b.id])).delete()
     db.commit()
     db.close()

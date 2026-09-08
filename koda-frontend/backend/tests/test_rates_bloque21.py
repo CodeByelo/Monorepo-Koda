@@ -19,7 +19,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.core.database import Base, get_db
-from backend.models.core import Tenant, Profile, TasaCambio
+from backend.models.core import Organization, Profile, TasaCambio
 from backend.core.security import get_current_user, require_role
 from backend.routers.rates import router as rates_router, _tasa_cache
 
@@ -59,7 +59,7 @@ def test_client(db_session):
     app.include_router(rates_router)
 
     tenant_a_id = uuid.uuid4()
-    tenant_a = Tenant(id=tenant_a_id, nombre_empresa="Tenant Rates A")
+    tenant_a = Organization(id=tenant_a_id, name="Tenant Rates A", status="active")
 
     user_admin = Profile(
         id=uuid.uuid4(),

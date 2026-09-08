@@ -8,7 +8,7 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend.core.database import get_db
 from backend.core.security import oauth2_scheme, SECRET_KEY, ALGORITHM
-from backend.models.core import Profile, Tenant
+from backend.models.core import Profile, Tenant, Organization
 
 logger = logging.getLogger("koda_auth")
 
@@ -149,23 +149,17 @@ def get_current_user_from_token(token: str = Depends(oauth2_scheme), db: Session
             logger.warning("Tenant mismatch o tenant nulo. User: %s | Token: %s", user.tenant_id, tenant_id)
             raise credentials_exception
 
-        # Verificar estado de la licencia del Tenant
+        # Verificar estado de la licencia de la Organización (Multi-Tenant real)
         if user.tenant_id:
-            tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
-            if not tenant:
-                # Auto-provisionar registro de tenant como ACTIVA para que nunca quede bloqueado
-                tenant = Tenant(
-                    id=user.tenant_id,
-                    nombre_empresa="Empresa KODA ERP",
-                    estado_licencia="ACTIVA"
-                )
-                db.add(tenant)
-                db.commit()
-                db.refresh(tenant)
-            elif tenant.estado_licencia != "ACTIVA":
-                # Si la empresa está registrada en profiles, reactivar estado
-                tenant.estado_licencia = "ACTIVA"
-                db.commit()
+            organization = db.query(Organization).filter(Organization.id == user.tenant_id).first()
+            if not organization:
+                # Si el profile tiene un tenant_id que no existe en organizations,
+                # es un dato corrupto/huérfano, NO algo que debamos auto-reparar en silencio.
+                logger.error("Profile %s tiene tenant_id=%s que no existe en organizations.", user.id, user.tenant_id)
+                raise credentials_exception
+            if organization.status and organization.status.lower() not in ("active", "activa"):
+                logger.warning("Organización %s con status=%s, acceso bloqueado.", organization.id, organization.status)
+                raise credentials_exception
 
     # 3. Inyectar el Tenant ID globalmente (Excepto si es Dev haciendo query transversal)
     from backend.core.database import current_tenant_id_var

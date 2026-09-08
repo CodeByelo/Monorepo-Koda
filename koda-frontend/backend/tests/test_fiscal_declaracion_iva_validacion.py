@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.core.database import SessionLocal, Base, engine
-from backend.models.core import Profile, TasaCambio, Tenant
+from backend.models.core import Profile, TasaCambio, Organization
 from backend.models.erp_extended import DeclaracionIVA
 from backend.models.operations import Venta
 from backend.core.security import get_current_user
@@ -24,7 +24,7 @@ def test_borrador_periodo_invalido_da_422(setup_db):
     """1. Borrador con período inválido (no YYYY-MM) devuelve 422 y no crea DeclaracionIVA."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa=f"Empresa IVA {uuid.uuid4().hex[:6]}", estado_licencia="ACTIVA")
+    tenant = Organization(id=tenant_id, name=f"Empresa IVA {uuid.uuid4().hex[:6]}", status="active")
     user = Profile(
         id=uuid.uuid4(),
         username=f"user_{uuid.uuid4().hex[:6]}",
@@ -55,7 +55,7 @@ def test_borrador_periodo_invalido_da_422(setup_db):
 
     # Cleanup
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -64,7 +64,7 @@ def test_borrador_sin_periodo_da_422(setup_db):
     """2. Borrador sin campo período devuelve 422."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa=f"Empresa IVA {uuid.uuid4().hex[:6]}", estado_licencia="ACTIVA")
+    tenant = Organization(id=tenant_id, name=f"Empresa IVA {uuid.uuid4().hex[:6]}", status="active")
     user = Profile(
         id=uuid.uuid4(),
         username=f"user_{uuid.uuid4().hex[:6]}",
@@ -92,7 +92,7 @@ def test_borrador_sin_periodo_da_422(setup_db):
 
     # Cleanup
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -101,7 +101,7 @@ def test_borrador_retenciones_negativas_da_422(setup_db):
     """3. Borrador con retenciones negativas devuelve 422."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa=f"Empresa IVA {uuid.uuid4().hex[:6]}", estado_licencia="ACTIVA")
+    tenant = Organization(id=tenant_id, name=f"Empresa IVA {uuid.uuid4().hex[:6]}", status="active")
     user = Profile(
         id=uuid.uuid4(),
         username=f"user_{uuid.uuid4().hex[:6]}",
@@ -129,7 +129,7 @@ def test_borrador_retenciones_negativas_da_422(setup_db):
 
     # Cleanup
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -138,7 +138,7 @@ def test_borrador_payload_valido_guarda_correctamente(setup_db):
     """4. Borrador con payload válido (e ignorando campo 'data' extra) persiste exitosamente."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa=f"Empresa IVA {uuid.uuid4().hex[:6]}", estado_licencia="ACTIVA")
+    tenant = Organization(id=tenant_id, name=f"Empresa IVA {uuid.uuid4().hex[:6]}", status="active")
     user = Profile(
         id=uuid.uuid4(),
         username=f"user_{uuid.uuid4().hex[:6]}",
@@ -197,7 +197,7 @@ def test_borrador_payload_valido_guarda_correctamente(setup_db):
     db.query(DeclaracionIVA).filter(DeclaracionIVA.id == decl.id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -206,7 +206,7 @@ def test_finalizar_periodo_invalido_da_422(setup_db):
     """5. Finalizar con período inválido devuelve 422."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa=f"Empresa IVA {uuid.uuid4().hex[:6]}", estado_licencia="ACTIVA")
+    tenant = Organization(id=tenant_id, name=f"Empresa IVA {uuid.uuid4().hex[:6]}", status="active")
     user = Profile(
         id=uuid.uuid4(),
         username=f"user_{uuid.uuid4().hex[:6]}",
@@ -234,7 +234,7 @@ def test_finalizar_periodo_invalido_da_422(setup_db):
 
     # Cleanup
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -248,7 +248,7 @@ def test_finalizar_guarda_debito_credito_en_usd_reales(setup_db):
     solo cómo se guarda internamente."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa=f"Empresa IVA {uuid.uuid4().hex[:6]}", estado_licencia="ACTIVA")
+    tenant = Organization(id=tenant_id, name=f"Empresa IVA {uuid.uuid4().hex[:6]}", status="active")
     user = Profile(
         id=uuid.uuid4(),
         username=f"user_{uuid.uuid4().hex[:6]}",
@@ -323,6 +323,6 @@ def test_finalizar_guarda_debito_credito_en_usd_reales(setup_db):
     db.query(Venta).filter(Venta.tenant_id == tenant_id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()

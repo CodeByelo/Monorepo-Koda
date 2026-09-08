@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.core.database import SessionLocal, Base, engine
-from backend.models.core import Profile, TasaCambio, Tenant
+from backend.models.core import Profile, TasaCambio, Organization
 from backend.models.erp_extended import DeclaracionIVA, Empresa
 from backend.models.operations import Venta
 from backend.core.security import get_current_user
@@ -23,7 +23,7 @@ def test_pdf_muestra_mismo_monto_bs_que_antes_del_fix():
     cambiar ningun numero que el usuario final vea."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa=f"Empresa PDF {uuid.uuid4().hex[:6]}", estado_licencia="ACTIVA")
+    tenant = Organization(id=tenant_id, name=f"Empresa PDF {uuid.uuid4().hex[:6]}", status="active")
     user = Profile(
         id=uuid.uuid4(),
         username=f"user_{uuid.uuid4().hex[:6]}",
@@ -91,6 +91,6 @@ def test_pdf_muestra_mismo_monto_bs_que_antes_del_fix():
     db.query(Venta).filter(Venta.tenant_id == tenant_id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()

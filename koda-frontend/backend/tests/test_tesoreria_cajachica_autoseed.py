@@ -18,7 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.core.database import Base, get_db
-from backend.models.core import Tenant, Profile
+from backend.models.core import Organization, Profile
 from backend.models.erp_extended import FondoCajaChica, GastoCajaChica, CuentaBancaria
 from backend.core.security import get_current_user
 from backend.routers.operaciones.tesoreria import tesoreria_router
@@ -51,9 +51,9 @@ def db_session(test_engine):
 def create_mock_user(db_session, tenant_id=None):
     if not tenant_id:
         tenant_id = uuid.uuid4()
-    tenant = db_session.query(Tenant).filter(Tenant.id == tenant_id).first()
+    tenant = db_session.query(Organization).filter(Organization.id == tenant_id).first()
     if not tenant:
-        tenant = Tenant(id=tenant_id, nombre_empresa=f"Tenant {str(tenant_id)[:8]}")
+        tenant = Organization(id=tenant_id, name=f"Tenant {str(tenant_id)[:8]}", status="active")
         db_session.add(tenant)
         db_session.commit()
 
@@ -229,7 +229,7 @@ def test_delete_fondo_caja_chica_otro_tenant_devuelve_404(db_session):
     """
     user_a = create_mock_user(db_session)
     tenant_b_id = uuid.uuid4()
-    tenant_b = Tenant(id=tenant_b_id, nombre_empresa="Tenant B")
+    tenant_b = Organization(id=tenant_b_id, name="Tenant B", status="active")
 
     fondo_b = FondoCajaChica(
         id=3,

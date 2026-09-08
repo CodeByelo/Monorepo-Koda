@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.core.database import SessionLocal, Base, engine
-from backend.models.core import Profile, Tenant
+from backend.models.core import Profile, Organization
 from backend.models.accounting import CierrePeriodo
 from backend.models.erp_extended import AuditoriaLog
 from backend.core.security import get_current_user
@@ -23,10 +23,10 @@ def setup_db():
 
 def _crear_ambiente_cierre(db, rol="Admin"):
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Auditoria Cierre {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Auditoria Cierre {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     rol_id_map = {"Admin": 2, "Gerente": 5, "Vendedor": 3}
     user = Profile(

@@ -16,7 +16,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from backend.core.database import Base
-from backend.models.core import Tenant, Profile
+from backend.models.core import Organization, Profile
 from backend.models.erp_extended import Chofer, Vehiculo, TurnoDespacho, TurnoVentaAsociacion, TurnoGasto
 from backend.models.logistics_new import NotificationJob as NewNotificationJob, LogisticsPlan as NewLogisticsPlan
 from backend.routers.logistica import (
@@ -57,7 +57,7 @@ def test_bug1_pod_foto_non_blocking(db_session):
     """
     async def run_test():
         tenant_id = uuid.uuid4()
-        tenant = Tenant(id=tenant_id, nombre_empresa="Test Tenant POD")
+        tenant = Organization(id=tenant_id, name="Test Tenant POD", status="active")
         db_session.add(tenant)
         db_session.flush()
 

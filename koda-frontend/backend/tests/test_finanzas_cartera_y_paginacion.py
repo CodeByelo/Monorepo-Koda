@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.core.database import SessionLocal, Base, engine
-from backend.models.core import Profile, TasaCambio, Tenant
+from backend.models.core import Profile, TasaCambio, Organization
 from backend.models.operations import Cliente, Proveedor
 from backend.models.erp_extended import CuentaPorCobrar, CuentaPorPagar, CuentaBancaria, MovimientoBancario
 from backend.core.security import get_current_user
@@ -24,7 +24,7 @@ def test_cartera_clientes_n1_fix_and_structure(setup_db):
     """Verifica que /cobranzas/cartera retorna estructura y cálculos idénticos sin N+1."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa=f"Empresa Cartera {uuid.uuid4().hex[:6]}", estado_licencia="ACTIVA")
+    tenant = Organization(id=tenant_id, name=f"Empresa Cartera {uuid.uuid4().hex[:6]}", status="active")
     user = Profile(
         id=uuid.uuid4(),
         username=f"user_{uuid.uuid4().hex[:6]}",
@@ -120,7 +120,7 @@ def test_cartera_clientes_n1_fix_and_structure(setup_db):
     db.query(CuentaPorCobrar).filter(CuentaPorCobrar.tenant_id == tenant_id).delete()
     db.query(Cliente).filter(Cliente.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -129,7 +129,7 @@ def test_paginacion_pagos_y_tesoreria_y_cobranzas_completo(setup_db):
     """Verifica que /cobranzas/cuentas NO está paginado, /tesoreria/movimientos SÍ está paginado, y /pagos/cuentas calcula KPIs globales sobre todas las filas aunque su lista esté paginada."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa=f"Empresa Pag KPI {uuid.uuid4().hex[:6]}", estado_licencia="ACTIVA")
+    tenant = Organization(id=tenant_id, name=f"Empresa Pag KPI {uuid.uuid4().hex[:6]}", status="active")
     user = Profile(
         id=uuid.uuid4(),
         username=f"user_{uuid.uuid4().hex[:6]}",
@@ -235,6 +235,6 @@ def test_paginacion_pagos_y_tesoreria_y_cobranzas_completo(setup_db):
     db.query(Proveedor).filter(Proveedor.tenant_id == tenant_id).delete()
     db.query(Cliente).filter(Cliente.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()

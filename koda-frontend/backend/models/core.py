@@ -3,12 +3,32 @@ from datetime import datetime, timezone
 from backend.core.database import Base
 
 import uuid
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import text, func, JSON
+
+class Organization(Base):
+    """
+    Organizaciones / Empresas (Multi-Tenant).
+    Tabla maestra real en producción que gestiona los tenants y su estado de suscripción/licencia.
+    """
+    __tablename__ = "organizations"
+    __table_args__ = {'schema': 'public'}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    name = Column(String(255), nullable=False)
+    slug = Column(String(100), nullable=True)
+    status = Column(String(50), default="active", nullable=True)
+    config = Column(JSONB().with_variant(JSON, "sqlite"), nullable=True)
+    max_users = Column(Integer, default=10, nullable=True)
+    plan_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), nullable=True)
 
 class Tenant(Base):
     """
-    Maestro de Empresas (Multi-Tenant).
+    Maestro de Empresas (Multi-Tenant Legacy).
     Administra el estado y licenciamiento global de una cuenta corporativa.
+    Conservado por compatibilidad/deuda técnica histórica.
     """
     __tablename__ = "tenants"
     __table_args__ = {'schema': 'public'}
@@ -33,7 +53,7 @@ class Profile(Base):
     gerencia_id = Column(Integer)
     estado = Column(Integer, default=1)
     from sqlalchemy import ForeignKey
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey('public.tenants.id'), nullable=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey('public.organizations.id'), nullable=True)
     permisos = Column(String)
     telegram_chat_id = Column(String(50), nullable=True)
     ultima_conexion = Column(DateTime)

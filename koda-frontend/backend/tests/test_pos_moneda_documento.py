@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.core.database import SessionLocal, Base, engine
-from backend.models.core import Profile, TasaCambio, Tenant
+from backend.models.core import Profile, TasaCambio, Organization
 from backend.models.operations import Producto, Cliente, Venta
 from backend.models.erp_extended import Empresa
 from backend.models.fiscal import ReglaFiscal
@@ -23,7 +23,7 @@ def setup_db():
 
 def _crear_ambiente_facturacion(db):
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa=f"Empresa POS {uuid.uuid4().hex[:6]}", estado_licencia="ACTIVA")
+    tenant = Organization(id=tenant_id, name=f"Empresa POS {uuid.uuid4().hex[:6]}", status="active")
     db.add(tenant)
     db.flush()
 

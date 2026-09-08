@@ -18,7 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.core.database import Base, get_db
-from backend.models.core import Tenant, Profile
+from backend.models.core import Organization, Profile
 from backend.models.operations import Producto, Cliente, Venta, VentaDetalle
 from backend.models.erp_extended import Garantia
 from backend.core.security import get_current_user
@@ -56,7 +56,7 @@ def db_session(test_engine):
 def test_setup(db_session):
     """Configura ambiente con Tenant, Usuario Admin, Usuario Vendedor, Productos, Clientes y Ventas."""
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa="Tenant Garantias")
+    tenant = Organization(id=tenant_id, name="Tenant Garantias", status="active")
 
     user_admin = Profile(
         id=uuid.uuid4(),

@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.core.database import SessionLocal, Base, engine
-from backend.models.core import Profile, TasaCambio, Tenant
+from backend.models.core import Profile, TasaCambio, Organization
 from backend.models.operations import Producto, Cliente, Venta, VentaDetalle, KardexMovimiento
 from backend.models.erp_extended import (
     Empresa, Cotizacion, CotizacionItem, StockPorAlmacen, Almacen,
@@ -27,10 +27,10 @@ def setup_db():
 
 def _crear_ambiente_cotizacion(db):
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Cotizacion {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Cotizacion {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     db.add(tenant)
     db.flush()

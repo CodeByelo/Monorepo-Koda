@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.core.database import SessionLocal, Base, engine
-from backend.models.core import Profile, TasaCambio, Tenant
+from backend.models.core import Profile, TasaCambio, Organization
 from backend.core.security import get_current_user
 
 
@@ -22,7 +22,7 @@ def test_dashboard_periodo_invalido_da_400(setup_db):
     """1. Dashboard con período inválido devuelve 400 (no 500)."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa=f"Empresa Periodo {uuid.uuid4().hex[:6]}", estado_licencia="ACTIVA")
+    tenant = Organization(id=tenant_id, name=f"Empresa Periodo {uuid.uuid4().hex[:6]}", status="active")
     user = Profile(
         id=uuid.uuid4(),
         username=f"user_{uuid.uuid4().hex[:6]}",
@@ -50,7 +50,7 @@ def test_dashboard_periodo_invalido_da_400(setup_db):
 
     # Cleanup
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -59,7 +59,7 @@ def test_dashboard_mes_fuera_de_rango_da_400(setup_db):
     """2. Dashboard con mes fuera de rango (13) devuelve 400."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa=f"Empresa Mes 13 {uuid.uuid4().hex[:6]}", estado_licencia="ACTIVA")
+    tenant = Organization(id=tenant_id, name=f"Empresa Mes 13 {uuid.uuid4().hex[:6]}", status="active")
     user = Profile(
         id=uuid.uuid4(),
         username=f"user_{uuid.uuid4().hex[:6]}",
@@ -87,7 +87,7 @@ def test_dashboard_mes_fuera_de_rango_da_400(setup_db):
 
     # Cleanup
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -96,7 +96,7 @@ def test_dashboard_periodo_valido_funciona(setup_db):
     """3. Dashboard con período válido calcula calendario para el mes siguiente correspondiente."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa=f"Empresa OK {uuid.uuid4().hex[:6]}", estado_licencia="ACTIVA")
+    tenant = Organization(id=tenant_id, name=f"Empresa OK {uuid.uuid4().hex[:6]}", status="active")
     user = Profile(
         id=uuid.uuid4(),
         username=f"user_{uuid.uuid4().hex[:6]}",
@@ -138,7 +138,7 @@ def test_dashboard_periodo_valido_funciona(setup_db):
     # Cleanup
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -147,7 +147,7 @@ def test_declaracion_iva_get_periodo_invalido_da_400(setup_db):
     """4. GET /fiscal/declaracion-iva con período inválido devuelve 400 vía periodo_rango."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa=f"Empresa Decl {uuid.uuid4().hex[:6]}", estado_licencia="ACTIVA")
+    tenant = Organization(id=tenant_id, name=f"Empresa Decl {uuid.uuid4().hex[:6]}", status="active")
     user = Profile(
         id=uuid.uuid4(),
         username=f"user_{uuid.uuid4().hex[:6]}",
@@ -175,6 +175,6 @@ def test_declaracion_iva_get_periodo_invalido_da_400(setup_db):
 
     # Cleanup
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()

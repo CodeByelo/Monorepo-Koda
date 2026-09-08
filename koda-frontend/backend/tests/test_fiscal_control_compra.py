@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.core.database import SessionLocal, Base, engine
-from backend.models.core import Profile, TasaCambio, Tenant
+from backend.models.core import Profile, TasaCambio, Organization
 from backend.models.operations import Proveedor
 from backend.models.erp_extended import Compra, RetencionIVA
 from backend.core.security import get_current_user
@@ -24,10 +24,10 @@ def test_actualizar_control_compra_persiste_sin_crashear(setup_db):
     """1. Actualizar número de control persiste el nuevo valor sin crashear y sin crear RetencionIVA fantasma."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Control Compra {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Control Compra {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),
@@ -95,7 +95,7 @@ def test_actualizar_control_compra_persiste_sin_crashear(setup_db):
     db.query(Compra).filter(Compra.id == compra.id).delete()
     db.query(Proveedor).filter(Proveedor.id == proveedor.id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -104,10 +104,10 @@ def test_actualizar_control_compra_rechaza_vacio(setup_db):
     """2. Actualizar sin numero_control o con string vacío devuelve 400 y no modifica la compra."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
-        nombre_empresa=f"Empresa Control Vacio {uuid.uuid4().hex[:6]}",
-        estado_licencia="ACTIVA"
+        name=f"Empresa Control Vacio {uuid.uuid4().hex[:6]}",
+        status="active"
     )
     user = Profile(
         id=uuid.uuid4(),
@@ -169,7 +169,7 @@ def test_actualizar_control_compra_rechaza_vacio(setup_db):
     db.query(Compra).filter(Compra.id == compra.id).delete()
     db.query(Proveedor).filter(Proveedor.id == proveedor.id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -180,8 +180,8 @@ def test_actualizar_control_compra_compra_ajena_da_404(setup_db):
     tenant_a_id = uuid.uuid4()
     tenant_b_id = uuid.uuid4()
 
-    tenant_a = Tenant(id=tenant_a_id, nombre_empresa="Empresa A", estado_licencia="ACTIVA")
-    tenant_b = Tenant(id=tenant_b_id, nombre_empresa="Empresa B", estado_licencia="ACTIVA")
+    tenant_a = Organization(id=tenant_a_id, name="Empresa A", status="active")
+    tenant_b = Organization(id=tenant_b_id, name="Empresa B", status="active")
     user_a = Profile(
         id=uuid.uuid4(),
         username=f"user_a_{uuid.uuid4().hex[:6]}",
@@ -231,6 +231,6 @@ def test_actualizar_control_compra_compra_ajena_da_404(setup_db):
     db.query(Compra).filter(Compra.id == compra_b.id).delete()
     db.query(Proveedor).filter(Proveedor.id == prov_b.id).delete()
     db.query(Profile).filter(Profile.id == user_a.id).delete()
-    db.query(Tenant).filter(Tenant.id.in_([tenant_a_id, tenant_b_id])).delete()
+    db.query(Organization).filter(Organization.id.in_([tenant_a_id, tenant_b_id])).delete()
     db.commit()
     db.close()

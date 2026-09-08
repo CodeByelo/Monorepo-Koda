@@ -17,7 +17,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from backend.core.database import Base
-from backend.models.core import Tenant, Profile, TasaCambio
+from backend.models.core import Organization, Profile, TasaCambio
 from backend.models.erp_extended import CuentaPorCobrar, CuentaPorPagar, Vendedor
 from backend.models.operations import Venta, VentaDetalle, Producto, Cliente
 from backend.routers.operaciones.reportes import (
@@ -58,8 +58,8 @@ def test_bugs1_2_3_multi_tenant_tasa_cambio(db_session):
     tenant_a_id = uuid.uuid4()
     tenant_b_id = uuid.uuid4()
 
-    tenant_a = Tenant(id=tenant_a_id, nombre_empresa="Tenant A", estado_licencia="ACTIVA")
-    tenant_b = Tenant(id=tenant_b_id, nombre_empresa="Tenant B", estado_licencia="ACTIVA")
+    tenant_a = Organization(id=tenant_a_id, name="Tenant A", status="active")
+    tenant_b = Organization(id=tenant_b_id, name="Tenant B", status="active")
 
     user_a = Profile(id=uuid.uuid4(), tenant_id=tenant_a_id, rol_id=1, email="usera@test.com", username="usera", password_hash="fake")
     user_b = Profile(id=uuid.uuid4(), tenant_id=tenant_b_id, rol_id=1, email="userb@test.com", username="userb", password_hash="fake")

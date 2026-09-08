@@ -17,7 +17,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from backend.core.database import Base, get_db
-from backend.models.core import Tenant, Profile
+from backend.models.core import Organization, Profile
 from backend.models.erp_extended import Empresa, RetencionIVA, RetencionISLR
 from backend.models.operations import Proveedor
 from backend.core.security import get_current_user
@@ -59,7 +59,7 @@ def test_client(db_session):
     app.include_router(reportes_pdf_router, prefix="/fiscal")
 
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa="Empresa Fiscal Test")
+    tenant = Organization(id=tenant_id, name="Empresa Fiscal Test", status="active")
     user = Profile(
         id=uuid.uuid4(),
         tenant_id=tenant_id,

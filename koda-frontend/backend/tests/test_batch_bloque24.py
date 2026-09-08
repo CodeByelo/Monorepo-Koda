@@ -18,7 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.core.database import Base, get_db
-from backend.models.core import Tenant, Profile, TasaCambio
+from backend.models.core import Organization, Profile, TasaCambio
 from backend.core.security import get_current_user
 from backend.services.auth import get_current_user_from_token
 from backend.routers.contabilidad.cuentas import router as cuentas_router
@@ -57,7 +57,7 @@ def db_session(test_engine):
 @pytest.fixture(scope="function")
 def setup_users(db_session):
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa="Tenant B24")
+    tenant = Organization(id=tenant_id, name="Tenant B24", status="active")
 
     user_admin = Profile(
         id=uuid.uuid4(),

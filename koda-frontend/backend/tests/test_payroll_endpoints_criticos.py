@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.core.database import SessionLocal, Base, engine
-from backend.models.core import Profile, TasaCambio, Tenant
+from backend.models.core import Profile, TasaCambio, Organization
 from backend.models.hr import Empleado, Nomina, RHEmployee, RHConcept, RHPayrollPeriod, RHPayrollDetail
 from backend.models.accounting import AsientoContable, AsientoDetalle
 from backend.core.security import get_current_user
@@ -28,7 +28,7 @@ def _set_auth_override(user):
 
 def _create_tenant_and_admin(db, name_prefix="Payroll"):
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa=f"{name_prefix} {uuid.uuid4().hex[:6]}", estado_licencia="ACTIVA")
+    tenant = Organization(id=tenant_id, name=f"{name_prefix} {uuid.uuid4().hex[:6]}", status="active")
     user = Profile(
         id=uuid.uuid4(),
         username=f"admin_{uuid.uuid4().hex[:6]}",
@@ -122,7 +122,7 @@ def test_get_employees_active_profile_filter(setup_db):
     # Cleanup
     db.query(RHEmployee).filter(RHEmployee.tenant_id == tenant.id).delete()
     db.query(Profile).filter(Profile.tenant_id == tenant.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant.id).delete()
+    db.query(Organization).filter(Organization.id == tenant.id).delete()
     db.commit()
     db.close()
 
@@ -172,7 +172,7 @@ def test_bulk_save_details_new_detail_assigns_tenant_id(setup_db):
     db.query(RHPayrollPeriod).filter(RHPayrollPeriod.tenant_id == tenant.id).delete()
     db.query(RHEmployee).filter(RHEmployee.tenant_id == tenant.id).delete()
     db.query(Profile).filter(Profile.tenant_id == tenant.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant.id).delete()
+    db.query(Organization).filter(Organization.id == tenant.id).delete()
     db.commit()
     db.close()
 
@@ -237,7 +237,7 @@ def test_confirm_payroll_creates_asiento_with_tasa_cambio_bs(setup_db):
     db.query(RHEmployee).filter(RHEmployee.tenant_id == tenant.id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant.id).delete()
     db.query(Profile).filter(Profile.tenant_id == tenant.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant.id).delete()
+    db.query(Organization).filter(Organization.id == tenant.id).delete()
     db.commit()
     db.close()
 
@@ -293,7 +293,7 @@ def test_legacy_hr_procesar_nomina_asiento_tenant_id_and_tasa(setup_db):
     db.query(Empleado).filter(Empleado.tenant_id == tenant.id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant.id).delete()
     db.query(Profile).filter(Profile.tenant_id == tenant.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant.id).delete()
+    db.query(Organization).filter(Organization.id == tenant.id).delete()
     db.commit()
     db.close()
 
@@ -367,7 +367,7 @@ def test_guard_solapamiento_entre_motores_nomina(setup_db):
     db.query(Empleado).filter(Empleado.tenant_id == tenant.id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant.id).delete()
     db.query(Profile).filter(Profile.tenant_id == tenant.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant.id).delete()
+    db.query(Organization).filter(Organization.id == tenant.id).delete()
     db.commit()
     db.close()
 
