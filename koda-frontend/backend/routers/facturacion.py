@@ -200,6 +200,8 @@ def emitir_factura_fiscal(
             pago_movil_cedula=body.pago_movil_cedula,
             pago_movil_telefono=body.pago_movil_telefono,
             pago_movil_referencia=body.pago_movil_referencia,
+            metodo_pago_inicial=body.metodo_pago_inicial,
+            monto_inicial_usd=body.monto_inicial_usd,
         )
 
         now = resultado.venta.fecha

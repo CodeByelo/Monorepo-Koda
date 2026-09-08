@@ -63,11 +63,13 @@ const POS = () => {
   const [vendedores, setVendedores] = useState<any[]>([]);
   const [vendedorId, setVendedorId] = useState('');
   const [tarifa, setTarifa] = useState<Tarifa>('Detal');
-  const [metodoPago, setMetodoPago] = useState<'Efectivo' | 'Divisa' | 'Transferencia' | 'PagoMovil'>('Divisa');
+  const [metodoPago, setMetodoPago] = useState<'Efectivo' | 'Divisa' | 'Transferencia' | 'PagoMovil' | 'Cashea'>('Divisa');
   const [pagoMovilBanco, setPagoMovilBanco] = useState('');
   const [pagoMovilCedula, setPagoMovilCedula] = useState('');
   const [pagoMovilTelefono, setPagoMovilTelefono] = useState('');
   const [pagoMovilReferencia, setPagoMovilReferencia] = useState('');
+  const [metodoPagoInicial, setMetodoPagoInicial] = useState<'Efectivo' | 'Divisa' | 'Transferencia' | 'PagoMovil'>('Divisa');
+  const [montoInicialUsd, setMontoInicialUsd] = useState<string>('');
   const [formatoDocumento, setFormatoDocumento] = useState<'BIMONETARIO' | 'SOLO_USD' | 'SOLO_VES'>('BIMONETARIO');
   const [tipoTasa, setTipoTasa] = useState<'BCV' | 'PERSONALIZADA'>('BCV');
   const [tasaPersonalizada, setTasaPersonalizada] = useState<string>('');
@@ -287,7 +289,25 @@ const POS = () => {
       return;
     }
 
-    const appliesIgtfBase = metodoPago === 'Divisa' && formatoDocumento !== 'SOLO_VES';
+    if (metodoPago === 'Cashea') {
+      if (!metodoPagoInicial) {
+        showToast("Para pagos con Cashea debe seleccionar la forma de pago del inicial.");
+        return;
+      }
+      const montoInicialNum = parseFloat(montoInicialUsd);
+      if (isNaN(montoInicialNum) || montoInicialNum < 0) {
+        showToast("Para pagos con Cashea debe indicar un monto inicial válido (no negativo).");
+        return;
+      }
+      if (montoInicialNum > cartTotal) {
+        showToast(`El monto del inicial ($${montoInicialNum.toFixed(2)}) no puede ser mayor al total de la factura ($${cartTotal.toFixed(2)}).`);
+        return;
+      }
+    }
+
+    const appliesIgtfBase = metodoPago === 'Cashea'
+      ? (metodoPagoInicial === 'Divisa' && formatoDocumento !== 'SOLO_VES')
+      : (metodoPago === 'Divisa' && formatoDocumento !== 'SOLO_VES');
     const appliesIgtf = appliesIgtfBase && !eximirIgtf;
 
     const payload = {
@@ -304,6 +324,8 @@ const POS = () => {
       pago_movil_cedula: metodoPago === 'PagoMovil' ? pagoMovilCedula.trim() : undefined,
       pago_movil_telefono: metodoPago === 'PagoMovil' ? pagoMovilTelefono.trim() : undefined,
       pago_movil_referencia: metodoPago === 'PagoMovil' ? pagoMovilReferencia.trim() : undefined,
+      metodo_pago_inicial: metodoPago === 'Cashea' ? metodoPagoInicial : undefined,
+      monto_inicial_usd: metodoPago === 'Cashea' ? parseFloat(montoInicialUsd) || 0 : undefined,
       detalles: cart.map(item => ({
         producto_id: item.id,
         cantidad: Number(item.qty) || 1,
@@ -323,6 +345,7 @@ const POS = () => {
       setPagoMovilCedula('');
       setPagoMovilTelefono('');
       setPagoMovilReferencia('');
+      setMontoInicialUsd('');
       fetchContext();
     }).catch((err) => {
       console.error(err);
@@ -354,13 +377,20 @@ const POS = () => {
   // ==========================================
   // ETAPA B: CÁLCULO DE CAJA (MEDIOS DE PAGO E IGTF)
   // Medios Sujetos a IGTF 3%: 'Divisa' (USD efectivo / Zelle) cuando no está eximido
+  // En caso 'Cashea', aplica sobre monto_inicial_usd si metodo_pago_inicial == 'Divisa'
   // Medios Exentos 0%: 'Efectivo' (Bs), 'PagoMovil', 'Transferencia' o cuando eximirIgtf está activo
   // ==========================================
-  const appliesIgtfBase = metodoPago === 'Divisa' && formatoDocumento !== 'SOLO_VES';
+  const appliesIgtfBase = metodoPago === 'Cashea'
+    ? (metodoPagoInicial === 'Divisa' && formatoDocumento !== 'SOLO_VES')
+    : (metodoPago === 'Divisa' && formatoDocumento !== 'SOLO_VES');
   const appliesIgtf = appliesIgtfBase && !eximirIgtf;
-  const cartIGTF = appliesIgtf ? (subtotalBaseFactura * 0.03) : 0;
+  const montoInicialParsed = parseFloat(montoInicialUsd) || 0;
+  const cartIGTF = appliesIgtf
+    ? (metodoPago === 'Cashea' ? montoInicialParsed * 0.03 : subtotalBaseFactura * 0.03)
+    : 0;
   const cartTotal = subtotalBaseFactura + cartIGTF;
   const cartTotalBs = cartTotal * (tasaBCV || 0);
+  const casheaRemanente = metodoPago === 'Cashea' ? Math.max(0, cartTotal - montoInicialParsed) : 0;
 
   const filteredProducts = productos.filter(p =>
     p.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -559,6 +589,7 @@ const POS = () => {
                   <option value="PagoMovil">📱 Pago Móvil (0% IGTF - Bs)</option>
                   <option value="Transferencia">🏦 Transferencia (0% IGTF - Bs)</option>
                   <option value="Efectivo">🇻🇪 Efectivo Bs (0% IGTF)</option>
+                  <option value="Cashea">🟡 Cashea (Inicial + Financiamiento)</option>
                </select>
             </div>
         </div>
@@ -976,7 +1007,65 @@ const POS = () => {
                         <span>🇻🇪 Efectivo Bs</span>
                         <span className={`text-[8px] font-mono ${metodoPago === 'Efectivo' ? 'text-emerald-200' : 'text-slate-400'}`}>0% IGTF (Bs)</span>
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => setMetodoPago('Cashea')}
+                        className={`col-span-2 px-2.5 py-2 rounded-xl text-[11px] font-black uppercase transition-all flex flex-col items-center justify-center border text-center ${
+                          metodoPago === 'Cashea'
+                            ? 'bg-[#0b5156] text-white border-[#0b5156] shadow-sm ring-2 ring-[#0b5156]/20'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        <span>🟡 Cashea (Inicial + Cuotas)</span>
+                        <span className={`text-[8px] font-mono ${metodoPago === 'Cashea' ? 'text-amber-200' : 'text-slate-400'}`}>
+                          {metodoPagoInicial === 'Divisa' && !eximirIgtf && formatoDocumento !== 'SOLO_VES' ? 'IGTF 3% solo s/ inicial' : '0% IGTF'}
+                        </span>
+                      </button>
                     </div>
+                    {metodoPago === 'Cashea' && (
+                      <div className="space-y-3 pt-2 border-t border-slate-100 bg-amber-50/40 p-3 rounded-2xl border border-amber-200/50">
+                        <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest leading-none block">
+                          Detalle del Pago Dividido (Cashea)
+                        </label>
+                        <div>
+                          <label className="text-[9px] font-black text-slate-500 uppercase tracking-wider block mb-1">
+                            Forma de pago del inicial
+                          </label>
+                          <select
+                            value={metodoPagoInicial}
+                            onChange={(e) => setMetodoPagoInicial(e.target.value as any)}
+                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:border-[#0b5156]"
+                          >
+                            <option value="Divisa">💵 Divisas / Zelle (+3% IGTF)</option>
+                            <option value="PagoMovil">📱 Pago Móvil (0% IGTF)</option>
+                            <option value="Transferencia">🏦 Transferencia (0% IGTF)</option>
+                            <option value="Efectivo">🇻🇪 Efectivo Bs (0% IGTF)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-black text-slate-500 uppercase tracking-wider block mb-1">
+                            Monto del inicial (USD)
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={montoInicialUsd}
+                            onChange={(e) => setMontoInicialUsd(e.target.value)}
+                            placeholder="0.00"
+                            className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:border-[#0b5156]"
+                          />
+                        </div>
+                        <div className="flex justify-between items-center bg-white/80 p-2.5 rounded-xl border border-amber-200/60">
+                          <span className="text-xs font-black text-slate-600 uppercase tracking-tight">
+                            Cashea (remanente):
+                          </span>
+                          <span className="text-xs font-black font-mono text-[#0b5156]">
+                            ${casheaRemanente.toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    )}
                     {metodoPago === 'PagoMovil' && (
                       <div className="space-y-2 pt-2 border-t border-slate-100">
                          <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none block">
@@ -1092,7 +1181,9 @@ const POS = () => {
                     </div>
                     {cartIGTF > 0 ? (
                       <div className="flex justify-between items-center">
-                         <span className="text-xs font-black uppercase text-amber-600 tracking-wider">IGTF Percibido Divisas (3%)</span>
+                         <span className="text-xs font-black uppercase text-amber-600 tracking-wider">
+                           {metodoPago === 'Cashea' ? 'IGTF Percibido Inicial Divisa (3%)' : 'IGTF Percibido Divisas (3%)'}
+                         </span>
                          <strong className="text-sm font-black text-amber-600 font-mono">${cartIGTF.toFixed(2)}</strong>
                       </div>
                     ) : (
@@ -1101,6 +1192,18 @@ const POS = () => {
                            {eximirIgtf ? 'IGTF (0% Eximido)' : 'IGTF (0% Exento Bs)'}
                          </span>
                          <span className="text-xs font-bold text-slate-400 font-mono">$0.00</span>
+                      </div>
+                    )}
+                    {metodoPago === 'Cashea' && (
+                      <div className="bg-amber-50/70 p-2.5 rounded-xl border border-amber-200/70 space-y-1 my-1">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="font-bold text-slate-600">Inicial ({metodoPagoInicial}):</span>
+                          <span className="font-bold font-mono text-slate-800">${montoInicialParsed.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="font-bold text-slate-600">Financiamiento Cashea:</span>
+                          <span className="font-bold font-mono text-[#0b5156]">${casheaRemanente.toFixed(2)}</span>
+                        </div>
                       </div>
                     )}
                     <div className="border-t border-slate-200 pt-3">

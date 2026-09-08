@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.core import TasaCambio
 from backend.models.fiscal import ReglaFiscal, CorrelativoFiscal
-from backend.models.operations import Venta, VentaDetalle, KardexMovimiento
+from backend.models.operations import Venta, VentaDetalle, KardexMovimiento, PagoVenta
 from backend.models.erp_extended import CuentaPorCobrar, Vendedor
 from backend.services.contabilidad import ContabilidadService
 
@@ -160,6 +160,8 @@ def procesar_emision_factura(
     pago_movil_cedula: Optional[str] = None,
     pago_movil_telefono: Optional[str] = None,
     pago_movil_referencia: Optional[str] = None,
+    metodo_pago_inicial: Optional[str] = None,
+    monto_inicial_usd: Optional[Decimal] = None,
 ) -> ResultadoFactura:
     if not lineas:
         raise ValueError("La factura debe tener al menos un detalle.")
@@ -174,6 +176,14 @@ def procesar_emision_factura(
             raise ValueError(
                 "Para pagos con Pago Móvil debe indicar el banco emisor, la cédula/RIF, el teléfono y la referencia de la transferencia."
             )
+
+    if metodo_pago == "Cashea":
+        if not metodo_pago_inicial or monto_inicial_usd is None:
+            raise ValueError(
+                "Para pagos con Cashea debe indicar la forma de pago y el monto del inicial."
+            )
+        if monto_inicial_usd < 0:
+            raise ValueError("El monto del inicial no puede ser negativo.")
 
     tenant_id = current_user.tenant_id
 
@@ -203,9 +213,18 @@ def procesar_emision_factura(
     if aplica_igtf_override is not None:
         aplica_igtf = bool(aplica_igtf_override)
     else:
-        aplica_igtf = derivar_aplica_igtf(metodo_pago, moneda_documento)
+        if metodo_pago == "Cashea":
+            aplica_igtf = derivar_aplica_igtf(metodo_pago_inicial, moneda_documento)
+        else:
+            aplica_igtf = derivar_aplica_igtf(metodo_pago, moneda_documento)
 
-    monto_igtf = (subtotal_total + monto_iva) * tasa_igtf if aplica_igtf else Decimal("0.00")
+    if aplica_igtf:
+        if metodo_pago == "Cashea":
+            monto_igtf = (monto_inicial_usd or Decimal("0.00")) * tasa_igtf
+        else:
+            monto_igtf = (subtotal_total + monto_iva) * tasa_igtf
+    else:
+        monto_igtf = Decimal("0.00")
 
     retencion_iva = (
         monto_iva * Decimal("0.75") if getattr(cliente, "es_contribuyente_especial", False) else Decimal("0.00")
@@ -218,6 +237,11 @@ def procesar_emision_factura(
     monto_igtf_r = monto_igtf.quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
     retencion_iva_r = retencion_iva.quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
     monto_total_r = monto_total.quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
+
+    if metodo_pago == "Cashea" and monto_inicial_usd > monto_total_r:
+        raise ValueError(
+            f"El monto del inicial (${monto_inicial_usd}) no puede ser mayor al total de la factura (${monto_total_r})."
+        )
 
     # Monto neto de la CxC (lo que efectivamente se espera cobrar de esta
     # factura). Se calcula aquí, antes de crear la Venta, porque es también
@@ -310,6 +334,23 @@ def procesar_emision_factura(
     )
     db.add(nueva_venta)
     db.flush()
+
+    if metodo_pago == "Cashea":
+        monto_cashea = monto_total_r - monto_inicial_usd
+        db.add(PagoVenta(
+            venta_id=nueva_venta.id,
+            tenant_id=tenant_id,
+            forma_pago=metodo_pago_inicial,
+            monto_usd=monto_inicial_usd,
+            orden=1,
+        ))
+        db.add(PagoVenta(
+            venta_id=nueva_venta.id,
+            tenant_id=tenant_id,
+            forma_pago="Cashea",
+            monto_usd=monto_cashea,
+            orden=2,
+        ))
 
     detalles_orm = []
     for linea in lineas:
