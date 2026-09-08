@@ -208,6 +208,16 @@ async def update_user_role(
         if rol_id == 4:
             raise HTTPException(status_code=403, detail="El rol de Desarrollador solo puede ser asignado desde el Panel de Desarrollo.")
 
+        # Blindaje: no permitir cambiar el rol del único Desarrollador activo del sistema
+        target_profile = await conn.fetchrow("SELECT rol_id, estado FROM profiles WHERE id = $1::uuid", uuid.UUID(str(user_id)))
+        if target_profile and target_profile["rol_id"] == 4 and target_profile["estado"] is True:
+            active_devs_count = await conn.fetchval("SELECT count(*) FROM profiles WHERE rol_id = 4 AND estado = TRUE")
+            if active_devs_count is not None and active_devs_count <= 1:
+                raise HTTPException(
+                    status_code=409,
+                    detail="No puedes cambiar el rol del único Desarrollador activo del sistema. Crea otra cuenta con ese rol primero."
+                )
+
         await conn.execute(
             "UPDATE profiles SET rol_id = $1 WHERE id = $2",
             rol_id, user_id

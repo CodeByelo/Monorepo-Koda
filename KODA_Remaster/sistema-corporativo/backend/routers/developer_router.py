@@ -898,12 +898,28 @@ async def delete_tenant(
     try:
         t_uuid = uuid.UUID(tenant_id)
         async with async_db.pool.acquire() as conn:
-            async with conn.transaction():
-                # Check if tenant exists
-                exists = await conn.fetchval("SELECT name FROM organizations WHERE id = $1::uuid", t_uuid)
-                if not exists:
-                    raise HTTPException(status_code=404, detail="Empresa no encontrada")
+            # Check if tenant exists
+            exists = await conn.fetchval("SELECT name FROM organizations WHERE id = $1::uuid", t_uuid)
+            if not exists:
+                raise HTTPException(status_code=404, detail="Empresa no encontrada")
 
+            # Verificar que no tenga datos reales de negocio en el ERP antes de borrar.
+            # Estas tablas viven en la misma base física pero las gestiona koda-frontend/backend.
+            tablas_erp_criticas = ["ventas", "productos", "clientes", "facturas", "cuentas_bancarias", "asientos_contables"]
+            for tabla in tablas_erp_criticas:
+                try:
+                    count = await conn.fetchval(f"SELECT count(*) FROM {tabla} WHERE tenant_id = $1::uuid", t_uuid)
+                except Exception:
+                    # Si la tabla no existe en este entorno, no bloquear por eso.
+                    continue
+                if count and count > 0:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"No se puede eliminar: esta empresa tiene {count} registro(s) en '{tabla}' del ERP. "
+                               f"Elimina o migra esos datos primero, o usa la opción de archivar en vez de borrar (pendiente de implementar)."
+                    )
+
+            async with conn.transaction():
                 # Delete dependent records
                 await conn.execute("DELETE FROM security_events WHERE tenant_id = $1::uuid", t_uuid)
                 await conn.execute("DELETE FROM tickets WHERE tenant_id = $1::uuid", t_uuid)
@@ -1296,9 +1312,20 @@ async def delete_company_user(
             raise HTTPException(status_code=400, detail="No puede eliminarse a sí mismo.")
 
         async with async_db.pool.acquire() as conn:
-            exists = await conn.fetchrow("SELECT id FROM profiles WHERE id = $1::uuid", user_id)
+            exists = await conn.fetchrow("SELECT id, rol_id, estado FROM profiles WHERE id = $1::uuid", user_id)
             if not exists:
                 raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+
+            # Blindaje: verificar que no sea el único Desarrollador activo del sistema
+            if exists["rol_id"] == 4 and exists["estado"] is True:
+                active_devs_count = await conn.fetchval(
+                    "SELECT count(*) FROM profiles WHERE rol_id = 4 AND estado = TRUE"
+                )
+                if active_devs_count is not None and active_devs_count <= 1:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="No puedes eliminar al único Desarrollador activo del sistema. Crea otra cuenta con ese rol antes de eliminar esta."
+                    )
 
             await conn.execute("DELETE FROM profiles WHERE id = $1::uuid", user_id)
             return {"status": "success", "message": "Usuario eliminado correctamente."}
