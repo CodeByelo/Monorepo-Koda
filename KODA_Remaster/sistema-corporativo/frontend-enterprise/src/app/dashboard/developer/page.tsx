@@ -119,8 +119,6 @@ export interface SystemMetrics {
     database: boolean;
     redis: boolean;
     ollama: boolean;
-    loki: boolean;
-    vector: boolean;
   };
 }
 
@@ -589,6 +587,16 @@ function DeveloperDashboardContent() {
       await loadPlans();
     } catch (err: any) {
       setError(err?.message || 'Error al desactivar el plan');
+    }
+  };
+
+  const handleReactivatePlanSubmit = async (id: number, name: string) => {
+    try {
+      await updatePlan(id, { is_active: true });
+      setSuccess(`Plan "${name}" reactivado con éxito.`);
+      await loadPlans();
+    } catch (err: any) {
+      setError(err?.message || 'Error al reactivar el plan');
     }
   };
 
@@ -1324,13 +1332,22 @@ function DeveloperDashboardContent() {
                       >
                         <Edit3 className="w-4 h-4" />
                       </button>
-                      {plan.is_active && (
+                      {plan.is_active ? (
                         <button
                           onClick={() => handleDeletePlanSubmit(plan.id, plan.name)}
                           className="p-1.5 rounded-lg bg-red-950/40 hover:bg-red-900/60 text-red-400 hover:text-red-200 border border-red-900/50"
                           title="Desactivar plan"
                         >
                           <Trash2 className="w-4 h-4" />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleReactivatePlanSubmit(plan.id, plan.name)}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-400 hover:text-emerald-200 border border-emerald-900/50 text-xs font-semibold flex items-center gap-1 transition-colors"
+                          title="Reactivar plan"
+                        >
+                          <CheckCircle className="w-3.5 h-3.5" />
+                          Reactivar
                         </button>
                       )}
                     </div>

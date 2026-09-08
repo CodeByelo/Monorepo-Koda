@@ -1246,9 +1246,7 @@ async def get_system_metrics(
         "services": {
             "database": db_ok,
             "redis": redis_ok,
-            "ollama": ollama_ok,
-            "loki": True,
-            "vector": True
+            "ollama": ollama_ok
         }
     }
 
@@ -1327,7 +1325,15 @@ async def delete_company_user(
                         detail="No puedes eliminar al único Desarrollador activo del sistema. Crea otra cuenta con ese rol antes de eliminar esta."
                     )
 
-            await conn.execute("DELETE FROM profiles WHERE id = $1::uuid", user_id)
+            async with conn.transaction():
+                # Limpiar membresías de organizaciones y usuarios de app sincronizados
+                await conn.execute("DELETE FROM user_organizations WHERE user_id = $1::uuid", user_id)
+                try:
+                    await conn.execute("DELETE FROM app_users WHERE id = $1::uuid", user_id)
+                except Exception:
+                    pass
+                await conn.execute("DELETE FROM profiles WHERE id = $1::uuid", user_id)
+
             return {"status": "success", "message": "Usuario eliminado correctamente."}
     except HTTPException:
         raise
