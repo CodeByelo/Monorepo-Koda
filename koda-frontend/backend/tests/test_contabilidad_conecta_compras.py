@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.core.database import SessionLocal, Base, engine
-from backend.models.core import Profile, TasaCambio, Tenant
+from backend.models.core import Profile, TasaCambio, Organization
 from backend.models.operations import Proveedor
 from backend.models.erp_extended import Compra, CuentaPorPagar
 from backend.models.accounting import AsientoContable, AsientoDetalle, CierrePeriodo
@@ -25,7 +25,7 @@ def test_compra_genera_asiento_contable_automatico(setup_db):
     """Verifica que POST /compras genere un asiento contable automático con debe y haber balanceados."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
         nombre_empresa=f"Empresa Compra Test {uuid.uuid4().hex[:6]}",
         estado_licencia="ACTIVA"
@@ -145,7 +145,7 @@ def test_compra_genera_asiento_contable_automatico(setup_db):
     db.query(Proveedor).filter(Proveedor.id == proveedor.id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -154,7 +154,7 @@ def test_compra_rechazada_en_periodo_cerrado_y_rollback_completo(setup_db):
     """Verifica que una compra en período cerrado falle y no guarde Compra, CxP ni Asiento."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
         nombre_empresa=f"Empresa Cierre Compra {uuid.uuid4().hex[:6]}",
         estado_licencia="ACTIVA"
@@ -236,7 +236,7 @@ def test_compra_rechazada_en_periodo_cerrado_y_rollback_completo(setup_db):
     db.query(Proveedor).filter(Proveedor.id == proveedor.id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -245,7 +245,7 @@ def test_compra_asiento_visible_en_diario_y_balance(setup_db):
     """Verifica que el asiento de compra aparezca en el Libro Diario y que el Balance cuadre."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
         nombre_empresa=f"Empresa Diario Balance {uuid.uuid4().hex[:6]}",
         estado_licencia="ACTIVA"
@@ -329,6 +329,6 @@ def test_compra_asiento_visible_en_diario_y_balance(setup_db):
     db.query(Proveedor).filter(Proveedor.id == proveedor.id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()

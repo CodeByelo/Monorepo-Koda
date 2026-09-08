@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 import backend.models
 from backend.core.database import Base, get_db
 from backend.models.operations import Producto, Cliente, Venta, VentaDetalle, KardexMovimiento
-from backend.models.core import TasaCambio, Tenant, Profile
+from backend.models.core import TasaCambio, Organization, Profile
 from backend.models.erp_extended import (
     Vendedor, Almacen, StockPorAlmacen, CuentaPorCobrar, CuentaContable, Empresa, AuditoriaLog
 )
@@ -113,7 +113,7 @@ def test_crear_venta_bot_idempotencia_con_cache_redis(client, db_session):
     bot_key = os.getenv("BOT_INTERNAL_API_KEY")
     idem_key = str(uuid.uuid4())
 
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
         nombre_empresa="Tenant Bot Test",
         estado_licencia="ACTIVA"

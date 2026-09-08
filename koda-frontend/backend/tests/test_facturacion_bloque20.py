@@ -18,7 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.core.database import Base, get_db
-from backend.models.core import Tenant, Profile, TasaCambio
+from backend.models.core import Organization, Profile, TasaCambio
 from backend.models.erp_extended import Empresa, Almacen, StockPorAlmacen, CuentaContable, Cotizacion, CotizacionItem
 from backend.models.operations import Producto, Cliente, Venta, VentaDetalle, KardexMovimiento, PagoVenta
 from backend.models.fiscal import CorrelativoFiscal, ReglaFiscal
@@ -66,8 +66,8 @@ def test_client(db_session):
     tenant_a_id = uuid.uuid4()
     tenant_b_id = uuid.uuid4()
 
-    tenant_a = Tenant(id=tenant_a_id, nombre_empresa="Tenant Facturacion A")
-    tenant_b = Tenant(id=tenant_b_id, nombre_empresa="Tenant Facturacion B")
+    tenant_a = Organization(id=tenant_a_id, name="Tenant Facturacion A", status="active")
+    tenant_b = Organization(id=tenant_b_id, name="Tenant Facturacion B", status="active")
 
     user_a = Profile(
         id=uuid.uuid4(),

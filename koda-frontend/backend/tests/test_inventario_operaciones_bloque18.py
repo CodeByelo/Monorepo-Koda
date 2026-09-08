@@ -17,7 +17,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from backend.core.database import Base
-from backend.models.core import Tenant, Profile
+from backend.models.core import Organization, Profile
 from backend.models.erp_extended import Almacen, LoteProducto, StockPorAlmacen, TransferenciaInventario
 from backend.models.operations import Producto, KardexMovimiento
 from backend.routers.operaciones.inventario import (
@@ -56,7 +56,7 @@ def test_bug1_dashboard_lote_naive_datetime(db_session):
     TypeError: can't subtract offset-naive and offset-aware datetimes en /inventario/dashboard.
     """
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa="Tenant Vencimiento")
+    tenant = Organization(id=tenant_id, name="Tenant Vencimiento", status="active")
     user = Profile(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
@@ -136,7 +136,7 @@ def test_bug3_crear_transferencia_valida_stock_almacen_origen(db_session):
     debe rechazar con HTTP 400.
     """
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa="Tenant Multi Almacen")
+    tenant = Organization(id=tenant_id, name="Tenant Multi Almacen", status="active")
     user = Profile(
         id=uuid.uuid4(),
         tenant_id=tenant_id,
@@ -201,7 +201,7 @@ def test_bug4_recibir_transferencia_canonical_lock_and_clamping(db_session):
     - Verificar que el stock de origen quede clamp en >= 0.
     """
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa="Tenant Recibir")
+    tenant = Organization(id=tenant_id, name="Tenant Recibir", status="active")
     user = Profile(
         id=uuid.uuid4(),
         tenant_id=tenant_id,

@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.core.database import SessionLocal, Base, engine
-from backend.models.core import Profile, TasaCambio, Tenant
+from backend.models.core import Profile, TasaCambio, Organization
 from backend.models.erp_extended import CuentaBancaria, TransferenciaTesoreria, CuentaContable
 from backend.models.accounting import AsientoContable, AsientoDetalle, CierrePeriodo
 from backend.core.security import get_current_user
@@ -46,7 +46,7 @@ def test_transferencia_cuentas_usd_genera_asiento_y_mueve_saldos(setup_db):
     """1. Transferencia entre cuentas USD: mueve saldos y genera asiento 1.1.01 al Debe y al Haber."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
         nombre_empresa=f"Empresa Trf USD {uuid.uuid4().hex[:6]}",
         estado_licencia="ACTIVA"
@@ -147,7 +147,7 @@ def test_transferencia_cuentas_usd_genera_asiento_y_mueve_saldos(setup_db):
     db.query(CuentaContable).filter(CuentaContable.tenant_id == tenant_id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -156,7 +156,7 @@ def test_transferencia_cuenta_origen_ves_resta_monto_usd_exacto_sin_inflar_por_t
     """2. Fix del bug de moneda: cuenta origen VES resta el monto_usd exacto ($100.00) y NO $5.000.00."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
         nombre_empresa=f"Empresa Trf VES {uuid.uuid4().hex[:6]}",
         estado_licencia="ACTIVA"
@@ -244,7 +244,7 @@ def test_transferencia_cuenta_origen_ves_resta_monto_usd_exacto_sin_inflar_por_t
     db.query(CuentaContable).filter(CuentaContable.tenant_id == tenant_id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -253,7 +253,7 @@ def test_transferencia_rechazada_en_periodo_cerrado_y_rollback_completo(setup_db
     """3. Transferencia en período cerrado: rechaza con 403 y no altera saldos de bancos ni crea asiento."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
         nombre_empresa=f"Empresa Trf Cierre {uuid.uuid4().hex[:6]}",
         estado_licencia="ACTIVA"
@@ -353,6 +353,6 @@ def test_transferencia_rechazada_en_periodo_cerrado_y_rollback_completo(setup_db
     db.query(CuentaContable).filter(CuentaContable.tenant_id == tenant_id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()

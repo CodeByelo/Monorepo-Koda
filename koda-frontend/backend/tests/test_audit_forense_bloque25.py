@@ -18,7 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.core.database import Base, get_db
-from backend.models.core import Tenant, Profile
+from backend.models.core import Organization, Profile
 from backend.models.accounting import AsientoContable, AsientoDetalle
 from backend.models.audit import AuditorSession, AuditLog
 from backend.models.erp_extended import AuditoriaLog
@@ -65,8 +65,8 @@ def test_bug1_export_ledger_filtra_por_tenant_id(db_session):
     tenant_a_id = uuid.uuid4()
     tenant_b_id = uuid.uuid4()
 
-    tenant_a = Tenant(id=tenant_a_id, nombre_empresa="Empresa A")
-    tenant_b = Tenant(id=tenant_b_id, nombre_empresa="Empresa B")
+    tenant_a = Organization(id=tenant_a_id, name="Empresa A", status="active")
+    tenant_b = Organization(id=tenant_b_id, name="Empresa B", status="active")
 
     # Auditor session para Tenant A
     start_date = datetime.now(timezone.utc) - timedelta(days=5)
@@ -169,7 +169,7 @@ def test_bug2_forensic_timeline_no_busca_por_usuario(db_session):
     Buscar por un valor que está en `detalle`, `accion`, `modulo` o `ip` debe dar 200.
     """
     tenant_id = uuid.uuid4()
-    tenant = Tenant(id=tenant_id, nombre_empresa="Tenant Forense")
+    tenant = Organization(id=tenant_id, name="Tenant Forense", status="active")
 
     admin_user = Profile(
         id=uuid.uuid4(),

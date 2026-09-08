@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.core.database import SessionLocal, Base, engine
-from backend.models.core import Profile, TasaCambio, Tenant
+from backend.models.core import Profile, TasaCambio, Organization
 from backend.models.operations import Venta, Cliente
 from backend.models.erp_extended import CuentaPorCobrar, NotaCredito, CuentaContable
 from backend.models.accounting import AsientoContable, AsientoDetalle, CierrePeriodo
@@ -48,7 +48,7 @@ def test_nota_credito_genera_asiento_y_actualiza_cxc(setup_db):
     """1. Nota de CRÉDITO: reduce saldo de CxC y genera asiento 4.1.01 (Debe) / 1.1.02 (Haber)."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
         nombre_empresa=f"Empresa NC Test {uuid.uuid4().hex[:6]}",
         estado_licencia="ACTIVA"
@@ -168,7 +168,7 @@ def test_nota_credito_genera_asiento_y_actualiza_cxc(setup_db):
     db.query(CuentaContable).filter(CuentaContable.tenant_id == tenant_id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -177,7 +177,7 @@ def test_nota_debito_genera_asiento_y_reabre_cxc_pagada(setup_db):
     """2. Nota de DÉBITO: incrementa monto_total de CxC, la reabre y genera asiento 1.1.02 (Debe) / 4.1.01 (Haber)."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
         nombre_empresa=f"Empresa ND Test {uuid.uuid4().hex[:6]}",
         estado_licencia="ACTIVA"
@@ -298,7 +298,7 @@ def test_nota_debito_genera_asiento_y_reabre_cxc_pagada(setup_db):
     db.query(CuentaContable).filter(CuentaContable.tenant_id == tenant_id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -307,7 +307,7 @@ def test_nota_credito_rechazada_en_periodo_cerrado_y_rollback_completo(setup_db)
     """3. Nota de crédito en período cerrado: rechaza con 403 y no altera CxC ni crea Nota ni Asiento."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
         nombre_empresa=f"Empresa NC Cierre {uuid.uuid4().hex[:6]}",
         estado_licencia="ACTIVA"
@@ -426,6 +426,6 @@ def test_nota_credito_rechazada_en_periodo_cerrado_y_rollback_completo(setup_db)
     db.query(CuentaContable).filter(CuentaContable.tenant_id == tenant_id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()

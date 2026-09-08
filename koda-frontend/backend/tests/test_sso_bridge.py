@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 from backend.main import app
 from backend.core.database import SessionLocal, Base, engine
 from backend.core.security import SSO_BRIDGE_INTERNAL_KEY
-from backend.models.core import Profile, Tenant
+from backend.models.core import Profile, Organization
 
 Base.metadata.create_all(bind=engine)
 
@@ -34,12 +34,12 @@ _ISSUE_URL = "/internal/auth/sso-bridge/issue"
 _HEADER = "X-SSO-Bridge-Key"
 
 
-def _crear_tenant_y_perfil(session, *, activo: bool = True, con_tenant: bool = True):
+def _crear_tenant_y_perfil(session, *, activo: bool = True, con_tenant: bool = True, status: str = "active"):
     tenant_id = uuid.uuid4() if con_tenant else None
     if con_tenant:
-        tenant = Tenant(id=tenant_id, nombre_empresa="Test SSO Bridge S.A.", estado_licencia="ACTIVA")
+        tenant = Organization(id=tenant_id, name="Test SSO Bridge S.A.", status=status)
         session.add(tenant)
-        session.flush()  # <-- asegura que el INSERT de tenants ocurra antes que el de profiles
+        session.flush()  # <-- asegura que el INSERT de organizations ocurra antes que el de profiles
 
     unique = uuid.uuid4().hex[:10]
     profile = Profile(
@@ -62,7 +62,7 @@ def _cleanup(session, profile: Profile):
     tenant_id = profile.tenant_id
     session.query(Profile).filter(Profile.id == profile.id).delete()
     if tenant_id:
-        session.query(Tenant).filter(Tenant.id == tenant_id).delete()
+        session.query(Organization).filter(Organization.id == tenant_id).delete()
     session.commit()
 
 
@@ -155,6 +155,25 @@ def test_issue_rechaza_profile_sin_tenant():
                 headers={_HEADER: SSO_BRIDGE_INTERNAL_KEY},
             )
             assert resp.status_code == 404
+        finally:
+            _cleanup(session, profile)
+    finally:
+        session.close()
+
+
+def test_issue_rechaza_organizacion_suspendida():
+    """Si la organización asociada está suspendida, debe responder 403 Forbidden."""
+    session = SessionLocal()
+    try:
+        profile = _crear_tenant_y_perfil(session, activo=True, con_tenant=True, status="suspended")
+        try:
+            resp = client.post(
+                _ISSUE_URL,
+                json={"profile_id": str(profile.id)},
+                headers={_HEADER: SSO_BRIDGE_INTERNAL_KEY},
+            )
+            assert resp.status_code == 403
+            assert "suspendido o inactivo" in resp.json()["detail"]
         finally:
             _cleanup(session, profile)
     finally:

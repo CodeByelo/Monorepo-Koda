@@ -45,7 +45,7 @@ from sqlalchemy.orm import Session
 
 from backend.core.database import get_db
 from backend.core.security import verify_sso_bridge_key
-from backend.models.core import Profile, Tenant
+from backend.models.core import Profile, Tenant, Organization
 from backend.routers.auth import issue_exchange_code
 
 router = APIRouter(
@@ -104,21 +104,18 @@ def issue_sso_bridge_code(payload: SsoBridgeIssueRequest, db: Session = Depends(
             detail="Este usuario no tiene una empresa (tenant) asociada en el ERP.",
         )
 
-    tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
-    if tenant is None:
-        # Si la empresa fue creada en el sistema corporativo pero aún no tiene fila en `tenants`,
-        # la auto-provisionamos como ACTIVA para garantizar acceso sin fricción.
-        tenant = Tenant(
-            id=user.tenant_id,
-            nombre_empresa=getattr(user, "nombre_empresa", None) or "Empresa KODA ERP",
-            estado_licencia="ACTIVA"
+    org = db.query(Organization).filter(Organization.id == user.tenant_id).first()
+    if org is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="La organización asociada a este usuario no existe en el sistema.",
         )
-        db.add(tenant)
-        db.commit()
-        db.refresh(tenant)
-    elif tenant.estado_licencia != "ACTIVA":
-        tenant.estado_licencia = "ACTIVA"
-        db.commit()
+
+    if org.status and org.status.lower() not in ("active", "activa"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"El acceso para la organización {org.name} se encuentra suspendido o inactivo.",
+        )
 
     exchange_code = issue_exchange_code(user.id, db)
     return {"exchange_code": exchange_code}

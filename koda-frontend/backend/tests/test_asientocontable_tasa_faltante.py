@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.core.database import SessionLocal, Base, engine
-from backend.models.core import Profile, TasaCambio, Tenant
+from backend.models.core import Profile, TasaCambio, Organization
 from backend.models.operations import Producto, KardexMovimiento, AjusteInventario
 from backend.models.erp_extended import Almacen, StockPorAlmacen
 from backend.models.accounting import AsientoContable, AsientoDetalle
@@ -45,7 +45,7 @@ def _set_auth_override(user):
 
 def _create_tenant_and_admin(db, name_prefix="TasaFaltante"):
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
         nombre_empresa=f"{name_prefix} {uuid.uuid4().hex[:6]}",
         estado_licencia="ACTIVA"
@@ -174,7 +174,7 @@ def test_ajuste_inventario_merma_crea_asiento_con_tasa(setup_db):
     db.query(Almacen).filter(Almacen.tenant_id == tenant.id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant.id).delete()
     db.query(Profile).filter(Profile.tenant_id == tenant.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant.id).delete()
+    db.query(Organization).filter(Organization.id == tenant.id).delete()
     db.commit()
     db.close()
 
@@ -247,7 +247,7 @@ def test_ajuste_inventario_sobrante_crea_asiento_con_tasa(setup_db):
     db.query(Almacen).filter(Almacen.tenant_id == tenant.id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant.id).delete()
     db.query(Profile).filter(Profile.tenant_id == tenant.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant.id).delete()
+    db.query(Organization).filter(Organization.id == tenant.id).delete()
     db.commit()
     db.close()
 
@@ -312,7 +312,7 @@ def test_ajuste_inflacion_ejecutar_crea_asiento_con_tasa(setup_db):
     db.query(Almacen).filter(Almacen.tenant_id == tenant.id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant.id).delete()
     db.query(Profile).filter(Profile.tenant_id == tenant.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant.id).delete()
+    db.query(Organization).filter(Organization.id == tenant.id).delete()
     db.commit()
     db.close()
 
@@ -391,6 +391,6 @@ def test_sin_tasa_cambio_usa_fallback_en_ambos_endpoints(setup_db):
     db.query(Producto).filter(Producto.tenant_id == tenant.id).delete()
     db.query(Almacen).filter(Almacen.tenant_id == tenant.id).delete()
     db.query(Profile).filter(Profile.tenant_id == tenant.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant.id).delete()
+    db.query(Organization).filter(Organization.id == tenant.id).delete()
     db.commit()
     db.close()

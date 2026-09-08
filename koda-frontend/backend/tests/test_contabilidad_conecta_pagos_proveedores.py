@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.core.database import SessionLocal, Base, engine
-from backend.models.core import Profile, TasaCambio, Tenant
+from backend.models.core import Profile, TasaCambio, Organization
 from backend.models.operations import Proveedor
 from backend.models.erp_extended import CuentaPorPagar, CuentaBancaria, MovimientoBancario, CuentaContable
 from backend.models.accounting import AsientoContable, AsientoDetalle, CierrePeriodo
@@ -48,7 +48,7 @@ def test_pago_individual_cxp_genera_asiento_contable(setup_db):
     """1. Verifica que aprobar una orden de pago genere asiento contable y debite banco."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
         nombre_empresa=f"Empresa Pago Individual {uuid.uuid4().hex[:6]}",
         estado_licencia="ACTIVA"
@@ -163,7 +163,7 @@ def test_pago_individual_cxp_genera_asiento_contable(setup_db):
     db.query(CuentaContable).filter(CuentaContable.tenant_id == tenant_id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -172,7 +172,7 @@ def test_pago_por_lote_genera_un_solo_asiento_por_el_total(setup_db):
     """2. Verifica que procesar lotes de pago genere un único asiento por el total de las CxPs."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
         nombre_empresa=f"Empresa Pago Lote {uuid.uuid4().hex[:6]}",
         estado_licencia="ACTIVA"
@@ -307,7 +307,7 @@ def test_pago_por_lote_genera_un_solo_asiento_por_el_total(setup_db):
     db.query(CuentaContable).filter(CuentaContable.tenant_id == tenant_id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -316,7 +316,7 @@ def test_pago_rechazado_en_periodo_cerrado_y_rollback_completo(setup_db):
     """3. Verifica que un pago en período cerrado falle y no debite banco ni marque PAGADA la CxP."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
         nombre_empresa=f"Empresa Cierre Pago {uuid.uuid4().hex[:6]}",
         estado_licencia="ACTIVA"
@@ -429,6 +429,6 @@ def test_pago_rechazado_en_periodo_cerrado_y_rollback_completo(setup_db):
     db.query(CuentaContable).filter(CuentaContable.tenant_id == tenant_id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()

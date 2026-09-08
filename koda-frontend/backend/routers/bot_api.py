@@ -77,9 +77,9 @@ def _parse_tenant_id(raw: str, db: Session) -> uuid.UUID:
         tid = uuid.UUID(str(raw))
     except (ValueError, AttributeError, TypeError):
         raise HTTPException(status_code=400, detail="tenant_id inválido: debe ser un UUID.")
-    from backend.models.core import Tenant
-    tenant = db.query(Tenant).filter(Tenant.id == tid).first()
-    if not tenant:
+    from backend.models.core import Organization
+    org = db.query(Organization).filter(Organization.id == tid).first()
+    if not org:
         raise HTTPException(status_code=404, detail="tenant_id no corresponde a una empresa registrada.")
     return tid
 

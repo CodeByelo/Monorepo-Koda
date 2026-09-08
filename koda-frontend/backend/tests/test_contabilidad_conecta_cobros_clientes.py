@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.core.database import SessionLocal, Base, engine
-from backend.models.core import Profile, TasaCambio, Tenant
+from backend.models.core import Profile, TasaCambio, Organization
 from backend.models.operations import Cliente
 from backend.models.erp_extended import CuentaPorCobrar, CuentaBancaria, MovimientoBancario, CuentaContable
 from backend.models.accounting import AsientoContable, AsientoDetalle, CierrePeriodo
@@ -49,7 +49,7 @@ def test_cobro_simple_banco_genera_asiento_y_movimiento(setup_db):
     """1. Cobro simple por banco: mueve banco, crea movimiento bancario y genera asiento 1.1.01 vs 1.1.02."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
         nombre_empresa=f"Empresa Cobro Simple {uuid.uuid4().hex[:6]}",
         estado_licencia="ACTIVA"
@@ -175,7 +175,7 @@ def test_cobro_simple_banco_genera_asiento_y_movimiento(setup_db):
     db.query(CuentaContable).filter(CuentaContable.tenant_id == tenant_id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -184,7 +184,7 @@ def test_cobro_mixto_efectivo_y_banco(setup_db):
     """2. Cobro mixto: solo mueve banco por la parte bancaria, y asiento de 1.1.01 refleja el total."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
         nombre_empresa=f"Empresa Cobro Mixto {uuid.uuid4().hex[:6]}",
         estado_licencia="ACTIVA"
@@ -300,7 +300,7 @@ def test_cobro_mixto_efectivo_y_banco(setup_db):
     db.query(CuentaContable).filter(CuentaContable.tenant_id == tenant_id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -309,7 +309,7 @@ def test_cobro_con_diferencia_faltante_comision(setup_db):
     """3. Cobro con diferencia 'Faltante': genera línea extra en 5.1.03 (Gasto) al Debe y asiento cuadra."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
         nombre_empresa=f"Empresa Cobro Comision {uuid.uuid4().hex[:6]}",
         estado_licencia="ACTIVA"
@@ -430,7 +430,7 @@ def test_cobro_con_diferencia_faltante_comision(setup_db):
     db.query(CuentaContable).filter(CuentaContable.tenant_id == tenant_id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -439,7 +439,7 @@ def test_cobro_sin_metodos_trata_como_efectivo(setup_db):
     """4. Cobro sin campo 'metodos' (handleAplicarPendiente): se trata como Efectivo al 100%."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
         nombre_empresa=f"Empresa Cobro Pendiente {uuid.uuid4().hex[:6]}",
         estado_licencia="ACTIVA"
@@ -532,7 +532,7 @@ def test_cobro_sin_metodos_trata_como_efectivo(setup_db):
     db.query(CuentaContable).filter(CuentaContable.tenant_id == tenant_id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -541,7 +541,7 @@ def test_cobro_rechazado_en_periodo_cerrado_y_rollback_completo(setup_db):
     """5. Cobro en período cerrado: rechazado con 403, no altera saldo de banco ni CxC ni crea movimientos."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
         nombre_empresa=f"Empresa Cierre Cobro {uuid.uuid4().hex[:6]}",
         estado_licencia="ACTIVA"
@@ -655,7 +655,7 @@ def test_cobro_rechazado_en_periodo_cerrado_y_rollback_completo(setup_db):
     db.query(CuentaContable).filter(CuentaContable.tenant_id == tenant_id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 
@@ -664,7 +664,7 @@ def test_cobro_metodo_bolivares_convierte_a_usd_correctamente(setup_db):
     """6. Cobro en Bolívares: convierte a USD dividiendo por 'rate' antes de sumar al banco y crear asiento."""
     db = SessionLocal()
     tenant_id = uuid.uuid4()
-    tenant = Tenant(
+    tenant = Organization(
         id=tenant_id,
         nombre_empresa=f"Empresa Cobro Bolivares {uuid.uuid4().hex[:6]}",
         estado_licencia="ACTIVA"
@@ -793,7 +793,7 @@ def test_cobro_metodo_bolivares_convierte_a_usd_correctamente(setup_db):
     db.query(CuentaContable).filter(CuentaContable.tenant_id == tenant_id).delete()
     db.query(TasaCambio).filter(TasaCambio.tenant_id == tenant_id).delete()
     db.query(Profile).filter(Profile.id == user.id).delete()
-    db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+    db.query(Organization).filter(Organization.id == tenant_id).delete()
     db.commit()
     db.close()
 

@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from backend.main import app
 from backend.core.database import SessionLocal, get_db, Base, engine
 from backend.models.operations import Producto, Venta, VentaDetalle, Cliente
-from backend.models.core import Profile, TasaCambio, Tenant
+from backend.models.core import Profile, TasaCambio, Organization
 from backend.core.security import get_current_user
 
 Base.metadata.create_all(bind=engine)
@@ -22,7 +22,7 @@ def mock_get_current_user():
     try:
         user = session.query(Profile).first()
         if not user:
-            tenant = Tenant(nombre_empresa="Test Billing Math S.A.", estado_licencia="ACTIVA")
+            tenant = Organization(name="Test Billing Math S.A.", status="active")
             session.add(tenant)
             session.flush()
             user = Profile(
