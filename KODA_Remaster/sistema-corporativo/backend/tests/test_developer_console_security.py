@@ -44,6 +44,7 @@ class FakeConnection:
         self.erp_data = erp_tables_db if erp_tables_db is not None else {}
         # orgs_db: dict de tenant_id -> name
         self.orgs = orgs_db if orgs_db is not None else {}
+        self.user_orgs = []
         self.deleted_profiles = []
         self.deleted_tenants = []
 
@@ -92,6 +93,11 @@ class FakeConnection:
             if user_id in self.profiles:
                 del self.profiles[user_id]
             self.deleted_profiles.append(user_id)
+        elif "DELETE FROM user_organizations WHERE user_id =" in query:
+            user_id = str(args[0])
+            self.user_orgs = [uo for uo in self.user_orgs if uo["user_id"] != user_id]
+        elif "DELETE FROM app_users WHERE id =" in query:
+            pass
         elif "DELETE FROM organizations WHERE id =" in query:
             t_id = str(args[0])
             if t_id in self.orgs:
@@ -147,6 +153,34 @@ def test_delete_user_bloquea_ultimo_desarrollador_activo(monkeypatch):
     assert res_delete_last_dev.status_code == 409, res_delete_last_dev.text
     assert "No puedes eliminar al único Desarrollador activo del sistema" in res_delete_last_dev.json()["detail"]
     assert dev1_id in fake_conn.profiles  # Sigue intacto en la base de datos
+
+
+def test_delete_user_limpia_user_organizations(monkeypatch):
+    """
+    Verifica que al eliminar un usuario, también se eliminen sus registros
+    asociados en user_organizations para evitar filas huérfanas.
+    """
+    user_id = "44444444-4444-4444-4444-444444444444"
+    org_id = "55555555-5555-5555-5555-555555555555"
+
+    profiles_data = {
+        user_id: {"id": user_id, "rol_id": 3, "estado": True, "username": "emp_regular"}
+    }
+    user_orgs_data = [
+        {"user_id": user_id, "organization_id": org_id, "role": "member"}
+    ]
+
+    fake_conn = FakeConnection(profiles_db=profiles_data)
+    fake_conn.user_orgs = user_orgs_data
+    fake_pool = FakePool(fake_conn)
+    monkeypatch.setattr(async_db, "pool", fake_pool)
+
+    dev_token = _make_dev_token()
+
+    res = client.delete(f"/dev/users/{user_id}", headers={"Authorization": f"Bearer {dev_token}"})
+    assert res.status_code == 200, res.text
+    assert user_id not in fake_conn.profiles
+    assert len(fake_conn.user_orgs) == 0  # Fila en user_organizations limpiada
 
 
 def test_delete_tenant_bloquea_si_tiene_datos_en_erp(monkeypatch):
