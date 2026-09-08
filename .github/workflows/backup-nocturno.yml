@@ -1,0 +1,35 @@
+name: Backup Nocturno de Base de Datos
+
+on:
+  schedule:
+    # 3:00 AM UTC todos los días (11:00 PM hora Venezuela, UTC-4)
+    - cron: '0 3 * * *'
+  workflow_dispatch: {}  # Permite ejecución manual desde la pestaña Actions
+
+jobs:
+  backup:
+    name: Generar y Archivar Backup PostgreSQL
+    runs-on: ubuntu-latest
+    steps:
+      - name: Instalar cliente de PostgreSQL
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Generar dump comprimido
+        env:
+          DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::El secret BACKUP_DATABASE_URL no está configurado en el repositorio."
+            exit 1
+          fi
+          FECHA=$(date +'%Y-%m-%d_%H%M')
+          pg_dump "$DATABASE_URL" --no-owner --no-privileges --format=custom --file="backup_${FECHA}.dump"
+          gzip "backup_${FECHA}.dump"
+          echo "ARCHIVO=backup_${FECHA}.dump.gz" >> "$GITHUB_ENV"
+
+      - name: Subir backup como artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-koda-db
+          path: ${{ env.ARCHIVO }}
+          retention-days: 30
