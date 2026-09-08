@@ -44,6 +44,14 @@ def mock_get_current_user():
 # Inyectar el mock en la dependencia de FastAPI
 app.dependency_overrides[get_current_user] = mock_get_current_user
 
+import pytest
+
+@pytest.fixture(autouse=True)
+def _override_auth():
+    """Garantiza que el override de autenticación esté siempre activo para los tests de este módulo."""
+    app.dependency_overrides[get_current_user] = mock_get_current_user
+    yield
+
 client = TestClient(app)
 
 def cleanup_test_data(session):

@@ -22,9 +22,12 @@ def reset_test_state():
     """
     Fixture autouse para aislar completamente el estado entre tests:
     1. Resetea current_tenant_id_var a None antes y después de cada test.
-    2. Limpia app.dependency_overrides para evitar que overrides de un test afecten a otros.
+    2. Guarda una foto de los dependency_overrides previos y los restaura al finalizar,
+       evitando fugar mocks locales a otros tests sin destruir overrides a nivel de módulo.
     """
     current_tenant_id_var.set(None)
+    overrides_antes = dict(app.dependency_overrides)
     yield
     current_tenant_id_var.set(None)
     app.dependency_overrides.clear()
+    app.dependency_overrides.update(overrides_antes)
