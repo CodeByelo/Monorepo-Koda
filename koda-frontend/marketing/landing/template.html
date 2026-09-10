@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KODA · ERP Bimonetario para Retail y Distribución</title>
+<meta name="description" content="KODA ERP Bimonetario: Precio en Bs. y US$, stock multicentro, cotizaciones y facturación fiscal en una sola pantalla.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;700;800;900&family=Inter:wght@400;500;600;700&display=swap">
+<style>
+:root{
+  /* Paleta oficial KODA */
+  --koda:#0B5156;
+  --koda-hover:#083A3D;
+  --koda-mid:#126B71;
+  --koda-deep:#072E31;
+  --koda-abyss:#051F22;
+  --teal:#14B8A6;
+  --cyan:#0EA5E9;
+  --sand:#BDAFA1;
+  --canvas:#F4F6F8;
+  --card:#FFFFFF;
+  --line:#E2E8F0;
+  --ink:#0B2124;
+  --muted:#576574;
+  --alarm:#B4442F;
+  --alarm-soft:#F6E9E5;
+  --ok:#10B981;
+
+  --shell:0 1px 3px rgba(11,81,86,.06), 0 20px 48px -24px rgba(11,81,86,.28);
+  --shell-lift:0 4px 6px rgba(11,81,86,.05), 0 36px 72px -28px rgba(11,81,86,.38);
+  --fd:'Inter Tight', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --fb:'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --gut:clamp(20px, 5vw, 64px);
+  --section-py:clamp(76px, 8.5vw, 124px);
+}
+
+/* ── Barra de scroll personalizada y estilizada ── */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #072E31;
+}
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #14B8A6 0%, #0B5156 100%);
+  border-radius: 99px;
+  border: 2px solid #072E31;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #2dd4bf 0%, #126B71 100%);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #14B8A6 #072E31;
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0; background:var(--canvas); color:var(--ink);
+  font-family:var(--fb); font-size:16px; line-height:1.6;
+  -webkit-font-smoothing:antialiased; overflow-x:hidden;
+}
+img{max-width:100%; display:block}
+h1,h2,h3,h4{font-family:var(--fd); margin:0; text-wrap:balance; letter-spacing:-.03em; line-height:1.06}
+p{margin:0}
+a{color:inherit}
+::selection{background:var(--koda); color:#fff}
+
+.shell{max-width:1220px; margin-inline:auto; padding-inline:var(--gut)}
+
+/* ── etiqueta de sección ─────────────────────────────────────────────── */
+.tag{
+  font-family:var(--fd); font-weight:800; font-size:.72rem; letter-spacing:.18em;
+  text-transform:uppercase; color:var(--koda);
+  display:inline-flex; align-items:center; gap:12px; margin-bottom:20px;
+}
+.tag::before{content:""; width:30px; height:2px; background:var(--koda); flex:none}
+.tag.on-dark{color:var(--teal)}
+.tag.on-dark::before{background:var(--teal)}
+.tag.warn{color:var(--alarm)}
+.tag.warn::before{background:var(--alarm)}
+
+/* ── barra superior ──────────────────────────────────────────────────── */
+.topbar{
+  position:fixed; inset:0 0 auto 0; z-index:60; display:flex; align-items:center;
+  justify-content:space-between; gap:20px;
+  padding:12px var(--gut);
+  background:rgba(255,255,255,.95); backdrop-filter:blur(18px);
+  border-bottom:1px solid rgba(11,81,86,.08);
+  box-shadow:0 2px 16px -4px rgba(11,81,86,.06);
+}
+.brandmark{
+  position:relative; display:inline-flex; align-items:center;
+  background:transparent; padding:0; border-radius:0;
+  box-shadow:none; flex:none;
+}
+.brandmark img{height:46px; width:auto; display:block}
+.topbar .links{display:flex; align-items:center; gap:32px}
+.topbar .links a{
+  font-size:.86rem; font-weight:600; text-decoration:none; transition:color .25s;
+}
+.topbar .links a:not(.btn){color:var(--ink)}
+.topbar .links a:not(.btn):hover{color:var(--koda)}
+@media (max-width:780px){ .topbar .links a:not(.btn){display:none} }
+
+.btn{
+  font-family:var(--fd); font-weight:800; font-size:.78rem; letter-spacing:.1em; text-transform:uppercase;
+  padding:.88em 1.65em; border-radius:10px; text-decoration:none; display:inline-block;
+  transition:transform .25s cubic-bezier(.2,.7,.3,1), box-shadow .25s, background .25s; border:0; cursor:pointer;
+}
+.btn-fill{
+  background:var(--koda); color:#fff;
+  box-shadow:0 6px 20px -5px rgba(11,81,86,.45);
+}
+.btn-fill:hover{transform:translateY(-2px); background:var(--koda-hover); box-shadow:0 12px 28px -7px rgba(11,81,86,.55)}
+.topbar .btn-fill{background:var(--koda); color:#fff}
+.topbar .btn-fill:hover{background:var(--koda-hover)}
+.btn-line{border:1.5px solid rgba(255,255,255,.42); color:#fff; backdrop-filter:blur(8px)}
+.btn-line:hover{border-color:var(--teal); color:var(--teal); transform:translateY(-2px); background:rgba(20,184,166,.1)}
+
+/* ── hero ────────────────────────────────────────────────────────────── */
+.hero{
+  position:relative; overflow:hidden; color:#EAF6F5;
+  background:
+    radial-gradient(1000px 600px at 84% 12%, rgba(20,184,166,.28), transparent 64%),
+    radial-gradient(800px 520px at 8% 88%, rgba(14,165,233,.22), transparent 64%),
+    radial-gradient(500px 400px at 50% 50%, rgba(11,81,86,.45), transparent 75%),
+    linear-gradient(135deg, #0B5156 0%, #093E42 36%, #072E31 70%, #051F22 100%);
+  padding:clamp(120px, 14vw, 156px) 0 clamp(72px, 8vw, 108px);
+}
+.hero::before{
+  content:""; position:absolute; inset:0;
+  background-image:radial-gradient(rgba(255,255,255,.08) 1px, transparent 1px);
+  background-size:28px 28px; pointer-events:none; opacity:.45;
+}
+.hero::after{
+  content:""; position:absolute; inset:auto 0 -1px 0; height:120px;
+  background:linear-gradient(to bottom, transparent, var(--canvas)); pointer-events:none; z-index:3;
+}
+.hero-grid{display:grid; grid-template-columns:minmax(0,1fr); gap:52px; position:relative; z-index:2}
+.hero h1{
+  font-size:clamp(2.1rem, 4.2vw, 3.45rem); font-weight:900; color:#fff; max-width:20ch;
+  line-height:1.06;
+}
+.hero h1 b{
+  font-weight:900; color:transparent; background:linear-gradient(100deg, var(--teal), var(--cyan));
+  -webkit-background-clip:text; background-clip:text;
+}
+.hero .lede{
+  margin-top:20px; font-size:clamp(1rem,1.6vw,1.18rem); color:rgba(232,246,245,.85);
+  max-width:54ch; line-height:1.64;
+}
+.hero .acts{margin-top:34px; display:flex; gap:14px; flex-wrap:wrap; align-items:center}
+
+/* Las 3 métricas del hero: grid de 3 columnas fijas en desktop, sin romper línea */
+.hero .foot{
+  margin-top:38px; padding-top:28px; border-top:1px solid rgba(255,255,255,.14);
+  display:grid !important; grid-template-columns:1fr 1fr 1fr !important; gap:clamp(16px, 2.5vw, 36px) !important;
+  align-items:start;
+}
+.hero .foot div span{
+  display:block; font-family:var(--fd); font-weight:900; font-size:clamp(1.6rem, 2.4vw, 2.1rem); color:#fff; letter-spacing:-.03em;
+  line-height:1;
+}
+.hero .foot div small{
+  display:block; font-size:.72rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:rgba(232,246,245,.65);
+  margin-top:8px; line-height:1.35;
+}
+@media (max-width:560px){
+  .hero .foot{grid-template-columns:1fr !important; gap:18px !important}
+}
+
+/* marco de captura */
+.frame{
+  border-radius:14px; overflow:hidden; background:#0d2c2f;
+  border:1px solid rgba(255,255,255,.16); box-shadow:0 36px 85px -28px rgba(0,0,0,.75), 0 0 0 1px rgba(255,255,255,.05);
+  transition:transform .4s ease, box-shadow .4s ease;
+}
+.frame:hover{box-shadow:0 50px 105px -32px rgba(0,0,0,.85)}
+.frame .bar{
+  height:34px; display:flex; align-items:center; gap:7px; padding:0 14px;
+  background:linear-gradient(to bottom,#123c40,#0e3235); border-bottom:1px solid rgba(255,255,255,.08);
+}
+.frame .bar i{width:9px; height:9px; border-radius:50%; background:rgba(255,255,255,.24); display:block}
+.frame .bar em{
+  margin-left:12px; font-style:normal; font-family:var(--fb); font-size:.72rem;
+  color:rgba(255,255,255,.48); letter-spacing:.04em;
+}
+.frame.light{background:var(--card); border-color:var(--line); box-shadow:var(--shell-lift)}
+.frame.light .bar{background:linear-gradient(to bottom,#fbfcfd,#f1f4f6); border-bottom-color:var(--line)}
+.frame.light .bar i{background:#d6dee4}
+.frame.light .bar em{color:#8492a6}
+
+/* HERO SHOT: Captura más grande y llamativa */
+.hero-shot{position:relative}
+.hero-shot .frame{
+  transform:perspective(2200px) rotateX(2deg);
+  width:100%;
+}
+.hero-shot .frame img{
+  width:100%; height:auto; display:block;
+}
+.hero-callout{
+  position:absolute; right:-18px; bottom:-40px; width:min(440px, 86%);
+  border-radius:14px; overflow:hidden; box-shadow:0 42px 85px -25px rgba(0,0,0,.88), 0 0 0 1px rgba(255,255,255,.2);
+  border:1px solid rgba(255,255,255,.2); backdrop-filter:blur(10px);
+  transition:transform .3s ease;
+  z-index:4;
+}
+.hero-callout:hover{transform:translateY(-3px)}
+.hero-callout figcaption{
+  background:linear-gradient(120deg, var(--teal), var(--cyan)); color:#04262a;
+  font-family:var(--fd); font-weight:900; font-size:.76rem; letter-spacing:.12em;
+  text-transform:uppercase; padding:10px 16px;
+}
+@media (min-width:1000px){
+  .hero-grid{grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr); align-items:center; gap:64px}
+}
+@media (max-width:640px){
+  .hero{padding:108px 0 68px}
+  .hero-callout{position:static; width:100%; margin-top:16px}
+}
+
+/* ── secciones ───────────────────────────────────────────────────────── */
+section{padding:var(--section-py) 0}
+.head{max-width:680px; margin-bottom:clamp(40px,5.5vw,68px)}
+.head h2{font-size:clamp(1.85rem,3.8vw,2.95rem); font-weight:800; line-height:1.08}
+.head p{margin-top:16px; color:var(--muted); font-size:1.02rem; max-width:58ch; line-height:1.64}
+
+/* ── historia: caos de pantallas → una ───────────────────────────────── */
+.story{background:var(--card); border-block:1px solid var(--line)}
+.chaos-wrap{display:grid; grid-template-columns:1fr; gap:40px; align-items:center}
+@media (min-width:980px){ .chaos-wrap{grid-template-columns:1.2fr auto 1fr; gap:36px; align-items:center} }
+
+/* Altura suficiente para que las 7 tarjetas respiren y NINGUNA quede tapada o cortada */
+.chaos{position:relative; height:740px}
+.win{
+  position:absolute; width:68%; border-radius:12px; background:var(--card);
+  border:1px solid var(--line); box-shadow:0 12px 30px -15px rgba(11,33,36,.32); overflow:hidden;
+  transition:transform .3s ease, box-shadow .3s ease;
+}
+.win:hover{box-shadow:0 24px 48px -14px rgba(11,33,36,.48); z-index:15; transform:scale(1.02) rotate(0deg) !important}
+.win{transform:rotate(var(--rot,0deg))}
+.win .wb{height:26px; background:#eef2f4; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:5px; padding:0 10px}
+.win .wb i{width:7px;height:7px;border-radius:50%;background:#cbd5dc;display:block}
+.win p{
+  padding:14px 16px 16px; font-size:.86rem; font-weight:600; color:var(--muted); line-height:1.44;
+}
+.win b{display:block; font-family:var(--fd); font-size:.68rem; letter-spacing:.15em; text-transform:uppercase; color:var(--alarm); margin-bottom:4px; font-weight:900}
+
+.arrowcol{display:flex; align-items:center; justify-content:center; color:var(--koda)}
+.arrowcol svg{width:50px; height:50px}
+@media (max-width:979px){
+  .arrowcol svg{transform:rotate(90deg); margin:8px auto}
+  .chaos{height:auto; display:flex; flex-direction:column; gap:14px}
+  .win{position:static !important; width:100% !important; transform:none !important}
+}
+
+.solved{
+  border-radius:18px; padding:38px 34px; color:#0B2124 !important;
+  background:#FFFFFF !important;
+  box-shadow:var(--shell-lift); border:2px solid var(--teal);
+}
+.solved-brand{margin-bottom:22px; display:inline-flex; align-items:center}
+.solved-brand img{height:48px; width:auto; display:block}
+.solved h3{font-size:1.52rem; font-weight:800; color:#0B2124 !important}
+.solved p{margin-top:12px; color:#475569 !important; font-size:.96rem; line-height:1.58}
+.solved ul{margin:24px 0 0; padding:0; list-style:none; display:grid; gap:14px}
+.solved li{display:flex; gap:12px; font-size:.94rem; color:#1E293B !important; align-items:flex-start}
+.solved li svg{width:18px; height:18px; flex:none; margin-top:3px; color:var(--koda)}
+
+/* ── bloques con captura real ────────────────────────────────────────── */
+.feat-section-wrap{display:grid; gap:clamp(76px, 9.5vw, 128px)}
+.feat{display:grid; grid-template-columns:1fr; gap:44px; align-items:center}
+@media (min-width:980px){
+  .feat{grid-template-columns:minmax(0,.82fr) minmax(0,1.18fr); gap:72px}
+  .feat.flip .feat-txt{order:2}
+  .feat.flip .feat-img{order:1}
+}
+.feat h3{font-size:clamp(1.5rem,2.6vw,2.15rem); font-weight:800}
+.feat p{margin-top:16px; color:var(--muted); font-size:1.02rem; line-height:1.64}
+.feat .pts{margin:24px 0 0; padding:0; list-style:none; display:grid; gap:14px}
+.feat .pts li{display:flex; gap:12px; font-size:.95rem; align-items:flex-start}
+.feat .pts svg{width:18px; height:18px; flex:none; margin-top:3px; color:var(--koda)}
+.feat-img{position:relative}
+.shotcap{
+  margin-top:14px; font-size:.78rem; color:var(--muted); font-weight:500;
+  display:flex; align-items:center; gap:8px;
+}
+.shotcap::before{content:""; width:6px; height:6px; border-radius:50%; background:var(--ok); flex:none}
+
+/* Tarjeta flotante con captura recortada completa (sin cortar nada) */
+.feat-badge-wrap{
+  margin-top:14px;
+}
+.inset-card{
+  background:var(--card); border:1px solid var(--line); border-radius:14px;
+  box-shadow:var(--shell-lift); overflow:hidden; padding:8px;
+  max-width:380px;
+}
+.inset-card img{width:100%; height:auto; display:block; border-radius:8px}
+
+/* ── módulos ─────────────────────────────────────────────────────────── */
+.mods{background:var(--card); border-block:1px solid var(--line)}
+.modgrid{
+  display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr));
+  gap:1px; background:var(--line); border:1px solid var(--line); border-radius:16px; overflow:hidden;
+  box-shadow:0 6px 24px -12px rgba(11,81,86,.08);
+}
+.mod{
+  background:var(--card); padding:24px 20px; transition:background .25s, transform .25s;
+  position:relative;
+}
+.mod:hover{
+  background:color-mix(in srgb, var(--koda) 5%, var(--card));
+}
+.mod b{display:block; font-family:var(--fd); font-weight:800; font-size:.98rem; letter-spacing:-.01em; color:var(--ink)}
+.mod span{display:block; margin-top:6px; font-size:.82rem; color:var(--muted); line-height:1.5}
+
+/* ── prueba en producción ────────────────────────────────────────────── */
+.proof-card{
+  display:grid; gap:36px; align-items:center; padding:clamp(32px, 5vw, 56px);
+  border-radius:24px; background:linear-gradient(135deg, #0B5156 0%, #072E31 100%);
+  color:#EAF6F5; position:relative; overflow:hidden;
+  box-shadow:0 18px 48px -20px rgba(11,81,86,.45);
+}
+.proof-card::before{
+  content:""; position:absolute; inset:0;
+  background-image:radial-gradient(rgba(255,255,255,.07) 1px, transparent 1px);
+  background-size:24px 24px; pointer-events:none;
+}
+.proof-card-grid{
+  display:grid; grid-template-columns:1fr; gap:36px; align-items:center; position:relative; z-index:2;
+}
+@media (min-width:960px){
+  .proof-card-grid{grid-template-columns:1.2fr .8fr; gap:52px}
+}
+.proof-card h3{font-size:clamp(1.5rem, 2.7vw, 2.2rem); font-weight:900; color:#fff; line-height:1.1}
+.proof-card p{margin-top:16px; color:rgba(234,246,245,.82); font-size:1.02rem; line-height:1.64; max-width:56ch}
+.proof-kpis{
+  display:grid; grid-template-columns:repeat(2, 1fr); gap:16px;
+}
+.proof-kpi-item{
+  background:rgba(255,255,255,.08); backdrop-filter:blur(10px);
+  border:1px solid rgba(255,255,255,.14); border-radius:14px; padding:18px 16px;
+}
+.proof-kpi-num{font-family:var(--fd); font-size:1.65rem; font-weight:900; color:var(--teal); line-height:1}
+.proof-kpi-label{font-size:.78rem; font-weight:600; color:rgba(234,246,245,.75); margin-top:6px; line-height:1.4}
+.live-pill{
+  display:inline-flex; align-items:center; gap:10px; font-family:var(--fd); font-weight:800;
+  font-size:.74rem; letter-spacing:.14em; text-transform:uppercase; color:#fff;
+  background:rgba(16,185,129,.2); padding:8px 16px; border-radius:99px;
+  border:1px solid rgba(16,185,129,.4); margin-bottom:18px;
+}
+.dot{width:9px; height:9px; border-radius:50%; background:var(--ok); position:relative; flex:none}
+.dot::after{content:""; position:absolute; inset:-4px; border-radius:50%; border:2px solid var(--ok); opacity:.5; animation:ping 2.4s ease-out infinite}
+@keyframes ping{0%{transform:scale(.6); opacity:.6} 70%{transform:scale(1.5); opacity:0} 100%{opacity:0}}
+
+/* ── cierre / demo ──────────────────────────────────────────────────── */
+.close{
+  color:var(--ink); position:relative; overflow:hidden;
+  background:
+    radial-gradient(900px 500px at 80% 20%, rgba(20,184,166,.14), transparent 64%),
+    radial-gradient(700px 450px at 15% 85%, rgba(14,165,233,.12), transparent 64%),
+    linear-gradient(180deg, var(--canvas) 0%, #FFFFFF 55%, #FFFFFF 100%);
+  border-top:1px solid var(--line);
+}
+.close-grid{
+  display:grid; grid-template-columns:1fr; gap:48px; align-items:center;
+}
+@media (min-width:980px){
+  .close-grid{grid-template-columns:1.05fr .95fr; gap:64px}
+}
+.close h2{font-size:clamp(1.95rem, 4vw, 3.2rem); font-weight:900; color:var(--ink); line-height:1.06}
+.close p{margin-top:18px; color:var(--muted); font-size:1.04rem; line-height:1.64; max-width:50ch}
+.close .acts{margin-top:34px; display:flex; gap:16px; flex-wrap:wrap; align-items:center}
+.close .mail{
+  font-family:var(--fd); font-weight:700; font-size:1rem; color:var(--koda);
+  text-decoration:none; border-bottom:2px solid rgba(11,81,86,.25); padding-bottom:2px;
+  transition:color .2s, border-color .2s;
+}
+.close .mail:hover{color:var(--koda-hover); border-color:var(--koda-hover)}
+
+.demo-box{
+  background:var(--card); border:1px solid var(--line); border-radius:20px;
+  padding:32px 28px; box-shadow:var(--shell-lift); position:relative;
+}
+.demo-box-head{
+  display:flex; align-items:center; gap:12px; margin-bottom:20px;
+  padding-bottom:18px; border-bottom:1px solid var(--line);
+}
+.demo-box-badge{
+  font-family:var(--fd); font-weight:800; font-size:.72rem; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--koda); background:color-mix(in srgb, var(--koda) 10%, transparent);
+  padding:6px 12px; border-radius:8px;
+}
+.demo-steps{display:grid; gap:18px; margin:0; padding:0; list-style:none}
+.demo-step-item{display:flex; gap:14px; align-items:flex-start}
+.demo-step-num{
+  width:28px; height:28px; border-radius:8px; background:var(--koda); color:#fff;
+  font-family:var(--fd); font-weight:800; font-size:.82rem; display:flex;
+  align-items:center; justify-content:center; flex:none;
+}
+.demo-step-content b{display:block; font-size:.94rem; color:var(--ink); font-weight:700}
+.demo-step-content span{display:block; font-size:.82rem; color:var(--muted); line-height:1.46; margin-top:2px}
+
+footer{
+  background:#FFFFFF; color:var(--muted); padding:38px 0;
+  border-top:1px solid var(--line);
+  font-size:.84rem;
+}
+footer .footer-brand{display:inline-flex; align-items:center}
+footer .footer-brand img{height:42px; width:auto; display:block}
+
+/* ── ANIMACIONES DE SCROLL VISIBLES Y DINÁMICAS ──────────────────────── */
+.rv{
+  opacity:0;
+  transform:translateY(32px);
+  transition:opacity .75s cubic-bezier(.16, 1, .3, 1), transform .75s cubic-bezier(.16, 1, .3, 1);
+  will-change:opacity, transform;
+}
+.rv.in{
+  opacity:1 !important;
+  transform:translateY(0) !important;
+}
+
+/* Las ventanas de la historia tienen su rotación conservada */
+.chaos .win.rv{
+  transform:translateY(32px) rotate(var(--rot,0deg));
+}
+.chaos .win.rv.in{
+  transform:rotate(var(--rot,0deg)) !important;
+}
+
+.rv-d1{transition-delay:.08s}
+.rv-d2{transition-delay:.16s}
+.rv-d3{transition-delay:.24s}
+.rv-d4{transition-delay:.32s}
+.rv-d5{transition-delay:.40s}
+.rv-d6{transition-delay:.48s}
+
+.zoom{
+  opacity:0;
+  transform:scale(.92) translateY(36px);
+  transition:opacity .85s cubic-bezier(.16, 1, .3, 1), transform .9s cubic-bezier(.16, 1, .3, 1);
+  will-change:opacity, transform;
+}
+.zoom.in{
+  opacity:1 !important;
+  transform:scale(1) translateY(0) !important;
+}
+
+/* Animación inicial del hero al cargar la página */
+.hero .rv{
+  opacity:0;
+  transform:translateY(24px);
+  animation:riseHero .85s cubic-bezier(.16, 1, .3, 1) forwards;
+}
+.hero .rv-d1{animation-delay:.1s}
+.hero .rv-d2{animation-delay:.2s}
+.hero .rv-d3{animation-delay:.32s}
+.hero .rv-d4{animation-delay:.44s}
+@keyframes riseHero{to{opacity:1; transform:translateY(0)}}
+
+@media (prefers-reduced-motion: reduce){
+  html{scroll-behavior:auto}
+  .rv,.zoom,.hero .rv{opacity:1 !important; transform:none !important; animation:none !important; transition:none !important}
+  .dot::after{animation:none}
+}
+</style>
+</head>
+<body>
+
+<div class="topbar" id="topbar">
+  <div class="brandmark">
+    <img src="{{logo}}" alt="KODA">
+  </div>
+  <nav class="links">
+    <a href="#historia">El problema</a>
+    <a href="#sistema">El sistema</a>
+    <a href="#modulos">Módulos</a>
+    <a class="btn btn-fill" href="#demo">Pedir demo</a>
+  </nav>
+</div>
+
+<header class="hero">
+  <div class="shell hero-grid">
+    <div>
+      <div class="tag on-dark rv">ERP bimonetario · Retail y Distribución</div>
+      <h1 class="rv rv-d1">Siete pantallas para cerrar una venta. <b>O una sola.</b></h1>
+      <p class="lede rv rv-d2">En KODA el precio en bolívares y en dólares, el stock de cada tienda y la cotización del cliente viven en la misma pantalla. Sin saltar de programa en programa. Sin calcular la tasa a mano.</p>
+      <div class="acts rv rv-d3">
+        <a class="btn btn-fill" href="#demo">Pedir una demo</a>
+        <a class="btn btn-line" href="#historia">Ver el problema</a>
+      </div>
+      <div class="foot rv rv-d4">
+        <div><span>2</span><small>monedas por documento</small></div>
+        <div><span>12</span><small>módulos operativos</small></div>
+        <div><span>1</span><small>pantalla para cotizar</small></div>
+      </div>
+    </div>
+    <div class="hero-shot rv rv-d3">
+      <figure class="frame" style="margin:0">
+        <div class="bar"><i></i><i></i><i></i><em>Punto de venta — KODA ERP</em></div>
+        <img src="{{pos}}" alt="Punto de venta de KODA ERP mostrando catálogo con precios bimonetarios y control de stock" loading="eager">
+      </figure>
+      <figure class="hero-callout" style="margin:0">
+        <figcaption>Cada precio, en las dos monedas</figcaption>
+        <img src="{{pos_detalle}}" alt="Detalle del catálogo: precio en dólares y su conversión oficial en bolívares">
+      </figure>
+    </div>
+  </div>
+</header>
+
+<section class="story" id="historia">
+  <div class="shell">
+    <div class="head rv">
+      <div class="tag warn">Lo que pasa hoy en el mostrador</div>
+      <h2>Un vendedor. Un cliente. Siete pantallas y un lapicero.</h2>
+      <p>Un recorrido real con los sistemas administrativos tradicionales: cada consulta de stock, precio o documento obliga a cambiar de programa.</p>
+    </div>
+
+    <div class="chaos-wrap">
+      <div class="chaos">
+        <article class="win rv" style="left:0; top:0; --rot:-1.1deg">
+          <div class="wb"><i></i><i></i><i></i></div>
+          <p><b>Pantalla 1</b>Busca el producto y ve el precio — solo en bolívares.</p>
+        </article>
+        <article class="win rv rv-d1" style="left:30%; top:104px; --rot:.9deg">
+          <div class="wb"><i></i><i></i><i></i></div>
+          <p><b>Pantalla 2</b>Abre otro programa para confirmar el modelo exacto.</p>
+        </article>
+        <article class="win rv rv-d2" style="left:4%; top:208px; --rot:-.7deg">
+          <div class="wb"><i></i><i></i><i></i></div>
+          <p><b>Pantalla 3</b>Otro más para saber si hay existencia en esa tienda.</p>
+        </article>
+        <article class="win rv rv-d3" style="left:32%; top:312px; --rot:1.2deg">
+          <div class="wb"><i></i><i></i><i></i></div>
+          <p><b>Pantalla 4</b>Otro para verificar estado o garantía del equipo.</p>
+        </article>
+        <article class="win rv rv-d4" style="left:2%; top:416px; --rot:-1deg">
+          <div class="wb"><i></i><i></i><i></i></div>
+          <p><b>Pantalla 5</b>Otro programa para armar la cotización.</p>
+        </article>
+        <article class="win rv rv-d5" style="left:30%; top:520px; --rot:.6deg">
+          <div class="wb"><i></i><i></i><i></i></div>
+          <p><b>Pantalla 6</b>Otro más solo para imprimirla.</p>
+        </article>
+        <article class="win rv rv-d6" style="left:5%; top:624px; --rot:-1.3deg; border-color:var(--alarm); background:var(--alarm-soft)">
+          <div class="wb"><i></i><i></i><i></i></div>
+          <p><b>Y al final</b>El precio en dólares, anotado a mano sobre el papel.</p>
+        </article>
+      </div>
+
+      <div class="arrowcol rv rv-d3" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+      </div>
+
+      <div class="solved rv rv-d4">
+        <div class="solved-brand"><img src="{{logo}}" alt="KODA"></div>
+        <h3>Una sola pantalla</h3>
+        <p>El vendedor busca el producto y ya tiene todo lo que necesita para cerrar la venta.</p>
+        <ul>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Precio en Bs. y en US$, calculado con la tasa del día</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Existencia real de cada tienda y depósito</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Cotización generada e impresa desde ahí mismo</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Y si el cliente acepta, se convierte en factura fiscal</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="sistema">
+  <div class="shell">
+    <div class="head rv">
+      <div class="tag">El sistema, tal cual es</div>
+      <h2>Estas no son maquetas. Es KODA funcionando.</h2>
+      <p>Todas las pantallas de abajo son capturas directas del sistema en producción, operando con inventario multi-tienda y precios duales.</p>
+    </div>
+
+    <div class="feat-section-wrap">
+
+      <div class="feat">
+        <div class="feat-txt rv">
+          <h3>La divisa deja de ser un cálculo mental</h3>
+          <p>Cada producto, cada línea de la factura y cada cotización llevan el monto en dólares y su equivalente en bolívares, con la tasa congelada en el documento. El vendedor nunca vuelve a sacar la calculadora ni el lapicero.</p>
+          <ul class="pts">
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Elige si el documento se imprime en US$, en Bs. o en ambos</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>IVA 16% e IGTF 3% aplicados solos según la forma de pago</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Divisa, pago móvil, transferencia, efectivo y pago dividido</li>
+          </ul>
+        </div>
+        <div class="feat-img zoom">
+          <figure class="frame light" style="margin:0">
+            <div class="bar"><i></i><i></i><i></i><em>Facturación · Punto de venta</em></div>
+            <img src="{{pos}}" alt="Pantalla de punto de venta de KODA con el catálogo mostrando precios duales y el panel de métodos de pago" loading="lazy">
+          </figure>
+          <p class="shotcap">Captura real del punto de venta de KODA</p>
+        </div>
+      </div>
+
+      <div class="feat flip">
+        <div class="feat-txt rv">
+          <h3>Cada tienda, con su existencia real</h3>
+          <p>El inventario no es un número global que nadie sabe dónde está. Cada sucursal y cada depósito tienen su propia existencia, su responsable y su valor — y se ven todos juntos desde una pantalla, sin llamar a preguntar.</p>
+          <ul class="pts">
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Transferencias entre sedes con confirmación de recepción</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Alertas de stock crítico antes de quedarte sin mercancía</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Kardex: cada entrada, salida y ajuste queda registrado</li>
+          </ul>
+          <div class="feat-badge-wrap">
+            <div class="inset-card">
+              <img src="{{sucursal_detalle}}" alt="Detalle de existencias por sucursal en KODA">
+            </div>
+          </div>
+        </div>
+        <div class="feat-img zoom">
+          <figure class="frame light" style="margin:0">
+            <div class="bar"><i></i><i></i><i></i><em>Inventario · Gestión de almacenes</em></div>
+            <img src="{{almacenes}}" alt="Pantalla de gestión de almacenes de KODA con tres sedes, su valor de inventario y su responsable" loading="lazy">
+          </figure>
+          <p class="shotcap">Captura real del maestro de almacenes</p>
+        </div>
+      </div>
+
+      <div class="feat">
+        <div class="feat-txt rv">
+          <h3>De la cotización a la factura, sin volver a escribir nada</h3>
+          <p>La propuesta que le entregas al cliente queda guardada con su estado y su vencimiento. Cuando el cliente dice que sí, se convierte en orden y en factura fiscal con los mismos datos.</p>
+          <ul class="pts">
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Historial completo por cliente, con monto y estado</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Aviso de las que vencen esta semana</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Tasa de conversión de cotización a venta, calculada sola</li>
+          </ul>
+        </div>
+        <div class="feat-img zoom">
+          <figure class="frame light" style="margin:0">
+            <div class="bar"><i></i><i></i><i></i><em>Ventas · Cotizaciones a clientes</em></div>
+            <img src="{{cotizaciones}}" alt="Pantalla de cotizaciones de KODA con el listado de propuestas, su monto y su estado" loading="lazy">
+          </figure>
+          <p class="shotcap">Captura real del módulo de cotizaciones</p>
+        </div>
+      </div>
+
+      <div class="feat flip">
+        <div class="feat-txt rv">
+          <h3>El catálogo que sí sabe cuánto vale tu negocio</h3>
+          <p>Costo, precio, margen, rotación y valor total del inventario en una sola tabla — con las tres tarifas (detal, mayor y gran mayor) que tu negocio realmente usa.</p>
+          <ul class="pts">
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Tres niveles de precio por producto, sin listas paralelas</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Productos exentos de IVA marcados desde el catálogo</li>
+            <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Valor del inventario actualizado con cada movimiento</li>
+          </ul>
+        </div>
+        <div class="feat-img zoom">
+          <figure class="frame light" style="margin:0">
+            <div class="bar"><i></i><i></i><i></i><em>Inventario · Catálogo maestro</em></div>
+            <img src="{{productos}}" alt="Catálogo de productos de KODA con costo, precio, valor total y estado de cada artículo" loading="lazy">
+          </figure>
+          <p class="shotcap">Captura real del catálogo de productos</p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section class="mods" id="modulos">
+  <div class="shell">
+    <div class="head rv">
+      <div class="tag">Todo dentro del mismo sistema</div>
+      <h2>Doce módulos que comparten la misma información.</h2>
+      <p>No son integraciones entre programas distintos: es un solo sistema donde lo que registra el vendedor ya lo ve el contador.</p>
+    </div>
+    <div class="modgrid">
+      <div class="mod rv"><b>Ventas</b><span>Cotizaciones, órdenes, notas de entrega y listas de precios</span></div>
+      <div class="mod rv rv-d1"><b>Facturación</b><span>Punto de venta, facturación fiscal y notas de crédito</span></div>
+      <div class="mod rv rv-d2"><b>Inventario</b><span>Catálogo, kardex, almacenes, transferencias y toma física</span></div>
+      <div class="mod rv rv-d3"><b>Compras</b><span>Proveedores, requisiciones, aprobaciones y recepción</span></div>
+      <div class="mod rv"><b>Cobranzas</b><span>Cuentas por cobrar y seguimiento de clientes deudores</span></div>
+      <div class="mod rv rv-d1"><b>Pagos</b><span>Cuentas por pagar y programación de desembolsos</span></div>
+      <div class="mod rv rv-d2"><b>Tesorería</b><span>Bancos, caja, conciliación y flujo de efectivo</span></div>
+      <div class="mod rv rv-d3"><b>Contabilidad</b><span>Plan de cuentas, asientos y estados financieros</span></div>
+      <div class="mod rv"><b>Fiscal</b><span>Retenciones de IVA e ISLR y libros para el SENIAT</span></div>
+      <div class="mod rv rv-d1"><b>Logística</b><span>Flota, choferes, despachos y mantenimiento de vehículos</span></div>
+      <div class="mod rv rv-d2"><b>Nómina</b><span>Personal, cálculo de nómina y control de asistencia</span></div>
+      <div class="mod rv rv-d3"><b>Reportes</b><span>Indicadores del negocio y auditoría de cada movimiento</span></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="shell">
+    <div class="proof-card rv">
+      <div class="proof-card-grid">
+        <div>
+          <div class="live-pill"><span class="dot"></span>En producción diaria</div>
+          <h3>KODA ya está trabajando todos los días.</h3>
+          <p>No es un prototipo ni una promesa: hoy corre en producción para empresas comerciales que facturan y llevan su inventario multicentro en las dos monedas. Todas las capturas de esta página salen del sistema tal como está hoy.</p>
+        </div>
+        <div class="proof-kpis">
+          <div class="proof-kpi-item">
+            <div class="proof-kpi-num">100%</div>
+            <div class="proof-kpi-label">Tasa oficial congelada por documento fiscal</div>
+          </div>
+          <div class="proof-kpi-item">
+            <div class="proof-kpi-num">Multi</div>
+            <div class="proof-kpi-label">Sedes, depósitos y almacenes centralizados</div>
+          </div>
+          <div class="proof-kpi-item">
+            <div class="proof-kpi-num">Bs. + $</div>
+            <div class="proof-kpi-label">Doble moneda en caja, cobranza y catálogo</div>
+          </div>
+          <div class="proof-kpi-item">
+            <div class="proof-kpi-num">0</div>
+            <div class="proof-kpi-label">Programas externos para cotizar y facturar</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="close" id="demo">
+  <div class="shell">
+    <div class="close-grid">
+      <div class="rv">
+        <div class="tag">Hablemos</div>
+        <h2>Quince minutos con tus propios productos.</h2>
+        <p>Cuéntanos qué vendes y montamos la demo con tu catálogo, tus tiendas y tus precios reales — para que veas exactamente cómo se vería tu mostrador. Sin compromiso.</p>
+        <div class="acts">
+          <a class="btn btn-fill" href="mailto:byelocode@gmail.com?subject=Quiero%20una%20demo%20de%20KODA&body=Hola%2C%20me%20interesa%20ver%20KODA%20para%20mi%20negocio.%0A%0ANegocio%3A%20%0AQu%C3%A9%20vendo%3A%20%0ACu%C3%A1ntas%20tiendas%3A%20">Escribir a KODA</a>
+          <a class="mail" href="mailto:byelocode@gmail.com">byelocode@gmail.com</a>
+        </div>
+      </div>
+      <div class="demo-box rv rv-d2">
+        <div class="demo-box-head">
+          <span class="demo-box-badge">¿Cómo es la demo?</span>
+          <span style="font-size:.84rem; font-weight:600; color:var(--muted)">100% personalizada</span>
+        </div>
+        <ul class="demo-steps">
+          <li class="demo-step-item">
+            <div class="demo-step-num">1</div>
+            <div class="demo-step-content">
+              <b>Nos dices tu tipo de negocio</b>
+              <span>Retail, repuestos, tecnología, ferretería o distribución con una o varias sedes.</span>
+            </div>
+          </li>
+          <li class="demo-step-item">
+            <div class="demo-step-num">2</div>
+            <div class="demo-step-content">
+              <b>Cargamos tu esquema de precios</b>
+              <span>Tasa del día, precios en dólares, bolívares y tarifas detal/mayorista reales.</span>
+            </div>
+          </li>
+          <li class="demo-step-item">
+            <div class="demo-step-num">3</div>
+            <div class="demo-step-content">
+              <b>Ves el mostrador en vivo</b>
+              <span>Simulamos una venta real: desde la búsqueda y stock hasta la factura fiscal en 1 pantalla.</span>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="shell" style="display:flex; justify-content:space-between; gap:20px; flex-wrap:wrap; align-items:center; width:100%; max-width:1220px">
+    <span class="footer-brand"><img src="{{logo}}" alt="KODA ERP"></span>
+    <span style="font-weight:500">Imagina. Programa. Evoluciona. · © 2026 KODA ERP</span>
+  </div>
+</footer>
+
+<script>
+(function(){
+  var targets = document.querySelectorAll('.rv, .zoom');
+  
+  if (!('IntersectionObserver' in window)) {
+    targets.forEach(function(el){ el.classList.add('in'); });
+    return;
+  }
+
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if (e.isIntersecting){
+        e.target.classList.add('in');
+      }
+    });
+  }, {
+    rootMargin: '0px 0px -60px 0px',
+    threshold: 0.12
+  });
+
+  targets.forEach(function(el){
+    // Si ya está en pantalla o cerca al cargar
+    var rect = el.getBoundingClientRect();
+    if (rect.top < window.innerHeight - 40) {
+      el.classList.add('in');
+    } else {
+      io.observe(el);
+    }
+  });
+})();
+</script>
+</body>
+</html>
