@@ -8,15 +8,16 @@ from typing import Optional, List
 
 from backend.core.database import get_db
 from backend.models.operations import (
-    Venta, Cliente, Proveedor, Producto, VentaDetalle, KardexMovimiento, EvaluacionProveedor
+    Venta, Cliente, Proveedor, Producto, VentaDetalle, KardexMovimiento, EvaluacionProveedor, AjusteInventario
 )
 from backend.models.erp_extended import (
     Compra, CuentaPorCobrar, CuentaPorPagar, CuentaBancaria, MovimientoBancario,
     Cotizacion, CotizacionItem, OrdenVenta, RequisicionCompra, TransferenciaInventario,
     RetencionIVA, RetencionISLR, Vendedor, Almacen, RecepcionStock, DevolucionProveedor, LoteProducto,
     NotaCredito, AnticipoCliente, Cheque, FondoCajaChica, GastoCajaChica, StockPorAlmacen,
-    NotaEntrega, NotaEntregaItem
+    NotaEntrega, NotaEntregaItem, DevolucionCliente, CuarentenaLogistica, TurnoDespacho, ConteoFisico, Garantia
 )
+from backend.models.fiscal import CorrelativoFiscal
 from backend.schemas.operations import (
     CotizacionCreate, CotizacionStatusUpdate, CompraCreate, RecepcionStockCreate, RecepcionStockResponse,
     DevolucionProveedorCreate, NotaEntregaCreate, NotaEntregaEstadoUpdate
@@ -447,3 +448,559 @@ def transferencias_stats(db: Session = Depends(get_db), current_user = Depends(g
 
 
 # --- TASAS ALIAS ---
+
+
+# ==============================================================================
+# DEVOLUCIONES DE CLIENTE (MOSTRADOR / POS) & FICHA 360 DE PRODUCTO
+# ==============================================================================
+
+class DevolucionClienteCreate(BaseModel):
+    venta_id: int
+    producto_id: int
+    cantidad: Decimal = Field(..., gt=0)
+    motivo: str = Field(..., min_length=1, max_length=255)
+    condicion: str = Field("BUENO", description="BUENO o DAÑADO")
+    almacen_id: Optional[int] = None
+
+
+@inventario_ext_router.post("/devoluciones-cliente", status_code=201)
+def crear_devolucion_cliente(
+    payload: DevolucionClienteCreate,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    Registra la devolución de un producto vendido por mostrador / POS.
+    - condicion == 'BUENO': reingresa al stock del almacén y suma al stock global del producto
+      mediante KardexMovimiento(tipo_movimiento='Devolucion_Cliente').
+    - condicion == 'DAÑADO': NO altera stock ni crea movimiento en Kardex, pero queda registrado
+      en devoluciones_cliente para trazabilidad completa en la Ficha 360.
+    """
+    condicion_clean = payload.condicion.strip().upper()
+    if condicion_clean not in ["BUENO", "DAÑADO"]:
+        raise HTTPException(status_code=400, detail="La condición debe ser 'BUENO' o 'DAÑADO'.")
+
+    # 1. Validar producto
+    producto = db.query(Producto).filter(
+        Producto.id == payload.producto_id,
+        Producto.tenant_id == current_user.tenant_id
+    ).first()
+    if not producto:
+        raise HTTPException(status_code=404, detail="Producto no encontrado.")
+
+    # 2. Validar venta
+    venta = db.query(Venta).filter(
+        Venta.id == payload.venta_id,
+        Venta.tenant_id == current_user.tenant_id
+    ).first()
+    if not venta:
+        raise HTTPException(status_code=404, detail="Venta no encontrada.")
+
+    # 3. Generar número correlativo
+    correlativo = (
+        db.query(CorrelativoFiscal)
+        .filter(
+            CorrelativoFiscal.tipo_documento == "DEVOLUCION_CLIENTE",
+            CorrelativoFiscal.tenant_id == current_user.tenant_id
+        )
+        .with_for_update()
+        .first()
+    )
+    if not correlativo:
+        correlativo = CorrelativoFiscal(
+            tipo_documento="DEVOLUCION_CLIENTE",
+            prefijo="DEV-CLI-",
+            siguiente_numero=1,
+            tenant_id=current_user.tenant_id
+        )
+        db.add(correlativo)
+        db.flush()
+
+    num_seq = correlativo.siguiente_numero
+    correlativo.siguiente_numero += 1
+    numero_dev = f"{correlativo.prefijo}{str(num_seq).zfill(5)}"
+
+    # 4. Crear registro DevolucionCliente
+    dev_cliente = DevolucionCliente(
+        tenant_id=current_user.tenant_id,
+        numero_devolucion=numero_dev,
+        venta_id=payload.venta_id,
+        producto_id=payload.producto_id,
+        cantidad=payload.cantidad,
+        motivo=payload.motivo.strip(),
+        condicion=condicion_clean,
+        fecha=datetime.now(timezone.utc)
+    )
+    db.add(dev_cliente)
+    db.flush()
+
+    # 5. Si es BUENO, reingresa a stock vía Kardex y StockPorAlmacen
+    if condicion_clean == "BUENO":
+        almacen_dest_id = payload.almacen_id or get_almacen_principal_id(db, current_user.tenant_id)
+        if not almacen_dest_id:
+            alm = db.query(Almacen).filter(Almacen.tenant_id == current_user.tenant_id, Almacen.activo == True).first()
+            if alm:
+                almacen_dest_id = alm.id
+
+        # Kardex
+        kardex = KardexMovimiento(
+            tenant_id=current_user.tenant_id,
+            producto_id=payload.producto_id,
+            tipo_movimiento="Devolucion_Cliente",
+            cantidad=payload.cantidad,
+            documento_referencia=numero_dev,
+            almacen_id=almacen_dest_id,
+            estado="ACTIVO",
+            fecha=datetime.now(timezone.utc)
+        )
+        db.add(kardex)
+
+        # Actualizar stock global del producto
+        producto.stock = (producto.stock or Decimal("0.00")) + payload.cantidad
+
+        # Actualizar stock por almacén
+        if almacen_dest_id:
+            spa = db.query(StockPorAlmacen).filter(
+                StockPorAlmacen.producto_id == payload.producto_id,
+                StockPorAlmacen.almacen_id == almacen_dest_id,
+                StockPorAlmacen.tenant_id == current_user.tenant_id
+            ).first()
+            if spa:
+                spa.cantidad = (spa.cantidad or Decimal("0.00")) + payload.cantidad
+            else:
+                spa = StockPorAlmacen(
+                    tenant_id=current_user.tenant_id,
+                    producto_id=payload.producto_id,
+                    almacen_id=almacen_dest_id,
+                    cantidad=payload.cantidad
+                )
+                db.add(spa)
+
+    db.commit()
+    db.refresh(dev_cliente)
+
+    return {
+        "ok": True,
+        "id": dev_cliente.id,
+        "numero_devolucion": dev_cliente.numero_devolucion,
+        "condicion": dev_cliente.condicion,
+        "cantidad": float(dev_cliente.cantidad),
+        "mensaje": "Devolución registrada exitosamente."
+    }
+
+
+@inventario_ext_router.get("/productos/{id}/ficha-360")
+def obtener_ficha_360_producto(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    Ficha 360 del producto — Consulta unificada de las 13 fuentes de datos del ERP.
+    """
+    producto = db.query(Producto).filter(
+        Producto.id == id,
+        Producto.tenant_id == current_user.tenant_id
+    ).first()
+    if not producto:
+        raise HTTPException(status_code=404, detail="Producto no encontrado.")
+
+    # 1. Rotación y cuadrante — fuente de verdad única: calcular_matriz_abc()
+    # Se clasifican TODOS los productos del tenant con umbrales dinámicos (promedio del catálogo)
+    # para que la Ficha 360 siempre coincida con el reporte de Matriz ABC.
+    from backend.services.analitica_inventario import calcular_matriz_abc
+
+    _CUADRANTE_MAP = {
+        "stars":     ("Estrellas (Alta Rotación / Alto Margen)",           "bg-teal-50 text-[#0b5156] border-[#0b5156]"),
+        "questions": ("Incógnitas (Baja Rotación / Alto Margen)",           "bg-blue-50 text-blue-700 border-blue-200"),
+        "cows":      ("Vacas de Efectivo (Alta Rotación / Bajo Margen)",    "bg-emerald-50 text-emerald-700 border-emerald-200"),
+        "dogs":      ("Perros (Baja Rotación / Bajo Margen)",               "bg-rose-50 text-rose-700 border-rose-200"),
+    }
+
+    clasificados = calcular_matriz_abc(db, current_user.tenant_id)
+    # Buscar este producto en el resultado; si no existe (catálogo vacío) crear uno base
+    _clasificado = next((c for c in clasificados if c.producto.id == id), None)
+
+    precio_usd = float(producto.precio_usd or 0.0)
+    costo_usd = float(producto.costo_usd or 0.0)
+    rentabilidad_bruta = (_clasificado.rentabilidad if _clasificado else
+                          ((precio_usd - costo_usd) / precio_usd * 100.0) if precio_usd > 0 else 0.0)
+    rotacion_unidades = _clasificado.rotacion if _clasificado else 0.0
+
+    _clave_cuadrante = _clasificado.cuadrante if _clasificado else "dogs"
+    cuadrante, cuadrante_badge = _CUADRANTE_MAP.get(_clave_cuadrante, _CUADRANTE_MAP["dogs"])
+
+    # Fuente #6: StockPorAlmacen
+    almacenes_rows = db.query(
+        StockPorAlmacen.id,
+        StockPorAlmacen.almacen_id,
+        StockPorAlmacen.cantidad,
+        Almacen.nombre.label("almacen_nombre"),
+        Almacen.codigo.label("almacen_codigo"),
+        Almacen.tipo.label("almacen_tipo")
+    ).join(
+        Almacen, StockPorAlmacen.almacen_id == Almacen.id
+    ).filter(
+        StockPorAlmacen.producto_id == id,
+        StockPorAlmacen.tenant_id == current_user.tenant_id
+    ).all()
+
+    stock_almacenes = [
+        {
+            "id": r.id,
+            "almacen_id": r.almacen_id,
+            "nombre": r.almacen_nombre,
+            "codigo": r.almacen_codigo,
+            "tipo": r.almacen_tipo,
+            "es_principal": (r.almacen_tipo == "LOCAL"),
+            "cantidad": float(r.cantidad)
+        }
+        for r in almacenes_rows
+    ]
+
+    # Fuente #9: LoteProducto
+    lotes_rows = db.query(LoteProducto).filter(
+        LoteProducto.producto_id == id,
+        LoteProducto.tenant_id == current_user.tenant_id
+    ).order_by(LoteProducto.fecha_vencimiento.asc().nullslast()).all()
+
+    lotes = [
+        {
+            "id": l.id,
+            "lote": l.lote,
+            "fecha_vencimiento": l.fecha_vencimiento.strftime("%Y-%m-%d") if l.fecha_vencimiento else None,
+            "cantidad": float(l.cantidad)
+        }
+        for l in lotes_rows
+    ]
+
+    # Historial de Movimientos Unificado:
+    # Fuente #2: KardexMovimiento
+    # Fuente #3: AjusteInventario
+    # Fuente #5: TransferenciaInventario
+    # Fuente #7: RecepcionStock
+    movimientos = []
+
+    kardex_rows = db.query(
+        KardexMovimiento.id,
+        KardexMovimiento.fecha,
+        KardexMovimiento.tipo_movimiento,
+        KardexMovimiento.cantidad,
+        KardexMovimiento.documento_referencia,
+        Almacen.nombre.label("almacen_nombre")
+    ).outerjoin(
+        Almacen, KardexMovimiento.almacen_id == Almacen.id
+    ).filter(
+        KardexMovimiento.producto_id == id,
+        KardexMovimiento.tenant_id == current_user.tenant_id
+    ).order_by(KardexMovimiento.fecha.desc()).limit(200).all()
+
+    for k in kardex_rows:
+        movimientos.append({
+            "origen": "Kardex",
+            "id": f"KDX-{k.id}",
+            "fecha": k.fecha.isoformat() if k.fecha else "",
+            "tipo": k.tipo_movimiento,
+            "cantidad": float(k.cantidad),
+            "referencia": k.documento_referencia,
+            "almacen": k.almacen_nombre or "General",
+            "estado": "REGISTRADO"
+        })
+
+    ajustes_rows = db.query(
+        AjusteInventario.id,
+        AjusteInventario.fecha_solicitud,
+        AjusteInventario.cantidad,
+        AjusteInventario.motivo,
+        AjusteInventario.estado,
+        Almacen.nombre.label("almacen_nombre")
+    ).outerjoin(
+        Almacen, AjusteInventario.almacen_id == Almacen.id
+    ).filter(
+        AjusteInventario.producto_id == id,
+        AjusteInventario.tenant_id == current_user.tenant_id
+    ).order_by(AjusteInventario.fecha_solicitud.desc()).limit(100).all()
+
+    for a in ajustes_rows:
+        movimientos.append({
+            "origen": "Ajuste",
+            "id": f"AJU-{a.id}",
+            "fecha": a.fecha_solicitud.isoformat() if a.fecha_solicitud else "",
+            "tipo": f"Ajuste ({a.estado})",
+            "cantidad": float(a.cantidad),
+            "referencia": a.motivo,
+            "almacen": a.almacen_nombre or "Almacén Principal",
+            "estado": a.estado
+        })
+
+    transferencias_rows = db.query(
+        TransferenciaInventario.id,
+        TransferenciaInventario.fecha,
+        TransferenciaInventario.cantidad,
+        TransferenciaInventario.estado,
+        Almacen.nombre.label("origen_nombre")
+    ).outerjoin(
+        Almacen, TransferenciaInventario.origen_almacen_id == Almacen.id
+    ).filter(
+        TransferenciaInventario.producto_id == id,
+        TransferenciaInventario.tenant_id == current_user.tenant_id
+    ).order_by(TransferenciaInventario.fecha.desc()).limit(100).all()
+
+    for tr in transferencias_rows:
+        movimientos.append({
+            "origen": "Transferencia",
+            "id": f"TRF-{tr.id}",
+            "fecha": tr.fecha.isoformat() if tr.fecha else "",
+            "tipo": f"Transferencia ({tr.estado})",
+            "cantidad": float(tr.cantidad),
+            "referencia": f"Desde {tr.origen_nombre or 'Almacén'}",
+            "almacen": tr.origen_nombre or "General",
+            "estado": tr.estado
+        })
+
+    recepciones_rows = db.query(RecepcionStock).filter(
+        RecepcionStock.producto_id == id,
+        RecepcionStock.tenant_id == current_user.tenant_id
+    ).order_by(RecepcionStock.fecha.desc()).limit(100).all()
+
+    for rec in recepciones_rows:
+        movimientos.append({
+            "origen": "Recepción Stock",
+            "id": f"REC-{rec.id}",
+            "fecha": rec.fecha.isoformat() if rec.fecha else "",
+            "tipo": "Recepción de Mercancía",
+            "cantidad": float(rec.cantidad),
+            "referencia": f"Hoja {rec.hoja_id} / OC: {rec.orden_compra or 'S/N'}",
+            "almacen": "Almacén Recepción",
+            "estado": rec.estado
+        })
+
+    # Ordenar cronológicamente descendente
+    movimientos.sort(key=lambda m: m["fecha"] or "", reverse=True)
+
+    # Devoluciones y Condición:
+    # Fuente #11: DevolucionProveedor
+    dev_prov_rows = db.query(
+        DevolucionProveedor.id,
+        DevolucionProveedor.numero_devolucion,
+        DevolucionProveedor.fecha,
+        DevolucionProveedor.cantidad,
+        DevolucionProveedor.motivo,
+        DevolucionProveedor.estado,
+        DevolucionProveedor.monto_usd,
+        Proveedor.nombre.label("proveedor_nombre")
+    ).join(
+        Proveedor, DevolucionProveedor.proveedor_id == Proveedor.id
+    ).filter(
+        DevolucionProveedor.producto_id == id,
+        DevolucionProveedor.tenant_id == current_user.tenant_id
+    ).order_by(DevolucionProveedor.fecha.desc()).all()
+
+    devoluciones_proveedor = [
+        {
+            "id": dp.id,
+            "numero": dp.numero_devolucion,
+            "fecha": dp.fecha.isoformat() if dp.fecha else "",
+            "proveedor": dp.proveedor_nombre,
+            "cantidad": float(dp.cantidad) if dp.cantidad is not None else 0.0,
+            "monto_usd": float(dp.monto_usd),
+            "motivo": dp.motivo,
+            "estado": dp.estado
+        }
+        for dp in dev_prov_rows
+    ]
+
+    # Fuente #13: DevolucionCliente
+    dev_cli_rows = db.query(
+        DevolucionCliente.id,
+        DevolucionCliente.numero_devolucion,
+        DevolucionCliente.fecha,
+        DevolucionCliente.cantidad,
+        DevolucionCliente.motivo,
+        DevolucionCliente.condicion,
+        DevolucionCliente.venta_id,
+        Venta.numero_factura.label("factura_numero")
+    ).join(
+        Venta, DevolucionCliente.venta_id == Venta.id
+    ).filter(
+        DevolucionCliente.producto_id == id,
+        DevolucionCliente.tenant_id == current_user.tenant_id
+    ).order_by(DevolucionCliente.fecha.desc()).all()
+
+    devoluciones_cliente = [
+        {
+            "id": dc.id,
+            "numero": dc.numero_devolucion,
+            "fecha": dc.fecha.isoformat() if dc.fecha else "",
+            "venta_id": dc.venta_id,
+            "factura": dc.factura_numero,
+            "cantidad": float(dc.cantidad),
+            "motivo": dc.motivo,
+            "condicion": dc.condicion,
+            "reingreso_stock": (dc.condicion == "BUENO")
+        }
+        for dc in dev_cli_rows
+    ]
+
+    # Fuente #12: CuarentenaLogistica (filtrando por producto_id cruzando TurnoDespacho)
+    cuarentena_rows = db.query(
+        CuarentenaLogistica.id,
+        CuarentenaLogistica.cantidad,
+        CuarentenaLogistica.motivo,
+        CuarentenaLogistica.estado,
+        CuarentenaLogistica.created_at,
+        TurnoDespacho.numero_turno.label("turno_numero"),
+        TurnoDespacho.destino.label("turno_destino")
+    ).join(
+        TurnoDespacho, CuarentenaLogistica.turno_id == TurnoDespacho.id
+    ).filter(
+        CuarentenaLogistica.producto_id == id,
+        TurnoDespacho.tenant_id == current_user.tenant_id
+    ).order_by(CuarentenaLogistica.created_at.desc()).all()
+
+    cuarentena_logistica = [
+        {
+            "id": q.id,
+            "turno": q.turno_numero,
+            "destino": q.turno_destino,
+            "cantidad": float(q.cantidad),
+            "motivo": q.motivo,
+            "estado": q.estado,
+            "fecha": q.created_at.isoformat() if q.created_at else ""
+        }
+        for q in cuarentena_rows
+    ]
+
+    # Fuente #8: Garantia
+    garantias_rows = db.query(
+        Garantia.id,
+        Garantia.fecha_inicio,
+        Garantia.fecha_vencimiento,
+        Garantia.duracion_meses,
+        Garantia.estado,
+        Garantia.notas,
+        Cliente.nombre.label("cliente_nombre"),
+        Cliente.rif.label("cliente_rif"),
+        Venta.numero_factura.label("factura_numero")
+    ).join(
+        Cliente, Garantia.cliente_id == Cliente.id
+    ).outerjoin(
+        Venta, Garantia.venta_id == Venta.id
+    ).filter(
+        Garantia.producto_id == id,
+        Garantia.tenant_id == current_user.tenant_id
+    ).order_by(Garantia.fecha_inicio.desc()).all()
+
+    now_utc = datetime.now(timezone.utc)
+    garantias = []
+    for g in garantias_rows:
+        # Comparación timezone-aware
+        fv_aware = g.fecha_vencimiento
+        if fv_aware and fv_aware.tzinfo is None:
+            fv_aware = fv_aware.replace(tzinfo=timezone.utc)
+        vigente = (g.estado == "VIGENTE") and (fv_aware >= now_utc if fv_aware else True)
+        garantias.append({
+            "id": g.id,
+            "cliente": g.cliente_nombre,
+            "rif": g.cliente_rif,
+            "factura": g.factura_numero or "Garantía de Fábrica / Directa",
+            "fecha_inicio": g.fecha_inicio.strftime("%Y-%m-%d") if g.fecha_inicio else "",
+            "fecha_vencimiento": g.fecha_vencimiento.strftime("%Y-%m-%d") if g.fecha_vencimiento else "",
+            "duracion_meses": g.duracion_meses,
+            "estado": g.estado,
+            "esta_vigente": vigente,
+            "notas": g.notas
+        })
+
+    # Fuente #4: CotizacionItem (en qué cotizaciones ha aparecido)
+    cotizaciones_rows = db.query(
+        CotizacionItem.id,
+        CotizacionItem.cantidad,
+        CotizacionItem.precio_unitario,
+        CotizacionItem.total_fila,
+        Cotizacion.numero_cotizacion,
+        Cotizacion.fecha_emision,
+        Cotizacion.estado.label("cotizacion_estado"),
+        Cliente.nombre.label("cliente_nombre")
+    ).join(
+        Cotizacion, CotizacionItem.cotizacion_id == Cotizacion.id
+    ).outerjoin(
+        Cliente, Cotizacion.cliente_id == Cliente.id
+    ).filter(
+        CotizacionItem.producto_id == id,
+        Cotizacion.tenant_id == current_user.tenant_id
+    ).order_by(Cotizacion.fecha_emision.desc()).all()
+
+    cotizaciones = [
+        {
+            "id": c.id,
+            "numero_cotizacion": c.numero_cotizacion,
+            "fecha": c.fecha_emision.strftime("%Y-%m-%d") if c.fecha_emision else "",
+            "cliente": c.cliente_nombre or "Cliente General",
+            "cantidad": float(c.cantidad),
+            "precio_unitario": float(c.precio_unitario),
+            "total": float(c.total_fila),
+            "estado": c.cotizacion_estado
+        }
+        for c in cotizaciones_rows
+    ]
+
+    # Fuente #10: ConteoFisico (Auditoría de conteo)
+    conteos_rows = db.query(
+        ConteoFisico.id,
+        ConteoFisico.fecha,
+        ConteoFisico.cantidad_sistema,
+        ConteoFisico.cantidad_fisica,
+        ConteoFisico.diferencia,
+        ConteoFisico.estado,
+        Almacen.nombre.label("almacen_nombre")
+    ).join(
+        Almacen, ConteoFisico.almacen_id == Almacen.id
+    ).filter(
+        ConteoFisico.producto_id == id,
+        ConteoFisico.tenant_id == current_user.tenant_id
+    ).order_by(ConteoFisico.fecha.desc()).all()
+
+    auditorias_conteo = [
+        {
+            "id": cf.id,
+            "fecha": cf.fecha.strftime("%Y-%m-%d %H:%M") if cf.fecha else "",
+            "almacen": cf.almacen_nombre,
+            "cantidad_sistema": float(cf.cantidad_sistema),
+            "cantidad_fisica": float(cf.cantidad_fisica),
+            "diferencia": float(cf.diferencia),
+            "estado": cf.estado
+        }
+        for cf in conteos_rows
+    ]
+
+    return {
+        "producto": {
+            "id": producto.id,
+            "sku": producto.sku,
+            "nombre": producto.nombre,
+            "precio_usd": precio_usd,
+            "precio_detal": float(producto.precio_detal or producto.precio_usd or 0.0),
+            "precio_mayor": float(producto.precio_mayor or 0.0),
+            "costo_usd": costo_usd,
+            "stock_total": float(producto.stock or 0.0),
+            "stock_minimo": float(producto.stock_minimo or 0.0),
+            "es_exento": bool(producto.es_exento),
+            "imagen_url": producto.imagen_url,
+            "rentabilidad_pct": round(rentabilidad_bruta, 2),
+            "rotacion_30d": rotacion_unidades,
+            "cuadrante": cuadrante,
+            "cuadrante_badge": cuadrante_badge
+        },
+        "stock_almacenes": stock_almacenes,
+        "lotes": lotes,
+        "movimientos": movimientos,
+        "devoluciones": {
+            "proveedor": devoluciones_proveedor,
+            "cliente": devoluciones_cliente,
+            "cuarentena": cuarentena_logistica
+        },
+        "garantias": garantias,
+        "cotizaciones": cotizaciones,
+        "auditorias_conteo": auditorias_conteo
+    }

@@ -26,8 +26,10 @@ import {
   Pencil,
   Trash2,
   Minus,
-  Lock
+  Lock,
+  RotateCcw
 } from 'lucide-react';
+import { DevolucionClienteModal } from '@/components/inventory/DevolucionClienteModal';
 
 // Cantidad de productos mostrados por página en la grilla del POS — antes
 // se renderizaban los 129+ productos de una sola vez y la página quedaba
@@ -82,6 +84,8 @@ const POS = () => {
   const [eximirIgtf, setEximirIgtf] = useState(false);
   const [productPage, setProductPage] = useState(1);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const [isDevolucionOpen, setIsDevolucionOpen] = useState(false);
+  const [devolucionProducto, setDevolucionProducto] = useState<any | null>(null);
 
   const showToast = (message: string, type: 'error' | 'success' = 'error') => {
     setToast({ message, type });
@@ -449,6 +453,17 @@ const POS = () => {
              <button onClick={() => setIsCxCOpen(true)} className="bg-white text-[#0b5156] px-6 py-2.5 rounded-xl text-sm font-black uppercase tracking-widest border border-[#0b5156]/20 hover:bg-[#0b5156]/5 transition-all flex items-center gap-2">
                 <Wallet size={16} />
                 Quién Me Debe
+             </button>
+             <button
+                type="button"
+                onClick={() => {
+                  setDevolucionProducto(null);
+                  setIsDevolucionOpen(true);
+                }}
+                className="bg-rose-50 text-rose-700 px-6 py-2.5 rounded-xl text-sm font-black uppercase tracking-widest border border-rose-200 hover:bg-rose-100 transition-all flex items-center gap-2 shadow-xs"
+             >
+                <RotateCcw size={16} className="text-rose-600" />
+                Devolución Mostrador
              </button>
               <button 
                 onClick={handleCheckout} 
@@ -1289,6 +1304,21 @@ const POS = () => {
           fetchContext();
           showToast(wasEditing ? 'Producto actualizado' : 'Producto creado exitosamente', 'success');
         }}
+      />
+
+      <DevolucionClienteModal
+        isOpen={isDevolucionOpen}
+        onClose={() => {
+          setIsDevolucionOpen(false);
+          setDevolucionProducto(null);
+        }}
+        onSuccess={() => {
+          fetchContext();
+          showToast('Devolución procesada correctamente', 'success');
+        }}
+        initialProductId={devolucionProducto?.id || null}
+        initialProductName={devolucionProducto?.nombre || ''}
+        initialProductSku={devolucionProducto?.sku || ''}
       />
     </div>
   );

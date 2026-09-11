@@ -45,7 +45,8 @@ from backend.routers import (
     hr as hr_router, productos, proveedores, audit, entidades, clientes,
     dashboard_ext, operaciones, admin_ext, extras_ext,
     reportes, developer, developer_router, payroll, facturacion, telegram_api,
-    forense, telemetry, bot_api, garantias, sso_bridge,
+    forense, telemetry, bot_api, garantias, sso_bridge, notificaciones_sistema,
+    public_facturas,
 )
 from backend.routers import logistica as logistica_router
 from backend.utils.seed_extended import seed_extended_data
@@ -403,6 +404,7 @@ app.include_router(extras_ext.router)
 app.include_router(reportes.router)
 app.include_router(developer.router)
 app.include_router(developer_router.router)
+app.include_router(notificaciones_sistema.router)
 app.include_router(payroll.router)
 app.include_router(payroll.router, prefix="/api")
 # Facturación Fiscal (Ledger, auditoría de emisión y firma SHA-256)
@@ -418,6 +420,8 @@ app.include_router(bot_api.router)
 app.include_router(sso_bridge.router)
 # Garantías de producto/venta
 app.include_router(garantias.router)
+# Facturas Públicas (Solo Lectura QR)
+app.include_router(public_facturas.public_facturas_router)
 
 # Endpoints de Dashboard para el Frontend
 @app.get("/repo_dashboard_resumen", tags=["Reportes Financieros"])

@@ -7,9 +7,11 @@ import { useSystem, SystemKey } from '@/providers/SystemProvider';
 import { SessionGuard } from '@/components/common/SessionGuard';
 import { useAuth } from '@/providers/AuthProvider';
 import { api, BASE_URL } from '@/api/client';
+import { SystemNotificationBell, SystemNotificationItem } from '@/components/common/SystemNotificationBell';
+import { SystemNotificationModal } from '@/components/common/SystemNotificationModal';
 
 const isPathAllowed = (path: string, system: SystemKey): boolean => {
-  if (system === 'all' || path === '/' || path === '/alertas') return true;
+  if (system === 'all' || path === '/' || path === '/alertas' || path.startsWith('/developer')) return true;
   
   if (system === 'administrativo') {
     return path.startsWith('/ventas') || 
@@ -56,6 +58,20 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const isIframe = window !== window.parent;
 
   const [headerLogo, setHeaderLogo] = useState<string | null>(null);
+  const [pendientes, setPendientes] = useState<SystemNotificationItem[]>([]);
+
+  const fetchPendientes = async () => {
+    try {
+      const data = await api.get<SystemNotificationItem[]>('/notificaciones-sistema/mis-pendientes');
+      setPendientes(data || []);
+    } catch (err) {
+      console.error('Error al consultar notificaciones pendientes:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchPendientes();
+  }, []);
 
   useEffect(() => {
     // Cargar logo de la empresa para el avatar del header
@@ -94,6 +110,10 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  const handleNotificationDismissed = (id: number) => {
+    setPendientes(prev => prev.filter(p => p.id !== id));
+  };
+
   return (
     <div className="flex min-h-screen bg-koda-bg print:bg-white print:block">
       <SessionGuard />
@@ -116,8 +136,14 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
               )}
             </div>
           </div>
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-3 border-r border-slate-300 pr-6">
+          <div className="flex items-center gap-4">
+            {/* Campana de Notificaciones Globales del Sistema */}
+            <SystemNotificationBell
+              badgeCount={pendientes.length}
+              onRefreshPendientes={fetchPendientes}
+            />
+
+            <div className="flex items-center gap-3 border-r border-slate-300 pr-4">
                <div className="text-right leading-none">
                   <p className="text-xs font-black text-slate-800">{displayName}</p>
                   <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">{displayRole}</p>
@@ -156,8 +182,13 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
       {/* Dynamic Command Palette / Quick Search Modal */}
       {!isIframe && <QuickSearch isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} />}
       
-
-
+      {/* Modal / Popup de Notificaciones Globales del Sistema */}
+      {!isIframe && pendientes.length > 0 && (
+        <SystemNotificationModal
+          notifications={pendientes}
+          onNotificationDismissed={handleNotificationDismissed}
+        />
+      )}
     </div>
   );
 };

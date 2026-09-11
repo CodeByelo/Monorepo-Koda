@@ -72,7 +72,7 @@ def _add_tenant_filter(execute_state):
             execute_state.statement = execute_state.statement.options(
                 with_loader_criteria(
                     Base,
-                    lambda cls: cls.tenant_id == tenant_id if hasattr(cls, 'tenant_id') and cls.__name__ not in ('Profile', 'Organization', 'Tenant') else True,
+                    lambda cls: cls.tenant_id == tenant_id if hasattr(cls, 'tenant_id') and cls.__name__ not in ('Profile', 'Organization', 'Tenant', 'NotificacionSistema', 'NotificacionSistemaLectura') else True,
                     include_aliases=True,
                     track_closure_variables=False
                 )
@@ -82,7 +82,7 @@ from sqlalchemy.orm import Mapper
 @event.listens_for(Mapper, "before_insert")
 @event.listens_for(Mapper, "before_update")
 def receive_before_insert_update(mapper, connection, target):
-    if hasattr(target, 'tenant_id') and target.__class__.__name__ not in ('Profile', 'Organization', 'Tenant'):
+    if hasattr(target, 'tenant_id') and target.__class__.__name__ not in ('Profile', 'Organization', 'Tenant', 'NotificacionSistema', 'NotificacionSistemaLectura'):
         # Only assign from ContextVar if tenant_id was not explicitly provided on the model instance
         if getattr(target, 'tenant_id', None) is None:
             tenant_id = current_tenant_id_var.get()

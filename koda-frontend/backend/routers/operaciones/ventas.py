@@ -284,6 +284,35 @@ def descargar_factura_pdf(
             c.setFillColor(colors.HexColor("#1e293b"))
             c.drawString(350, pos_y_totales - offset_y - 18, "TOTAL EQUIVALENTE (Bs.):")
             c.drawRightString(ancho - 50, pos_y_totales - offset_y - 18, f"Bs. {total_bs:,.2f}")
+
+    # --- Código QR de Verificación Pública (Blindado) ---
+    if getattr(venta, "qr_token", None):
+        try:
+            import qrcode
+            from reportlab.lib.utils import ImageReader
+            frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+            qr_url = f"{frontend_url}/factura-publica/{venta.qr_token}"
+            qr_img = qrcode.make(qr_url)
+            qr_buffer = io.BytesIO()
+            qr_img.save(qr_buffer, format="PNG")
+            qr_buffer.seek(0)
+            qr_reader = ImageReader(qr_buffer)
+
+            # Dibujar QR de 65x65 puntos a la izquierda de los totales
+            qr_size = 65
+            qr_y = max(60, pos_y_totales - offset_y - 15)
+            c.drawImage(qr_reader, 50, qr_y, width=qr_size, height=qr_size, mask='auto')
+            c.setFont("Helvetica-Bold", 7)
+            c.setFillColor(colors.HexColor("#0b5156"))
+            c.drawString(50 + qr_size + 8, qr_y + 45, "VERIFICACIÓN DIGITAL")
+            c.setFont("Helvetica", 6.5)
+            c.setFillColor(colors.HexColor("#64748b"))
+            c.drawString(50 + qr_size + 8, qr_y + 33, "Escanee con la cámara para")
+            c.drawString(50 + qr_size + 8, qr_y + 23, "validar autenticidad de factura")
+            c.setFont("Helvetica-Oblique", 6)
+            c.drawString(50 + qr_size + 8, qr_y + 11, f"Token: {str(venta.qr_token)[:13]}...")
+        except Exception:
+            pass
     
     # Pie de Página Legal
     c.setFillColor(colors.black)
@@ -584,6 +613,28 @@ def descargar_ticket_pdf(
 
     y -= 6
     c.line(4 * mm, y, ANCHO - 4 * mm, y)
+    y -= 8
+
+    # QR de verificación pública en Ticket térmico
+    if getattr(venta, "qr_token", None):
+        try:
+            import qrcode
+            from reportlab.lib.utils import ImageReader
+            frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+            qr_url = f"{frontend_url}/factura-publica/{venta.qr_token}"
+            qr_img = qrcode.make(qr_url)
+            qr_buffer = io.BytesIO()
+            qr_img.save(qr_buffer, format="PNG")
+            qr_buffer.seek(0)
+            qr_reader = ImageReader(qr_buffer)
+            qr_ticket_size = 28 * mm
+            c.drawImage(qr_reader, (ANCHO - qr_ticket_size) / 2, y - qr_ticket_size, width=qr_ticket_size, height=qr_ticket_size, mask='auto')
+            y -= (qr_ticket_size + 3)
+            c.setFont("Helvetica-Bold", 6.5)
+            c.drawCentredString(ANCHO / 2, y, "Escanear para verificar validez digital")
+            y -= 8
+        except Exception:
+            pass
 
     c.showPage()
     c.save()

@@ -22,6 +22,7 @@ transaccional (así puede añadir su propio log de auditoría u otros
 efectos y confirmar todo o nada de forma atómica).
 """
 
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, ROUND_HALF_UP
@@ -330,6 +331,7 @@ def procesar_emision_factura(
         pago_movil_cedula=(pago_movil_cedula.strip() if metodo_pago == "PagoMovil" and pago_movil_cedula else None),
         pago_movil_telefono=(pago_movil_telefono.strip() if metodo_pago == "PagoMovil" and pago_movil_telefono else None),
         pago_movil_referencia=(pago_movil_referencia.strip() if metodo_pago == "PagoMovil" and pago_movil_referencia else None),
+        qr_token=uuid.uuid4(),
         tenant_id=tenant_id,
     )
     db.add(nueva_venta)
