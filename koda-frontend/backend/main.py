@@ -201,6 +201,8 @@ async def startup_db_init():
                     connection.execute(text("ALTER TABLE public.kardex_movimientos ADD COLUMN IF NOT EXISTS almacen_id INTEGER REFERENCES public.almacenes(id);"))
                     connection.execute(text("ALTER TABLE public.almacenes ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) NOT NULL DEFAULT 'ALMACEN';"))
                     connection.execute(text("ALTER TABLE public.notas_entrega ADD COLUMN IF NOT EXISTS venta_id INTEGER REFERENCES public.ventas(id);"))
+                    connection.execute(text("ALTER TABLE public.ventas ADD COLUMN IF NOT EXISTS qr_token UUID UNIQUE;"))
+                    connection.execute(text("CREATE INDEX IF NOT EXISTS idx_ventas_qr_token ON public.ventas (qr_token);"))
                     connection.execute(text("""
                         CREATE TABLE IF NOT EXISTS public.plantillas_documento (
                             id SERIAL PRIMARY KEY,
