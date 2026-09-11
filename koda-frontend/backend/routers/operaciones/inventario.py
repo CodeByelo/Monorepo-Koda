@@ -605,35 +605,30 @@ def obtener_ficha_360_producto(
     if not producto:
         raise HTTPException(status_code=404, detail="Producto no encontrado.")
 
-    # 1. Rotación y analítica de ventas (Últimos 30 días, reusando el cálculo estándar de analítica de inventario)
-    hace_30_dias = datetime.now(timezone.utc) - timedelta(days=30)
-    ventas_30d_qty = db.query(func.sum(VentaDetalle.cantidad)).select_from(VentaDetalle).join(
-        Venta, VentaDetalle.venta_id == Venta.id
-    ).filter(
-        Venta.tenant_id == current_user.tenant_id,
-        VentaDetalle.producto_id == id,
-        Venta.fecha >= hace_30_dias,
-        Venta.estado != "ANULADA"
-    ).scalar() or Decimal("0.00")
+    # 1. Rotación y cuadrante — fuente de verdad única: calcular_matriz_abc()
+    # Se clasifican TODOS los productos del tenant con umbrales dinámicos (promedio del catálogo)
+    # para que la Ficha 360 siempre coincida con el reporte de Matriz ABC.
+    from backend.services.analitica_inventario import calcular_matriz_abc
+
+    _CUADRANTE_MAP = {
+        "stars":     ("Estrellas (Alta Rotación / Alto Margen)",           "bg-teal-50 text-[#0b5156] border-[#0b5156]"),
+        "questions": ("Incógnitas (Baja Rotación / Alto Margen)",           "bg-blue-50 text-blue-700 border-blue-200"),
+        "cows":      ("Vacas de Efectivo (Alta Rotación / Bajo Margen)",    "bg-emerald-50 text-emerald-700 border-emerald-200"),
+        "dogs":      ("Perros (Baja Rotación / Bajo Margen)",               "bg-rose-50 text-rose-700 border-rose-200"),
+    }
+
+    clasificados = calcular_matriz_abc(db, current_user.tenant_id)
+    # Buscar este producto en el resultado; si no existe (catálogo vacío) crear uno base
+    _clasificado = next((c for c in clasificados if c.producto.id == id), None)
 
     precio_usd = float(producto.precio_usd or 0.0)
     costo_usd = float(producto.costo_usd or 0.0)
-    rentabilidad_bruta = ((precio_usd - costo_usd) / precio_usd * 100.0) if precio_usd > 0 else 0.0
-    rotacion_unidades = float(ventas_30d_qty)
+    rentabilidad_bruta = (_clasificado.rentabilidad if _clasificado else
+                          ((precio_usd - costo_usd) / precio_usd * 100.0) if precio_usd > 0 else 0.0)
+    rotacion_unidades = _clasificado.rotacion if _clasificado else 0.0
 
-    # Clasificación de cuadrante
-    if rotacion_unidades >= 1.0 and rentabilidad_bruta >= 10.0:
-        cuadrante = "Estrellas (Alta Rotación / Alto Margen)"
-        cuadrante_badge = "bg-teal-50 text-[#0b5156] border-[#0b5156]"
-    elif rotacion_unidades < 1.0 and rentabilidad_bruta >= 10.0:
-        cuadrante = "Incógnitas (Baja Rotación / Alto Margen)"
-        cuadrante_badge = "bg-blue-50 text-blue-700 border-blue-200"
-    elif rotacion_unidades >= 1.0 and rentabilidad_bruta < 10.0:
-        cuadrante = "Vacas de Efectivo (Alta Rotación / Bajo Margen)"
-        cuadrante_badge = "bg-emerald-50 text-emerald-700 border-emerald-200"
-    else:
-        cuadrante = "Perros (Baja Rotación / Bajo Margen)"
-        cuadrante_badge = "bg-rose-50 text-rose-700 border-rose-200"
+    _clave_cuadrante = _clasificado.cuadrante if _clasificado else "dogs"
+    cuadrante, cuadrante_badge = _CUADRANTE_MAP.get(_clave_cuadrante, _CUADRANTE_MAP["dogs"])
 
     # Fuente #6: StockPorAlmacen
     almacenes_rows = db.query(
