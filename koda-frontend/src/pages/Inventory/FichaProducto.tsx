@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { api } from '@/api/client';
 import { Toast } from '@/components/common/Toast';
+import { DevolucionClienteModal } from '@/components/inventory/DevolucionClienteModal';
 
 export default function FichaProducto() {
   const { id: routeId } = useParams<{ id?: string }>();
@@ -51,12 +52,6 @@ export default function FichaProducto() {
 
   // Modal: Nueva Devolución de Cliente (#13)
   const [showDevolucionModal, setShowDevolucionModal] = useState(false);
-  const [isSubmittingDev, setIsSubmittingDev] = useState(false);
-  const [devVentaId, setDevVentaId] = useState<string>('');
-  const [devAlmacenId, setDevAlmacenId] = useState<string>('');
-  const [devCantidad, setDevCantidad] = useState<number>(1);
-  const [devMotivo, setDevMotivo] = useState<string>('');
-  const [devCondicion, setDevCondicion] = useState<'BUENO' | 'DAÑADO'>('BUENO');
 
   // Toast notifications
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -133,53 +128,6 @@ export default function FichaProducto() {
     }
   };
 
-  // Enviar Devolución de Cliente
-  const handleCrearDevolucion = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedProductId) return;
-    if (!devVentaId || !devCantidad || !devMotivo.trim()) {
-      showToast('Por favor complete todos los campos obligatorios.', 'error');
-      return;
-    }
-
-    setIsSubmittingDev(true);
-    try {
-      const payload = {
-        venta_id: Number(devVentaId),
-        producto_id: selectedProductId,
-        almacen_id: devAlmacenId ? Number(devAlmacenId) : null,
-        cantidad: Number(devCantidad),
-        motivo: devMotivo.trim(),
-        condicion: devCondicion,
-      };
-
-      const res: any = await api.post('/inventario/devoluciones-cliente', payload);
-      if (res?.ok) {
-        showToast(
-          devCondicion === 'BUENO'
-            ? 'Devolución registrada: producto devuelto al stock correctamente.'
-            : 'Devolución registrada: producto registrado como DAÑADO (no sumó a stock).',
-          'success'
-        );
-        setShowDevolucionModal(false);
-        // Reset form
-        setDevVentaId('');
-        setDevCantidad(1);
-        setDevMotivo('');
-        setDevCondicion('BUENO');
-        // Recargar Ficha 360 para reflejar el cambio inmediato
-        cargarFicha360(selectedProductId);
-      } else {
-        showToast(res?.detail || 'No se pudo registrar la devolución.', 'error');
-      }
-    } catch (err: any) {
-      console.error('Error al registrar devolución de cliente:', err);
-      const msg = err?.response?.data?.detail || 'Error al procesar la devolución.';
-      showToast(msg, 'error');
-    } finally {
-      setIsSubmittingDev(false);
-    }
-  };
 
   // Filtrado de movimientos para Tab 2
   const movimientosFiltrados = (fichaData?.movimientos || []).filter((m: any) => {
@@ -1071,165 +1019,24 @@ export default function FichaProducto() {
       {/* =======================================================================
           MODAL: NUEVA DEVOLUCIÓN DE CLIENTE (MOSTRADOR / POS)
          ======================================================================= */}
-      {showDevolucionModal && (
-        <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-lg rounded-3xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-600">
-                  <RotateCcw size={20} />
-                </div>
-                <div>
-                  <h3 className="text-base font-black uppercase tracking-tight text-slate-800">
-                    Registrar Devolución de Cliente
-                  </h3>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    Mostrador / POS (Fuente #13)
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowDevolucionModal(false)}
-                className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleCrearDevolucion} className="p-6 space-y-4 overflow-y-auto">
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Producto</span>
-                <strong className="text-xs font-black text-slate-800 uppercase block">{prod?.nombre}</strong>
-                <span className="text-[10px] font-mono font-bold text-slate-500">SKU: {prod?.sku}</span>
-              </div>
-
-              <div>
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                  ID o N° de Venta / Factura *
-                </label>
-                <input
-                  type="number"
-                  required
-                  placeholder="Ej: 105"
-                  value={devVentaId}
-                  onChange={(e) => setDevVentaId(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-[#0b5156]"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Cantidad a Devolver *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    required
-                    value={devCantidad}
-                    onChange={(e) => setDevCantidad(Number(e.target.value))}
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-black text-slate-800 focus:outline-none focus:border-[#0b5156]"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Almacén de Destino
-                  </label>
-                  <select
-                    value={devAlmacenId}
-                    onChange={(e) => setDevAlmacenId(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold uppercase text-slate-700 focus:outline-none focus:border-[#0b5156]"
-                  >
-                    <option value="">Almacén Principal por Defecto</option>
-                    {fichaData?.stock_almacenes?.map((a: any) => (
-                      <option key={a.almacen_id} value={a.almacen_id}>
-                        {a.almacen_nombre} ({a.almacen_tipo})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Condición con Explicación de Stock */}
-              <div>
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-2">
-                  Condición del Producto Devuelto *
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setDevCondicion('BUENO')}
-                    className={`p-3.5 rounded-2xl border text-left flex flex-col gap-1 transition-all ${
-                      devCondicion === 'BUENO'
-                        ? 'bg-emerald-50 border-emerald-300 text-emerald-900 shadow-sm'
-                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <strong className="text-xs font-black uppercase">BUENO</strong>
-                      {devCondicion === 'BUENO' && <CheckCircle2 size={16} className="text-emerald-600" />}
-                    </div>
-                    <span className="text-[10px] font-medium leading-tight">
-                      Reingresa inmediatamente a stock e inserta movimiento en Kardex.
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setDevCondicion('DAÑADO')}
-                    className={`p-3.5 rounded-2xl border text-left flex flex-col gap-1 transition-all ${
-                      devCondicion === 'DAÑADO'
-                        ? 'bg-rose-50 border-rose-300 text-rose-900 shadow-sm'
-                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <strong className="text-xs font-black uppercase">DAÑADO</strong>
-                      {devCondicion === 'DAÑADO' && <AlertTriangle size={16} className="text-rose-600" />}
-                    </div>
-                    <span className="text-[10px] font-medium leading-tight">
-                      NO suma a stock. Queda registrado en trazabilidad para auditoría.
-                    </span>
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                  Motivo de la Devolución *
-                </label>
-                <textarea
-                  required
-                  rows={3}
-                  placeholder="Describa la razón del cliente (ej: cambio por otro modelo, caja abierta, defecto de fábrica)..."
-                  value={devMotivo}
-                  onChange={(e) => setDevMotivo(e.target.value)}
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:border-[#0b5156]"
-                />
-              </div>
-
-              <div className="pt-4 border-t border-slate-100 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowDevolucionModal(false)}
-                  className="px-5 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-xs font-black uppercase tracking-wider hover:bg-slate-200 transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmittingDev}
-                  className="px-6 py-2.5 bg-[#0b5156] text-white rounded-xl text-xs font-black uppercase tracking-wider hover:bg-[#083a3d] transition-colors disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-teal-900/20"
-                >
-                  {isSubmittingDev ? 'Procesando...' : 'Confirmar Devolución'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <DevolucionClienteModal
+        isOpen={showDevolucionModal}
+        onClose={() => setShowDevolucionModal(false)}
+        onSuccess={() => {
+          showToast('Devolución registrada exitosamente.', 'success');
+          if (selectedProductId) {
+            cargarFicha360(selectedProductId);
+          }
+        }}
+        initialProductId={selectedProductId}
+        initialProductName={prod?.nombre}
+        initialProductSku={prod?.sku}
+        stockAlmacenes={fichaData?.stock_almacenes?.map((a: any) => ({
+          almacen_id: a.almacen_id,
+          almacen_nombre: a.almacen_nombre || a.nombre,
+          almacen_tipo: a.almacen_tipo || a.tipo,
+        }))}
+      />
     </div>
   );
 }
