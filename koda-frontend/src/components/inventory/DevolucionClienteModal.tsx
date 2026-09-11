@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, RotateCcw, AlertTriangle, CheckCircle2, Package, Search } from 'lucide-react';
 import { api } from '@/api/client';
 
@@ -87,6 +88,7 @@ export const DevolucionClienteModal: React.FC<DevolucionClienteModalProps> = ({
   }, [isOpen, initialProductId, initialProductName, initialProductSku]);
 
   if (!isOpen) return null;
+  if (typeof document === 'undefined') return null;
 
   const filteredProds = productos.filter(p => {
     const q = searchProdTerm.toLowerCase().trim();
@@ -138,7 +140,7 @@ export const DevolucionClienteModal: React.FC<DevolucionClienteModalProps> = ({
     }
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="bg-white w-full max-w-lg rounded-3xl border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Cabecera Modal */}
@@ -363,7 +365,8 @@ export const DevolucionClienteModal: React.FC<DevolucionClienteModalProps> = ({
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
