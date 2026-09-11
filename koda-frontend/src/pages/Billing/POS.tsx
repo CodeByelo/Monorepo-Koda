@@ -27,7 +27,8 @@ import {
   Trash2,
   Minus,
   Lock,
-  RotateCcw
+  RotateCcw,
+  History
 } from 'lucide-react';
 import { DevolucionClienteModal } from '@/components/inventory/DevolucionClienteModal';
 
@@ -700,6 +701,16 @@ const POS = () => {
                                 >
                                   <Pencil size={11} />
                                 </button>
+                                <a
+                                  href={`/inventario/ficha-producto/${p.id}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  title="Ver Ficha 360 / Historial de Movimientos"
+                                  className="w-5 h-5 rounded-md bg-white border border-slate-200 text-slate-400 hover:text-[#0b5156] hover:border-[#0b5156] flex items-center justify-center transition-colors shadow-xs"
+                                >
+                                  <History size={11} />
+                                </a>
                                 <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${tieneStock ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
                                   Stock: {p.stock}
                                 </span>
