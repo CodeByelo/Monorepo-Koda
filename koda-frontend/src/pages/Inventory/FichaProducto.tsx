@@ -478,13 +478,13 @@ export default function FichaProducto() {
                       >
                         <div className="flex justify-between items-start gap-2">
                           <div>
-                            <h4 className="text-xs font-black text-slate-800 uppercase leading-tight">{alm.almacen_nombre}</h4>
-                            <span className="text-[10px] font-bold text-slate-400 font-mono">Código: {alm.almacen_codigo}</span>
+                            <h4 className="text-xs font-black text-slate-800 uppercase leading-tight">{alm.almacen_nombre || alm.nombre}</h4>
+                            <span className="text-[10px] font-bold text-slate-400 font-mono">Código: {alm.codigo || alm.almacen_codigo}</span>
                           </div>
                           <span className={`text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-wider border ${
-                            alm.almacen_tipo === 'LOCAL' ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-blue-100 text-blue-800 border-blue-200'
+                            (alm.almacen_tipo || alm.tipo) === 'LOCAL' ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-blue-100 text-blue-800 border-blue-200'
                           }`}>
-                            {alm.almacen_tipo}
+                            {alm.almacen_tipo || alm.tipo}
                           </span>
                         </div>
                         <div className="pt-3 border-t border-slate-200 flex justify-between items-baseline">
