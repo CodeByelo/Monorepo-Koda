@@ -1,3 +1,4 @@
+import uuid
 from sqlalchemy import ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
@@ -74,6 +75,7 @@ class Venta(Base):
     pago_movil_cedula = Column(String(20), nullable=True)
     pago_movil_telefono = Column(String(20), nullable=True)
     pago_movil_referencia = Column(String(50), nullable=True)  # requerido en la práctica cuando metodo_pago == "PagoMovil" (validado en procesar_emision_factura), nullable a nivel de columna solo por compatibilidad con ventas anteriores a esta migración
+    qr_token = Column(UUID(as_uuid=True), unique=True, nullable=True, index=True, default=uuid.uuid4)
 
     # Relación uno-a-muchos con los detalles de la venta
     cliente = relationship("Cliente")

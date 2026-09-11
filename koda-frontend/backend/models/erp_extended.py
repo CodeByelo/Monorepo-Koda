@@ -628,6 +628,31 @@ class NotificacionRegla(Base):
     plantilla = Column(Text, nullable=True)
 
 
+class NotificacionSistema(Base):
+    __tablename__ = "notificaciones_sistema"
+    __table_args__ = {'schema': 'public'}
+
+    id = Column(Integer, primary_key=True, index=True)
+    titulo = Column(String(150), nullable=False)
+    mensaje = Column(Text, nullable=False)
+    activa = Column(Boolean, default=True, nullable=False)
+    creado_por = Column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=True)
+    creado_en = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class NotificacionSistemaLectura(Base):
+    __tablename__ = "notificaciones_sistema_lecturas"
+    __table_args__ = (
+        UniqueConstraint('notificacion_id', 'usuario_id', name='_notif_sistema_usuario_uc'),
+        {'schema': 'public'}
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    notificacion_id = Column(Integer, ForeignKey("public.notificaciones_sistema.id"), nullable=False, index=True)
+    usuario_id = Column(UUID(as_uuid=True), ForeignKey("public.profiles.id"), nullable=False, index=True)
+    leido_en = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
 class ImportacionJob(Base):
     __tablename__ = "importacion_jobs"
     __table_args__ = {'schema': 'public'}
@@ -1125,4 +1150,24 @@ class PlantillaDocumento(Base):
     config = Column(JSON, nullable=False)
     actualizado_por = Column(UUID(as_uuid=True), nullable=True)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class DevolucionCliente(Base):
+    __tablename__ = "devoluciones_cliente"
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'numero_devolucion', name='_tenant_devoluciones_cliente_numero_uc'),
+        {'schema': 'public'}
+    )
+    tenant_id = Column(UUID(as_uuid=True))
+    id = Column(Integer, primary_key=True, index=True)
+    numero_devolucion = Column(String(50), nullable=False)
+    venta_id = Column(Integer, ForeignKey("public.ventas.id"), nullable=False, index=True)
+    producto_id = Column(Integer, ForeignKey("public.productos.id"), nullable=False, index=True)
+    cantidad = Column(Numeric(15, 2), nullable=False)
+    motivo = Column(String(255), nullable=False)
+    condicion = Column(String(20), nullable=False)  # 'BUENO' (vuelve a stock) / 'DAÑADO' (no vuelve a stock)
+    fecha = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    venta = relationship("Venta")
+    producto = relationship("Producto")
 

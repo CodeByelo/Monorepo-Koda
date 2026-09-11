@@ -79,6 +79,7 @@ const navItems = [
       { label: 'Existencias', path: '/inventario/existencias' },
       { label: 'Stock Crítico', path: '/inventario/critico' },
       { label: 'TRAZABILIDAD' },
+      { label: 'Ficha 360° Producto', path: '/inventario/ficha-producto' },
       { label: 'Libro Kardex', path: '/inventario/kardex' },
       { label: 'Maestro Almacenes', path: '/inventario/almacenes' },
       { label: 'OPERACIONES' },
@@ -477,10 +478,34 @@ const Sidebar = ({ isOpen = true }: SidebarProps) => {
   const displayRole = userRole || 'Usuario';
   const initials = displayName.slice(0, 2).toUpperCase();
 
+  const isDev =
+    userRole?.toLowerCase() === 'desarrollador' ||
+    userRole?.toLowerCase() === 'dev' ||
+    userRole?.toLowerCase() === 'developer';
+
   const filteredNavItems = useMemo(() => {
     const items = getFilteredNavItems(activeSystem);
-    return items;
-  }, [activeSystem, userRole]);
+    if (!isDev) return items;
+
+    // Inyectar acceso a Notificaciones Globales en Configuración para desarrolladores
+    return items.map(item => {
+      if (item.label === 'Configuración' && item.subItems) {
+        const alreadyHas = item.subItems.some(s => s.path === '/developer/notificaciones');
+        if (!alreadyHas) {
+          const newSubItems = [...item.subItems];
+          const segIndex = newSubItems.findIndex(s => s.label === 'SEGURIDAD Y CONTROL');
+          const devItem = { label: 'Notificaciones Globales', path: '/developer/notificaciones' };
+          if (segIndex !== -1) {
+            newSubItems.splice(segIndex + 1, 0, devItem);
+          } else {
+            newSubItems.push(devItem);
+          }
+          return { ...item, subItems: newSubItems };
+        }
+      }
+      return item;
+    });
+  }, [activeSystem, userRole, isDev]);
 
   // Auto-expand category if current path matches
   useEffect(() => {

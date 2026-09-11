@@ -58,6 +58,7 @@ const StockInventory          = lazy(() => import('./pages/Inventory/StockInvent
 const InventoryCritical       = lazy(() => import('./pages/Inventory/InventoryCritical'));
 const Warranties              = lazy(() => import('./pages/Inventory/Warranties'));
 const LotExpiry               = lazy(() => import('./pages/Inventory/LotExpiry'));
+const FichaProducto           = lazy(() => import('./pages/Inventory/FichaProducto'));
 // LOGÍSTICA
 const Logistics               = lazy(() => import('./pages/Logistics/Logistics'));
 const FleetVehicles           = lazy(() => import('./pages/Logistics/FleetVehicles'));
@@ -150,9 +151,11 @@ const SystemAuditLogs         = lazy(() => import('./pages/Admin/SystemAuditLogs
 const CloudBackups            = lazy(() => import('./pages/Admin/CloudBackups'));
 const SystemHealth            = lazy(() => import('./pages/Admin/SystemHealth'));
 const AutomatedNotifications  = lazy(() => import('./pages/Admin/AutomatedNotifications'));
+const DeveloperNotifications  = lazy(() => import('./pages/Developer/DeveloperNotifications'));
 const ImportHistory           = lazy(() => import('./pages/Admin/ImportHistory'));
 const QuickImport             = lazy(() => import('./pages/Admin/QuickImport'));
 const OmniscienceDashboard    = lazy(() => import('./pages/Dashboard/OmniscienceDashboard'));
+const FacturaPublica          = lazy(() => import('./pages/FacturaPublica'));
 
 
 
@@ -591,6 +594,11 @@ function App() {
         <SystemProvider>
         <Router basename={getRouterBasename()} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
+          <Route path="/factura-publica/:token" element={
+            <Suspense fallback={<PageLoader />}>
+              <FacturaPublica />
+            </Suspense>
+          } />
           <Route path="/auditoria/ledger" element={
             <Suspense fallback={<PageLoader />}>
               <AuditorLedger />
@@ -643,6 +651,8 @@ function App() {
           <Route path="/inventario/critico" element={<InventoryCritical />} />
           <Route path="/inventario/lotes" element={<LotExpiry />} />
           <Route path="/inventario/garantias" element={<Warranties />} />
+          <Route path="/inventario/ficha-producto" element={<FichaProducto />} />
+          <Route path="/inventario/ficha-producto/:id" element={<FichaProducto />} />
           {/* LOGÍSTICA */}
           <Route path="/logistica" element={<Logistics />} />
           <Route path="/logistica/vehiculos" element={<FleetVehicles />} />
@@ -740,6 +750,7 @@ function App() {
           <Route path="/admin/omniscience" element={<OmniscienceDashboard />} />
           <Route path="/admin/importacion/historial" element={<ImportHistory />} />
           <Route path="/admin/importacion/rapida" element={<QuickImport />} />
+          <Route path="/developer/notificaciones" element={<DeveloperNotifications />} />
           <Route path="/nomina" element={<PayrollDashboard />} />
 
 
